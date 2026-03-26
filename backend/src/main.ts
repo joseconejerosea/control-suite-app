@@ -5,9 +5,9 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 
-import helmet = require('@fastify/helmet');
-import cors = require('@fastify/cors');
-import rateLimit = require('@fastify/rate-limit');
+import helmet from '@fastify/helmet';
+import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 
 import { ValidationPipe } from '@nestjs/common';
 
@@ -17,18 +17,21 @@ async function bootstrap() {
     new FastifyAdapter(),
   );
 
-  await app.register(helmet as any);
-  await app.register(cors as any, {
+  // Security plugins
+  await app.register(helmet);
+  await app.register(cors, {
     origin: ['http://localhost:3000'],
     credentials: true,
   });
-  await app.register(rateLimit as any, {
+  await app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
   });
 
+  // Global prefix
   app.setGlobalPrefix('api');
 
+  // Global validation
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -37,8 +40,12 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(3000, '0.0.0.0');
-  console.log(' Server running');
+  // Environment-based port
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+  await app.listen(port, '0.0.0.0');
+
+  console.log(` Server running on http://localhost:${port}`);
 }
 
 bootstrap();
