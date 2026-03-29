@@ -1,48 +1,33 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-
 import {
-  FastifyAdapter,
   NestFastifyApplication,
+  FastifyAdapter,
 } from '@nestjs/platform-fastify';
-
-import helmet from '@fastify/helmet';
-import cors from '@fastify/cors';
-import rateLimit from '@fastify/rate-limit';
-
-import { ValidationPipe } from '@nestjs/common';
-import { FastifyPluginAsync } from 'fastify';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import helmet from 'helmet';
+import { HttpExceptionFilter } from './common/filter/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({
-      logger: true,
-    }),
+    new FastifyAdapter(),
   );
 
-  //  Type-safe plugin casting (NO any)
-  const helmetPlugin: FastifyPluginAsync = helmet;
-  const corsPlugin: FastifyPluginAsync = cors;
-  const rateLimitPlugin: FastifyPluginAsync = rateLimit;
+  const logger = new Logger('Bootstrap');
 
-  //  Security plugins
-  await app.register(helmetPlugin);
+  // Security
+  app.use(helmet());
 
-  await app.register(corsPlugin, {
-    origin: ['http://localhost:3000'],
+  app.enableCors({
+    origin: ['http://localhost:3000'], // later move to env
     credentials: true,
   });
 
-  await app.register(rateLimitPlugin, {
-    max: 100,
-    timeWindow: '1 minute',
-  });
-
-  //  Global API prefix
+  // Global Prefix
   app.setGlobalPrefix('api');
 
-  // Global validation (Milestone 2 ready)
+  // Validation (STRICT)
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -51,12 +36,12 @@ async function bootstrap() {
     }),
   );
 
-  //  Port config
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
+  // Global Exception Filter
+  app.useGlobalFilters(new HttpExceptionFilter());
 
-  await app.listen(port, '0.0.0.0');
+  await app.listen(3000, '0.0.0.0');
 
-  console.log(` Server running on http://localhost:${port}`);
+  logger.log(` Backend running at http://localhost:3000/api`);
 }
 
 bootstrap();
