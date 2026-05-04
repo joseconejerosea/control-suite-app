@@ -13,7 +13,7 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 
-  //  FORCE SSL OFF (fix your error)
+  //  FORCE SSL OFF 
   ssl: false,
 
   entities: [__dirname + '/**/*.entity{.ts,.js}'],

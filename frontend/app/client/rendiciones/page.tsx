@@ -1,0 +1,173 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import AppShell from "@/components/layout/app-shell";
+import { api } from "@/lib/api";
+
+const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
+  borrador:  { background: "rgba(100,116,139,0.15)", color: "#94a3b8" },
+  enviada:   { background: "rgba(59,130,246,0.15)",  color: "#60a5fa" },
+  aprobada:  { background: "rgba(42,157,92,0.15)",   color: "#34b96e" },
+  pagada:    { background: "rgba(16,185,129,0.15)",  color: "#10b981" },
+  rechazada: { background: "rgba(200,32,44,0.15)",   color: "#e8353f" },
+};
+
+export default function RendicionesPage() {
+  const [rendiciones, setRendiciones] = useState<any[]>([]);
+  const [kpis, setKpis]               = useState<any>(null);
+  const [loading, setLoading]         = useState(true);
+  const [filtroEstado, setFiltroEstado] = useState("");
+  const [selected, setSelected]       = useState<any>(null);
+
+  const fetchData = () => {
+    setLoading(true);
+    const params = filtroEstado ? `?estado=${filtroEstado}` : "";
+    Promise.all([
+      api.get<any>(`/rendiciones${params}`),
+      api.get<any>("/rendiciones/kpis"),
+    ])
+      .then(([r, k]) => {
+        setRendiciones(r.data ?? r ?? []);
+        setKpis(k.data ?? k);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchData(); }, [filtroEstado]);
+
+  const aprobar = (id: string) =>
+    api.patch(`/rendiciones/${id}/aprobar`, {}).then(fetchData).catch(console.error);
+
+  const fmtCLP = (v: any) =>
+    v == null ? "—" : `$${parseFloat(String(v)).toLocaleString("es-CL")}`;
+
+  return (
+    <AppShell>
+      <div className="animate-fade-up">
+        <div className="mb-6">
+          <h1 className="text-xl font-bold">Rendiciones</h1>
+          <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+            Agrupación automática de gastos por persona, proyecto y semana
+          </p>
+        </div>
+
+        {kpis && (
+          <div className="grid grid-cols-5 gap-3 mb-6">
+            {["borrador", "enviada", "aprobada", "pagada", "rechazada"].map((estado) => (
+              <button
+                key={estado}
+                onClick={() => setFiltroEstado(filtroEstado === estado ? "" : estado)}
+                className="rounded-xl p-4 text-left border transition-all"
+                style={{
+                  background: filtroEstado === estado ? "var(--red-dim)" : "var(--card)",
+                  borderColor: filtroEstado === estado ? "var(--red)" : "var(--border)",
+                }}
+              >
+                <div className="text-2xl font-bold">{kpis[estado] ?? 0}</div>
+                <div className="text-xs capitalize mt-1" style={{ color: "var(--muted-foreground)" }}>{estado}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
+          <table className="w-full border-collapse">
+            <thead style={{ background: "var(--secondary)" }}>
+              <tr>
+                {["Persona", "Proyecto", "Período", "Items", "Monto", "% Presupuesto", "Estado", "Acciones"].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left"
+                    style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Cargando...</td></tr>
+              ) : rendiciones.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Sin rendiciones</td></tr>
+              ) : rendiciones.map((r: any) => {
+                const pct = r.porcentaje_presupuesto ? parseFloat(r.porcentaje_presupuesto) : null;
+                const cfg = ESTADO_STYLE[r.estado] ?? ESTADO_STYLE.borrador;
+                return (
+                  <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--secondary)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+                    <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--muted-foreground)" }}>{r.persona_id?.slice(0, 8)}…</td>
+                    <td className="px-4 py-3 text-sm font-medium">{r.project_name ?? "—"}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: "var(--muted-foreground)" }}>{r.periodo}</td>
+                    <td className="px-4 py-3 text-sm">{r.num_items ?? 0}</td>
+                    <td className="px-4 py-3 text-sm font-semibold">{fmtCLP(r.monto_total)}</td>
+                    <td className="px-4 py-3">
+                      {pct != null ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--secondary)" }}>
+                            <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: pct > 100 ? "var(--red)" : pct > 80 ? "#f59e0b" : "#34b96e" }} />
+                          </div>
+                          <span className="text-xs">{pct.toFixed(0)}%</span>
+                        </div>
+                      ) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold capitalize" style={cfg}>{r.estado}</span>
+                      {r.aprobada_auto && <span className="ml-1 text-xs" style={{ color: "var(--muted-foreground)" }}>(auto)</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <button onClick={() => setSelected(r)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Ver</button>
+                        {r.estado === "enviada" && (
+                          <button onClick={() => aprobar(r.id)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--red-dim)", color: "var(--red-light)", border: "none", cursor: "pointer" }}>Aprobar</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {selected && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setSelected(null)}>
+            <div className="rounded-2xl border p-6 w-full max-w-lg" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-lg">Rendición</h3>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>{selected.project_name} · {selected.periodo}</p>
+                </div>
+                <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20 }}>✕</button>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="rounded-xl p-3" style={{ background: "var(--secondary)" }}>
+                  <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Monto</div>
+                  <div className="font-bold mt-1">{fmtCLP(selected.monto_total)}</div>
+                </div>
+                <div className="rounded-xl p-3" style={{ background: "var(--secondary)" }}>
+                  <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Estado</div>
+                  <span className="text-xs font-semibold capitalize mt-1 block" style={ESTADO_STYLE[selected.estado]}>{selected.estado}</span>
+                </div>
+                <div className="rounded-xl p-3" style={{ background: "var(--secondary)" }}>
+                  <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Boletas</div>
+                  <div className="font-bold mt-1">{selected.num_items ?? 0}</div>
+                </div>
+              </div>
+              {selected.requiere_admin && (
+                <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>
+                  ⚠ Aprobación manual requerida — excede {fmtCLP(selected.excede_por_clp)} el presupuesto
+                </div>
+              )}
+              {selected.estado === "enviada" && (
+                <button onClick={() => { aprobar(selected.id); setSelected(null); }} className="w-full py-2 rounded-lg text-sm font-semibold"
+                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+                  Aprobar
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </AppShell>
+  );
+}

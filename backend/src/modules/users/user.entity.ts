@@ -1,24 +1,48 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
+import { Exclude } from 'class-transformer';
+import { Client } from '../clients/client.entity';
 
-@Entity('users') //  user → users
+@Entity('users')
+@Index('IDX_USERS_CLIENT_EMAIL', ['client_id', 'email'], { unique: true })
 export class User {
-  @PrimaryGeneratedColumn()
-  id!: number;
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
 
   @Column()
-  username!: string;
+  client_id!: string;
 
-  @Column({ unique: true })
+  @Column()
   email!: string;
 
+  @Exclude()
   @Column()
   password!: string;
 
-  //  ADD THIS (CRITICAL)
-  @Column()
-  client_id!: number;
+  @Column({ default: 'user' })
+  role!: string;
 
-  //  OPTIONAL (strong impression)
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  full_name!: string | null;
+
+  @Column({ default: true })
+  is_active!: boolean;
+
+  @CreateDateColumn({ type: 'timestamptz' })
   created_at!: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updated_at!: Date;
+
+  @ManyToOne(() => Client, (client) => client.users, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'client_id' })
+  client!: Client;
 }

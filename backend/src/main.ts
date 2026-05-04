@@ -1,34 +1,44 @@
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
-import {
-  NestFastifyApplication,
-  FastifyAdapter,
-} from '@nestjs/platform-fastify';
-import { ValidationPipe, Logger } from '@nestjs/common';
-import helmet from 'helmet';
+import { NestFastifyApplication, FastifyAdapter } from '@nestjs/platform-fastify';
+import { ValidationPipe, Logger, ClassSerializerInterceptor } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+import helmet from '@fastify/helmet';
+import multipart from '@fastify/multipart';
+import { FastifyInstance } from 'fastify';
 import { HttpExceptionFilter } from './common/filter/http-exception.filter';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { SanitizeInputPipe } from './common/pipes/sanitize-input.pipe';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
+    { rawBody: true },
   );
 
-  const logger = new Logger('Bootstrap');
+  app.enableShutdownHooks();
 
-  // Security
-  app.use(helmet());
+  const logger = new Logger('Bootstrap');
+  const configService = app.get(ConfigService);
+  const fastifyInstance = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
+  
+  await fastifyInstance.register(helmet);
+  await fastifyInstance.register(multipart, {
+    limits: { fileSize: 10 * 1024 * 1024 },
+  });
 
   app.enableCors({
-    origin: ['http://localhost:3000'], // later move to env
+    origin: configService.get<string>('ALLOWED_ORIGIN'),
     credentials: true,
   });
 
-  // Global Prefix
   app.setGlobalPrefix('api');
 
-  // Validation (STRICT)
   app.useGlobalPipes(
+    new SanitizeInputPipe(),
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
@@ -36,12 +46,17 @@ async function bootstrap() {
     }),
   );
 
-  // Global Exception Filter
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  await app.listen(3000, '0.0.0.0');
+  app.useGlobalInterceptors(
+    new ClassSerializerInterceptor(app.get(Reflector)),
+    new LoggingInterceptor(),
+    new ResponseInterceptor(),
+  );
 
-  logger.log(` Backend running at http://localhost:3000/api`);
+  const port = configService.get<number>('PORT', 3001);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`Backend running at http://localhost:${port}/api`);
 }
 
 bootstrap();

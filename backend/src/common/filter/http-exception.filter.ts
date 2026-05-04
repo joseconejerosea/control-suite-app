@@ -5,7 +5,7 @@ import {
   HttpException,
   Logger,
 } from '@nestjs/common';
-import { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -25,20 +25,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
       if (typeof res === 'string') {
         message = res;
-      } else if (typeof res === 'object' && res !== null) {
-        const r = res as any;
+      } 
+      //  FIXED (no any)
+      else if (typeof res === 'object' && res !== null) {
+        const r = res as { message?: string | string[] };
+
         message = Array.isArray(r.message)
           ? r.message.join(', ')
           : r.message || message;
       }
     }
 
-    // Safe logging (no sensitive data)
+    // Safe logging
     this.logger.error(
       `HTTP ${status} Error: ${message} - ${request.method} ${request.url}`,
     );
 
-    
     response.status(status).send({
       success: false,
       error: {
