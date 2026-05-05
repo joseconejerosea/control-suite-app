@@ -31,9 +31,12 @@ interface InvoiceRow {
 }
 interface ReportSection { total_amount: number; total_count: number; rows: InvoiceRow[]; }
 interface ReportData { sales: ReportSection; costs: ReportSection; expenses: ReportSection; }
-
 type StageStatus = "pending" | "running" | "completed" | "failed";
 interface DisplayStage { name: string; label: string; status: StageStatus; }
+
+const stageColors: Record<StageStatus, string> = {
+  completed: "#34b96e", running: "#6366f1", failed: "#e8353f", pending: "var(--muted-foreground)",
+};
 
 function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => void; onDone: () => void }) {
   const [stage, setStage] = useState<1 | 2 | 3 | 4>(1);
@@ -50,43 +53,23 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [pipelineStages, setPipelineStages] = useState<DisplayStage[]>([
-    { name: "upload", label: "Recepción del documento", status: "completed" },
-    { name: "ocr", label: "OCR · Extracción de texto", status: "running" },
-    { name: "classification", label: "Clasificación IA", status: "pending" },
+    { name: "upload", label: "Recepcion del documento", status: "completed" },
+    { name: "ocr", label: "OCR · Extraccion de texto", status: "running" },
+    { name: "classification", label: "Clasificacion IA", status: "pending" },
     { name: "persist", label: "Persistencia en base de datos", status: "pending" },
   ]);
 
-  const targetLabel = { gastos: "→ Gastos", ventas: "→ Ventas", costos: "→ Costos" }[target];
-
-  const stopPolling = () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (animTimerRef.current) clearTimeout(animTimerRef.current);
-  };
+  const targetLabel = { gastos: "Gastos", ventas: "Ventas", costos: "Costos" }[target];
+  const stopPolling = () => { if (pollRef.current) clearInterval(pollRef.current); if (animTimerRef.current) clearTimeout(animTimerRef.current); };
 
   const animateAndProceed = useCallback((classif: any, conf: number) => {
     if (animDone) return;
     setAnimDone(true);
-
-    setPipelineStages([
-      { name: "upload", label: "Recepción del documento", status: "completed" },
-      { name: "ocr", label: "OCR · Extracción de texto", status: "completed" },
-      { name: "classification", label: "Clasificación IA", status: "running" },
-      { name: "persist", label: "Persistencia en base de datos", status: "pending" },
-    ]);
+    setPipelineStages([{ name: "upload", label: "Recepcion del documento", status: "completed" }, { name: "ocr", label: "OCR · Extraccion de texto", status: "completed" }, { name: "classification", label: "Clasificacion IA", status: "running" }, { name: "persist", label: "Persistencia en base de datos", status: "pending" }]);
     setTimeout(() => {
-      setPipelineStages([
-        { name: "upload", label: "Recepción del documento", status: "completed" },
-        { name: "ocr", label: "OCR · Extracción de texto", status: "completed" },
-        { name: "classification", label: "Clasificación IA", status: "completed" },
-        { name: "persist", label: "Persistencia en base de datos", status: "running" },
-      ]);
+      setPipelineStages([{ name: "upload", label: "Recepcion del documento", status: "completed" }, { name: "ocr", label: "OCR · Extraccion de texto", status: "completed" }, { name: "classification", label: "Clasificacion IA", status: "completed" }, { name: "persist", label: "Persistencia en base de datos", status: "running" }]);
       setTimeout(() => {
-        setPipelineStages([
-          { name: "upload", label: "Recepción del documento", status: "completed" },
-          { name: "ocr", label: "OCR · Extracción de texto", status: "completed" },
-          { name: "classification", label: "Clasificación IA", status: "completed" },
-          { name: "persist", label: "Persistencia en base de datos", status: "completed" },
-        ]);
+        setPipelineStages([{ name: "upload", label: "Recepcion del documento", status: "completed" }, { name: "ocr", label: "OCR · Extraccion de texto", status: "completed" }, { name: "classification", label: "Clasificacion IA", status: "completed" }, { name: "persist", label: "Persistencia en base de datos", status: "completed" }]);
         setTimeout(() => setStage(3), 700);
       }, 900);
     }, 900);
@@ -96,294 +79,166 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
     try {
       const res = await apiFetch<{ data: any }>(`/invoices/eventos/status/${id}`);
       const s = res.data.status;
-      const terminalStatuses = ["processed", "low_confidence", "unclassified", "failed_ocr", "failed_classification", "duplicate", "failed"];
-
-      if (terminalStatuses.includes(s)) {
+      const terminal = ["processed", "low_confidence", "unclassified", "failed_ocr", "failed_classification", "duplicate", "failed"];
+      if (terminal.includes(s)) {
         stopPolling();
-        if (s === "duplicate") {
-          setError("Documento duplicado — ya fue procesado antes.");
-          setStage(1);
-        } else if (s === "failed_ocr" || s === "failed_classification" || s === "failed") {
+        if (s === "duplicate") { setError("Documento duplicado."); setStage(1); }
+        else if (["failed_ocr", "failed_classification", "failed"].includes(s)) {
           setPipelineStages(prev => prev.map(p => p.status === "running" ? { ...p, status: "failed" } : p));
-          setError(res.data.error_message ?? "Error en el pipeline. Intenta nuevamente.");
+          setError(res.data.error_message ?? "Error en pipeline.");
           setTimeout(() => setStage(1), 2000);
-        } else if (s === "processed" || s === "low_confidence" || s === "unclassified") {
+        } else {
           const classif = res.data.ai_classification;
           const conf = res.data.confidence_score ?? classif?.confidence_score ?? 0;
           setConfidencePct(Math.round(conf * 100));
           setClassifData(classif);
-          setEditedData({
-            tipo: classif?.tipo ?? "",
-            destino: classif?.destino ?? "",
-            categoria: classif?.categoria ?? "",
-            numero_documento: classif?.datos_extraidos?.numero_documento ?? "",
-            rut_emisor: classif?.datos_extraidos?.rut_emisor ?? "",
-            razon_social_emisor: classif?.datos_extraidos?.razon_social_emisor ?? "",
-            monto_total: classif?.datos_extraidos?.monto_total ?? "",
-            fecha_emision: classif?.datos_extraidos?.fecha_emision ?? "",
-          });
+          setEditedData({ tipo: classif?.tipo ?? "", destino: classif?.destino ?? "", categoria: classif?.categoria ?? "", numero_documento: classif?.datos_extraidos?.numero_documento ?? "", rut_emisor: classif?.datos_extraidos?.rut_emisor ?? "", razon_social_emisor: classif?.datos_extraidos?.razon_social_emisor ?? "", monto_total: classif?.datos_extraidos?.monto_total ?? "", fecha_emision: classif?.datos_extraidos?.fecha_emision ?? "" });
           animateAndProceed(classif, conf);
         }
-      } else if (s === "processing") {
-        setPipelineStages([
-          { name: "upload", label: "Recepción del documento", status: "completed" },
-          { name: "ocr", label: "OCR · Extracción de texto", status: "running" },
-          { name: "classification", label: "Clasificación IA", status: "pending" },
-          { name: "persist", label: "Persistencia en base de datos", status: "pending" },
-        ]);
-      } else if (s === "ocr_done") {
-        setPipelineStages([
-          { name: "upload", label: "Recepción del documento", status: "completed" },
-          { name: "ocr", label: "OCR · Extracción de texto", status: "completed" },
-          { name: "classification", label: "Clasificación IA", status: "running" },
-          { name: "persist", label: "Persistencia en base de datos", status: "pending" },
-        ]);
       }
     } catch { }
   }, [animateAndProceed]);
-
-  const handleDrop = (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f); };
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) setFile(f); };
 
   const handleUpload = async () => {
     if (!file) return;
     setUploading(true); setError("");
     try {
-      const base64 = await new Promise<string>((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res((r.result as string).split(",")[1]);
-        r.onerror = rej;
-        r.readAsDataURL(file);
-      });
-      const res = await fetch(`${API_BASE}/invoices/upload`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ file_base64: base64, mime_type: file.type || "image/jpeg", filename: file.name, target }),
-      });
+      const base64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
+      const res = await fetch(`${API_BASE}/invoices/upload`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ file_base64: base64, mime_type: file.type || "image/jpeg", filename: file.name, target }) });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).message ?? "Upload failed"); }
       const data = await res.json();
       const id = data?.data?.evento_crudo_id ?? data?.evento_crudo_id ?? data?.id;
-      if (!id) throw new Error(`No ID: ${JSON.stringify(data)}`);
-      setEventoId(id);
-      setStage(2);
-
-      // ✅ GUARANTEED: 8 sec baad animation chahe backend slow ho ya fast
+      if (!id) throw new Error("No ID");
+      setEventoId(id); setStage(2);
       animTimerRef.current = setTimeout(() => animateAndProceed(null, 0), 8000);
-
       pollRef.current = setInterval(() => pollStatus(id), 1500);
-    } catch (e: any) {
-      setError(e.message ?? "Upload failed");
-    } finally {
-      setUploading(false);
-    }
+    } catch (e: any) { setError(e.message ?? "Upload failed"); } finally { setUploading(false); }
   };
 
-  const handleConfirm = async () => {
-    setStage(4);
-    setTimeout(() => { onDone(); onClose(); }, 2000);
-  };
-
+  const handleConfirm = async () => { setStage(4); setTimeout(() => { onDone(); onClose(); }, 2000); };
   useEffect(() => () => stopPolling(), []);
 
-  const stageColors: Record<StageStatus, string> = {
-    completed: "#10b981", running: "#6366f1", failed: "#ef4444", pending: "#cbd5e1",
-  };
+  const inp = (key: string, label: string, type = "text") => (
+    <div key={key}>
+      <label style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>{label}</label>
+      <input type={type} value={editedData[key] ?? ""} onChange={e => setEditedData((d: any) => ({ ...d, [key]: e.target.value }))}
+        style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any }} />
+    </div>
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,15,25,0.75)", backdropFilter: "blur(6px)" }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
-
-        <div className="border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 bg-white z-10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
+      <div className="rounded-2xl border w-full max-w-2xl max-h-[90vh] overflow-y-auto" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--border)" }}>
           <div>
-            <h3 className="font-semibold text-lg flex items-center gap-2 text-slate-900">
-              Subir documento <span className="text-sm font-normal text-slate-500">{targetLabel}</span>
-              <span className="text-[10px] text-white px-1.5 py-0.5 rounded uppercase tracking-wider" style={{ background: "linear-gradient(135deg,#6366f1,#06b6d4)" }}>IA</span>
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">La IA leerá el documento, lo clasificará y lo agregará al reporte correcto</p>
+            <div className="font-bold text-base flex items-center gap-2">
+              Subir documento
+              <span className="text-xs px-2 py-0.5 rounded font-semibold" style={{ background: "var(--red)", color: "#fff" }}>{targetLabel}</span>
+              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(99,102,241,0.2)", color: "#818cf8" }}>IA</span>
+            </div>
+            <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>La IA lee, clasifica y agrega al reporte correcto</div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={18} /></button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}><X size={18} /></button>
         </div>
 
-        <div className="px-6 pt-5">
-          <div className="flex items-center px-2">
-            {[{ n: 1, label: "Subir", sub: "archivo" }, { n: 2, label: "Procesar", sub: "OCR + IA" }, { n: 3, label: "Clasificar", sub: "y rutear" }, { n: 4, label: "Confirmar", sub: "y guardar" }].map((s, i) => (
-              <div key={s.n} className="flex items-center gap-2 text-xs flex-1">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center font-semibold text-xs shrink-0"
-                  style={{ background: stage >= s.n ? "#6366f1" : "#e2e8f0", color: stage >= s.n ? "#fff" : "#94a3b8" }}>
-                  {stage > s.n ? <Check size={12} /> : s.n}
-                </div>
-                <div><div className="font-medium text-slate-700">{s.label}</div><div className="text-[10px] text-slate-500">{s.sub}</div></div>
-                {i < 3 && <div className="flex-1 h-0.5 mx-2" style={{ background: stage > s.n ? "#6366f1" : "#e2e8f0" }} />}
+        {/* Steps */}
+        <div className="px-5 pt-4 flex items-center gap-2">
+          {[{ n: 1, label: "Subir" }, { n: 2, label: "Procesar" }, { n: 3, label: "Revisar" }, { n: 4, label: "Listo" }].map((s, i) => (
+            <div key={s.n} className="flex items-center gap-2 flex-1">
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "#6366f1" : "var(--secondary)", color: stage >= s.n ? "#fff" : "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                {stage > s.n ? <Check size={12} /> : s.n}
               </div>
-            ))}
-          </div>
+              <span style={{ fontSize: 12, fontWeight: stage === s.n ? 600 : 400, color: stage === s.n ? "var(--foreground)" : "var(--muted-foreground)" }}>{s.label}</span>
+              {i < 3 && <div style={{ flex: 1, height: 1, background: stage > s.n ? "#6366f1" : "var(--border)" }} />}
+            </div>
+          ))}
         </div>
 
-        <div className="p-6">
+        <div className="p-5">
           {stage === 1 && (
             <div>
-              <input ref={fileRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileChange} />
+              <input ref={fileRef} type="file" accept=".pdf,image/*" style={{ display: "none" }} onChange={e => setFile(e.target.files?.[0] ?? null)} />
               {!file ? (
-                <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileRef.current?.click()}
-                  className="border-2 border-dashed rounded-xl p-12 text-center cursor-pointer"
-                  style={{ borderColor: "#c7d2fe", background: "linear-gradient(135deg,#eef2ff,#f0fdf4)" }}>
-                  <div className="w-16 h-16 mx-auto rounded-full bg-white shadow-sm flex items-center justify-center mb-4">
-                    <Upload size={28} style={{ color: "#6366f1" }} />
-                  </div>
-                  <div className="font-semibold mb-1 text-slate-800">Arrastra el documento aquí o haz click</div>
-                  <div className="text-xs text-slate-500 mb-4">PDF, JPG, PNG · facturas, boletas, OCs · max 10MB</div>
-                  <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500 flex-wrap">
-                    {["📄 Factura electrónica", "🧾 Boleta", "📋 Orden de compra", "📑 Comprobante"].map(t => (
-                      <span key={t} className="bg-white px-2 py-1 rounded">{t}</span>
-                    ))}
-                  </div>
+                <div onClick={() => fileRef.current?.click()} onDrop={e => { e.preventDefault(); setFile(e.dataTransfer.files[0]); }} onDragOver={e => e.preventDefault()}
+                  style={{ border: "2px dashed var(--border)", borderRadius: 12, padding: 48, textAlign: "center", cursor: "pointer", background: "var(--secondary)" }}>
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Arrastra el documento aqui</div>
+                  <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>PDF, JPG, PNG · facturas, boletas, OCs</div>
                 </div>
               ) : (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center gap-3">
-                  <span className="text-lg">📄</span>
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-slate-800">{file.name}</div>
-                    <div className="text-xs text-slate-500">{(file.size / 1024).toFixed(0)} KB · listo para subir</div>
-                  </div>
-                  <button onClick={() => setFile(null)} className="text-xs text-slate-500 hover:text-red-500">Cambiar</button>
+                <div style={{ borderRadius: 10, border: "1px solid var(--border)", padding: 16, background: "var(--secondary)", display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>📄</span>
+                  <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 14 }}>{file.name}</div><div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{(file.size / 1024).toFixed(0)} KB</div></div>
+                  <button onClick={() => setFile(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 12 }}>Cambiar</button>
                 </div>
               )}
-              <div className="mt-4 bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-900">
-                <strong>💡 Tip:</strong> No te preocupes en qué tab estés. La IA detecta si es <strong>gasto</strong>, <strong>venta</strong> o <strong>costo</strong> y lo rutea solo.
-              </div>
-              {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+              {error && <div style={{ color: "#e8353f", fontSize: 13, marginTop: 12 }}>{error}</div>}
             </div>
           )}
 
           {stage === 2 && (
-            <div>
-              {file && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 flex items-center gap-3">
-                  <span className="text-lg">📄</span>
-                  <div className="flex-1"><div className="text-sm font-medium text-slate-900">{file.name}</div></div>
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">✓ subido</span>
-                </div>
-              )}
-              <div className="rounded-xl p-5 border border-slate-200" style={{ background: "linear-gradient(135deg,#f8fafc,#eef2ff)" }}>
-                <div className="text-sm font-semibold mb-4 flex items-center gap-2 text-slate-800">
-                  <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                  Procesando con IA · pipeline en tiempo real
-                </div>
-                <div className="space-y-2.5">
-                  {pipelineStages.map((ps) => (
-                    <div key={ps.name}
-                      className="flex items-center gap-3 p-3 bg-white rounded-lg border transition-all duration-500"
-                      style={{ borderColor: ps.status === "running" ? "#a5b4fc" : ps.status === "completed" ? "#86efac" : ps.status === "failed" ? "#fca5a5" : "#e2e8f0" }}>
-                      {ps.status === "completed" && <Check size={18} style={{ color: "#10b981" }} />}
-                      {ps.status === "running" && <Loader2 size={18} className="animate-spin" style={{ color: "#6366f1" }} />}
-                      {ps.status === "failed" && <AlertCircle size={18} style={{ color: "#ef4444" }} />}
-                      {ps.status === "pending" && <div className="w-[18px] h-[18px] rounded-full border-2 border-slate-300" />}
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-slate-800">{ps.label}</div>
-                      </div>
-                      <div className="w-2 h-2 rounded-full transition-all duration-300" style={{ background: stageColors[ps.status] }} />
-                    </div>
-                  ))}
-                </div>
+            <div className="rounded-xl p-5" style={{ background: "var(--secondary)", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366f1" }} />
+                Procesando con IA · pipeline en tiempo real
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {pipelineStages.map(ps => (
+                  <div key={ps.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8, background: "var(--card)", border: `1px solid ${ps.status === "running" ? "#6366f1" : ps.status === "completed" ? "#34b96e" : ps.status === "failed" ? "#e8353f" : "var(--border)"}` }}>
+                    {ps.status === "completed" && <Check size={16} style={{ color: "#34b96e" }} />}
+                    {ps.status === "running" && <Loader2 size={16} className="animate-spin" style={{ color: "#6366f1" }} />}
+                    {ps.status === "failed" && <AlertCircle size={16} style={{ color: "#e8353f" }} />}
+                    {ps.status === "pending" && <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--border)" }} />}
+                    <span style={{ fontSize: 13, fontWeight: 500 }}>{ps.label}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
           {stage === 3 && (
             <div>
-              <div className="border border-green-300 rounded-xl p-5 mb-4" style={{ background: "linear-gradient(135deg,#f0fdf4,#ecfdf5)" }}>
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                    <Check size={18} color="white" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold text-green-900">
-                      La IA clasificó como{" "}
-                      <span className="bg-green-200 px-1.5 rounded capitalize">{classifData?.destino ?? editedData.destino ?? "—"}</span>
-                    </div>
-                    <div className="text-xs text-green-800 mt-1">
-                      {classifData?.tipo ?? editedData.tipo ?? "—"} · categoría "{classifData?.categoria ?? editedData.categoria ?? "Sin categoría"}"
-                    </div>
-                  </div>
-                  <span className="text-[10px] bg-green-600 text-white px-2 py-1 rounded font-semibold">
-                    {confidencePct > 0 ? `${confidencePct}% confianza` : "Procesado"}
-                  </span>
+              <div style={{ borderRadius: 10, border: "1px solid rgba(42,157,92,0.4)", padding: 16, background: "rgba(42,157,92,0.1)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#34b96e", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Check size={18} color="#fff" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: "#34b96e" }}>Clasificado como <strong>{classifData?.destino ?? editedData.destino ?? "—"}</strong></div>
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{classifData?.tipo ?? editedData.tipo ?? "—"} · {classifData?.categoria ?? editedData.categoria ?? "—"}{confidencePct > 0 && ` · ${confidencePct}% confianza`}</div>
                 </div>
               </div>
-
-              <div className="flex items-center justify-center gap-2 mb-4 text-xs flex-wrap">
-                {["PDF", "EVENTOS_CRUDOS", "Clasificación IA", `Reporte ${classifData?.destino ?? editedData.destino ?? ""}`].map((item, i, arr) => (
-                  <div key={item} className="flex items-center gap-2">
-                    <span className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                      style={{ background: i === arr.length - 1 ? "#dcfce7" : "#f1f5f9", color: i === arr.length - 1 ? "#16a34a" : "#475569" }}>
-                      {item}
-                    </span>
-                    {i < arr.length - 1 && <ChevronRight size={14} className="text-slate-400" />}
-                  </div>
-                ))}
-              </div>
-
-              <div className="bg-white border border-slate-200 rounded-xl p-5">
-                <div className="text-sm font-semibold mb-4 text-slate-800">Datos extraídos (puedes editarlos)</div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { key: "tipo", label: "Tipo" }, { key: "numero_documento", label: "N° documento" },
-                    { key: "razon_social_emisor", label: "Proveedor / Emisor" }, { key: "rut_emisor", label: "RUT" },
-                    { key: "fecha_emision", label: "Fecha", type: "date" }, { key: "monto_total", label: "Monto" },
-                    { key: "categoria", label: "Categoría" }, { key: "destino", label: "Reporte destino" },
-                  ].map(({ key, label, type }) => (
-                    <div key={key}>
-                      <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">{label}</label>
-                      <input type={type ?? "text"} value={editedData[key] ?? ""}
-                        onChange={e => setEditedData((d: any) => ({ ...d, [key]: e.target.value }))}
-                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900"
-                        style={{ background: "#f8fafc" }} />
-                    </div>
-                  ))}
-                </div>
-                {classifData?.razonamiento && (
-                  <details className="mt-4 bg-slate-50 rounded-lg p-3">
-                    <summary className="text-xs font-medium text-slate-700 cursor-pointer">🤔 ¿Por qué la IA decidió esto? Ver razonamiento</summary>
-                    <div className="mt-3 space-y-2 text-xs text-slate-600">
-                      {Object.entries(classifData.razonamiento).map(([k, v]) => (
-                        <div key={k} className="flex gap-2">
-                          <span className="text-slate-400 font-mono">→</span>
-                          <span><strong>{k}:</strong> {String(v)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Datos extraidos (editables)</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {[{ key: "tipo", label: "Tipo" }, { key: "numero_documento", label: "N documento" }, { key: "razon_social_emisor", label: "Proveedor / Emisor" }, { key: "rut_emisor", label: "RUT" }, { key: "fecha_emision", label: "Fecha", type: "date" }, { key: "monto_total", label: "Monto" }, { key: "categoria", label: "Categoria" }, { key: "destino", label: "Reporte destino" }].map(({ key, label, type }) => inp(key, label, type))}
               </div>
             </div>
           )}
 
           {stage === 4 && (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
-                <Check size={32} style={{ color: "#16a34a" }} />
+            <div style={{ textAlign: "center", padding: "48px 0" }}>
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(42,157,92,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <Check size={32} style={{ color: "#34b96e" }} />
               </div>
-              <div className="text-lg font-semibold text-slate-800 mb-2">¡Documento guardado!</div>
-              <div className="text-sm text-slate-500">El reporte se actualizará en breve.</div>
+              <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Documento guardado</div>
+              <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>El reporte se actualizara en breve.</div>
             </div>
           )}
         </div>
 
-        <div className="border-t border-slate-200 px-6 py-4 flex items-center justify-between bg-slate-50 rounded-b-2xl sticky bottom-0">
-          <div className="text-xs text-slate-500">
-            {eventoId && <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">evt: {eventoId.slice(0, 8)}...</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-medium text-slate-700">Cancelar</button>
+        {/* Footer */}
+        <div className="flex items-center justify-between px-5 py-4 border-t" style={{ borderColor: "var(--border)", background: "var(--secondary)" }}>
+          <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontFamily: "monospace" }}>{eventoId && `evt: ${eventoId.slice(0, 8)}...`}</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
             {stage === 1 && (
               <button onClick={handleUpload} disabled={!file || uploading}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2"
-                style={{ background: !file ? "#cbd5e1" : "linear-gradient(135deg,#6366f1,#8b5cf6)", cursor: !file ? "not-allowed" : "pointer" }}>
+                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: !file ? "var(--secondary)" : "#6366f1", color: !file ? "var(--muted-foreground)" : "#fff", cursor: !file ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                 {uploading ? <><Loader2 size={14} className="animate-spin" />Subiendo...</> : <><Upload size={14} />Subir y procesar</>}
               </button>
             )}
             {stage === 3 && (
-              <button onClick={handleConfirm} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+              <button onClick={handleConfirm} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#34b96e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                 <Check size={14} /> Confirmar y guardar
               </button>
             )}
@@ -395,91 +250,58 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
 }
 
 function ManualModal({ target, onClose, onDone }: { target: Tab; onClose: () => void; onDone: () => void }) {
-  const targetLabel = { gastos: "→ Gastos", ventas: "→ Ventas", costos: "→ Costos" }[target];
-  const [form, setForm] = useState({
-    vendor_name: "", amount: "", currency: "CLP",
-    invoice_date: new Date().toISOString().slice(0, 10),
-    category: target === "gastos" ? "expense" : target === "ventas" ? "sale" : "cost",
-    description: "",
-  });
+  const targetLabel = { gastos: "Gastos", ventas: "Ventas", costos: "Costos" }[target];
+  const [form, setForm] = useState({ vendor_name: "", amount: "", currency: "CLP", invoice_date: new Date().toISOString().slice(0, 10), category: target === "gastos" ? "expense" : target === "ventas" ? "sale" : "cost", description: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const save = async () => {
     setSaving(true); setError("");
     try {
-      await apiFetch("/invoices", {
-        method: "POST",
-        body: JSON.stringify({
-          source: "manual", vendor_name: form.vendor_name || undefined,
-          amount: form.amount ? parseFloat(form.amount) : undefined,
-          currency: form.currency, invoice_date: form.invoice_date || undefined,
-          category: form.category, description: form.description || undefined,
-        }),
-      });
+      await apiFetch("/invoices", { method: "POST", body: JSON.stringify({ source: "manual", vendor_name: form.vendor_name || undefined, amount: form.amount ? parseFloat(form.amount) : undefined, currency: form.currency, invoice_date: form.invoice_date || undefined, category: form.category, description: form.description || undefined }) });
       onDone(); onClose();
     } catch (e: any) { setError(e.message ?? "Failed to save"); } finally { setSaving(false); }
   };
 
+  const field = (key: keyof typeof form, label: string, type = "text", placeholder = "") => (
+    <div key={key}>
+      <label style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>{label}</label>
+      <input type={type} placeholder={placeholder} value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+        style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any }} />
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,15,25,0.75)", backdropFilter: "blur(6px)" }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl">
-        <div className="border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
+      <div className="rounded-2xl border w-full max-w-lg" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--border)" }}>
           <div>
-            <h3 className="font-semibold text-lg text-slate-900">Agregar registro manual <span className="text-sm font-normal text-slate-500">{targetLabel}</span></h3>
-            <p className="text-xs text-slate-500 mt-0.5">Sin IA · captura directa de los datos</p>
+            <div className="font-bold text-base flex items-center gap-2">Registro manual <span className="text-xs px-2 py-0.5 rounded font-semibold" style={{ background: "var(--secondary)", color: "var(--muted-foreground)" }}>{targetLabel}</span></div>
+            <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Sin IA · captura directa</div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}><X size={18} /></button>
         </div>
-        <div className="p-6">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">Descripción *</label>
-              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900" placeholder="Ej: Bencina equipo terreno"
-                value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-            </div>
+        <div className="p-5">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ gridColumn: "1 / -1" }}>{field("description", "Descripcion *", "text", "Ej: Bencina equipo terreno")}</div>
+            {field("vendor_name", "Proveedor")}
+            {field("invoice_date", "Fecha *", "date")}
+            {field("amount", "Monto *", "number", "0")}
             <div>
-              <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">Proveedor</label>
-              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900"
-                value={form.vendor_name} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">Fecha *</label>
-              <input type="date" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900"
-                value={form.invoice_date} onChange={e => setForm(f => ({ ...f, invoice_date: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">Monto *</label>
-              <input type="number" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900"
-                placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">Moneda</label>
-              <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900"
-                value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>Moneda</label>
+              <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none" }}>
                 <option>CLP</option><option>USD</option><option>EUR</option>
               </select>
             </div>
-            <div>
-              <label className="text-[10px] text-slate-500 uppercase font-medium block mb-1">Categoría</label>
-              <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900"
-                value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-                <option value="expense">Gasto (expense)</option>
-                <option value="sale">Venta (sale)</option>
-                <option value="cost">Costo (cost)</option>
-              </select>
-            </div>
           </div>
-          {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+          {error && <div style={{ color: "#e8353f", fontSize: 13, marginTop: 12 }}>{error}</div>}
         </div>
-        <div className="border-t border-slate-200 px-6 py-4 flex items-center justify-between bg-slate-50 rounded-b-2xl">
-          <div className="text-xs text-slate-500">Origen: <span className="font-mono bg-slate-200 px-1 rounded text-[10px]">manual</span></div>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="bg-white border border-slate-200 px-4 py-2 rounded-lg text-sm font-medium text-slate-700">Cancelar</button>
-            <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium text-white" style={{ background: "#6366f1", opacity: saving ? 0.7 : 1 }}>
-              {saving ? "Guardando..." : "Guardar registro"}
-            </button>
-          </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t" style={{ borderColor: "var(--border)", background: "var(--secondary)" }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
+          <button onClick={save} disabled={saving} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#6366f1", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Guardando..." : "Guardar"}
+          </button>
         </div>
       </div>
     </div>
@@ -487,24 +309,30 @@ function ManualModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
 }
 
 function SourceBadge({ source }: { source: string }) {
-  const map: Record<string, { bg: string; color: string; label: string }> = {
-    email: { bg: "#eef2ff", color: "#6366f1", label: "Email" },
-    whatsapp: { bg: "#dcfce7", color: "#16a34a", label: "WhatsApp" },
-    manual: { bg: "#f1f5f9", color: "#64748b", label: "Manual" },
+  const map: Record<string, { background: string; color: string }> = {
+    email:    { background: "rgba(99,102,241,0.15)",  color: "#818cf8" },
+    whatsapp: { background: "rgba(42,157,92,0.15)",   color: "#34b96e" },
+    manual:   { background: "var(--secondary)",        color: "var(--muted-foreground)" },
   };
   const s = map[source] ?? map.manual;
-  return <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
+  return <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600, background: s.background, color: s.color, textTransform: "capitalize" }}>{source}</span>;
 }
 
-function KpiCard({ label, value, sub, subColor }: { label: string; value: string; sub?: string; subColor?: string }) {
+function KpiCard({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-white p-5 rounded-xl border border-slate-200">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-2xl font-semibold mt-1" style={{ color: subColor ?? "#0f172a" }}>{value}</div>
-      {sub && <div className="text-xs mt-1" style={{ color: subColor ?? "#94a3b8" }}>{sub}</div>}
+    <div className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color ?? "var(--foreground)" }}>{value}</div>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 4 }}>{label}</div>
     </div>
   );
 }
+
+const TH = ({ children }: { children: React.ReactNode }) => (
+  <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", background: "var(--secondary)", borderBottom: "1px solid var(--border)" }}>{children}</th>
+);
+const TD = ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
+  <td style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", ...style }}>{children}</td>
+);
 
 export default function ReportesPage() {
   const [activeTab, setActiveTab] = useState<Tab>("gastos");
@@ -515,247 +343,161 @@ export default function ReportesPage() {
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
-    try {
-      const res = await apiFetch<{ data: ReportData }>("/invoices/report");
-      setReport(res.data);
-    } catch { } finally { setLoading(false); }
+    try { const res = await apiFetch<{ data: ReportData }>("/invoices/report"); setReport(res.data); } catch { } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchReport(); }, [fetchReport]);
 
   const expenses = report?.expenses?.rows ?? [];
-  const sales = report?.sales?.rows ?? [];
-  const costs = report?.costs?.rows ?? [];
+  const sales    = report?.sales?.rows ?? [];
+  const costs    = report?.costs?.rows ?? [];
 
-  const tabs: { key: Tab; label: string; badge?: string }[] = [
-    { key: "gastos", label: "Gastos", badge: "principal" },
-    { key: "ventas", label: "Ventas" },
-    { key: "costos", label: "Costos" },
-  ];
+  const ActionBar = ({ tabKey }: { tabKey: Tab }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
+      <button onClick={() => setUploadTarget(tabKey)}
+        style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#6366f1", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+        <Upload size={13} /> Subir doc IA
+      </button>
+      <button onClick={() => setManualTarget(tabKey)}
+        style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+        <Plus size={13} /> Manual
+      </button>
+      <button style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+        <Download size={13} /> Exportar
+      </button>
+    </div>
+  );
+
+  const renderTable = (rows: InvoiceRow[], cols: { label: string; render: (r: InvoiceRow) => React.ReactNode }[]) => (
+    <div className="rounded-xl border overflow-hidden mb-6" style={{ borderColor: "var(--border)" }}>
+      <table className="w-full border-collapse" style={{ fontSize: 13 }}>
+        <thead><tr>{cols.map(c => <TH key={c.label}>{c.label}</TH>)}</tr></thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={cols.length} style={{ padding: "40px 0", textAlign: "center", color: "var(--muted-foreground)" }}>Sin registros. Sube un documento o agrega manualmente.</td></tr>
+          ) : rows.map(row => (
+            <tr key={row.id} onMouseEnter={e => (e.currentTarget.style.background = "var(--secondary)")} onMouseLeave={e => (e.currentTarget.style.background = "")}>
+              {cols.map(c => <TD key={c.label}>{c.render(row)}</TD>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <AppShell>
       {uploadTarget && <UploadModal target={uploadTarget} onClose={() => setUploadTarget(null)} onDone={fetchReport} />}
       {manualTarget && <ManualModal target={manualTarget} onClose={() => setManualTarget(null)} onDone={fetchReport} />}
 
-      <div style={{ background: "#f8fafc", minHeight: "100%", padding: "2rem" }}>
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Reportes Internos</h1>
-          <p className="text-sm text-slate-500 mt-1">Información ingresada por WhatsApp, correo o registro manual</p>
+      <div className="animate-fade-up">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 700 }}>Reportes Internos</h1>
+            <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>Documentos ingresados por WhatsApp, email o manual</p>
+          </div>
+          <button onClick={fetchReport} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--muted-foreground)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Actualizar
+          </button>
         </div>
 
-        <div className="flex gap-1 mb-6 border-b border-slate-200">
-          {tabs.map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className="px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors"
-              style={{ borderBottomColor: activeTab === tab.key ? "#6366f1" : "transparent", color: activeTab === tab.key ? "#6366f1" : "#64748b", background: "none" }}>
-              {tab.label}
-              {tab.badge && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">{tab.badge}</span>}
+        {/* Tabs */}
+        <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
+          {(["gastos", "ventas", "costos"] as Tab[]).map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              style={{ padding: "10px 18px", fontSize: 14, fontWeight: activeTab === tab ? 600 : 400, borderBottom: activeTab === tab ? "2px solid var(--red)" : "2px solid transparent", color: activeTab === tab ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: -1, textTransform: "capitalize" }}>
+              {tab}
             </button>
           ))}
-          <div className="ml-auto flex items-center pb-2">
-            <button onClick={fetchReport} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500">
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            </button>
-          </div>
         </div>
 
+        {/* GASTOS */}
         {activeTab === "gastos" && (
           <div>
-            <div className="grid grid-cols-4 gap-4 mb-4">
-              <KpiCard label="Total gastos mes" value={formatCLP(report?.expenses?.total_amount ?? null)} subColor="#dc2626" sub="del presupuesto" />
-              <KpiCard label="Registros" value={String(report?.expenses?.total_count ?? 0)} sub="este mes" />
-              <KpiCard label="Fuentes" value="3" sub="Email · WhatsApp · Manual" />
-              <KpiCard label="Confianza IA" value="—" subColor="#16a34a" sub="promedio OCR" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+              <KpiCard label="Total gastos" value={formatCLP(report?.expenses?.total_amount ?? null)} color="#e8353f" />
+              <KpiCard label="Registros" value={String(report?.expenses?.total_count ?? 0)} />
+              <KpiCard label="Confianza IA" value="—" color="#34b96e" />
             </div>
-            <div className="flex items-center justify-between mb-4">
-              <input type="text" placeholder="Buscar descripción, proveedor..." className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 bg-white text-slate-900" />
-              <div className="flex items-center gap-2">
-                <button className="bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm flex items-center gap-2 text-slate-700"><Download size={14} /> Exportar</button>
-                <button onClick={() => setUploadTarget("gastos")} className="text-white px-3 py-2 rounded-lg text-sm flex items-center gap-2 shadow-sm" style={{ background: "linear-gradient(135deg,#6366f1,#8b5cf6)" }}>
-                  <Upload size={14} /> Subir documento <span className="text-[9px] bg-white/20 px-1 rounded uppercase">IA</span>
-                </button>
-                <button onClick={() => setManualTarget("gastos")} className="bg-white border-2 border-slate-300 hover:border-indigo-400 text-slate-700 px-3 py-2 rounded-lg text-sm flex items-center gap-2 font-medium">
-                  <Plus size={14} /> Agregar manual
-                </button>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-8">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                  <tr>{["Fecha", "Descripción", "Proveedor", "Monto", "Origen", "Confianza"].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {expenses.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-sm">Sin registros. Sube un documento o agrega manualmente.</td></tr>
-                  ) : expenses.map(row => (
-                    <tr key={row.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{row.invoice_date ?? "—"}</td>
-                      <td className="px-4 py-3 max-w-[200px] truncate text-slate-900 font-medium">{row.description ?? "—"}</td>
-                      <td className="px-4 py-3 text-slate-900 font-medium">{row.vendor_name ?? "—"}</td>
-                      <td className="px-4 py-3 font-semibold text-red-600">{row.amount ? `−${formatCLP(row.amount)}` : "—"}</td>
-                      <td className="px-4 py-3"><SourceBadge source={row.source} /></td>
-                      <td className="px-4 py-3 text-xs text-slate-600 font-medium">{row.confidence_score ? `${Math.round(row.confidence_score * 100)}%` : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-900 mb-1">
-                Dashboard interactivo · Gastos
-                <span className="text-[10px] text-white px-1.5 py-0.5 rounded uppercase tracking-wider" style={{ background: "linear-gradient(135deg,#6366f1,#06b6d4)" }}>live</span>
-              </h2>
-              <p className="text-xs text-slate-500 mb-4">Se actualiza con cada documento procesado por la IA</p>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl border border-slate-200 p-5">
-                  <div className="text-sm font-semibold mb-4 text-slate-800">Por fuente de ingreso</div>
-                  <div className="space-y-3">
-                    {[{ label: "Email", color: "#6366f1" }, { label: "WhatsApp", color: "#16a34a" }, { label: "Manual", color: "#94a3b8" }].map(s => {
-                      const count = expenses.filter(r => r.source === s.label.toLowerCase()).length;
+            <ActionBar tabKey="gastos" />
+            {renderTable(expenses, [
+              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
+              { label: "Descripcion", render: r => <span style={{ fontWeight: 500 }}>{r.description ?? "—"}</span> },
+              { label: "Proveedor", render: r => r.vendor_name ?? "—" },
+              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "#e8353f" }}>{r.amount ? `−${formatCLP(r.amount)}` : "—"}</span> },
+              { label: "Origen", render: r => <SourceBadge source={r.source} /> },
+              { label: "Confianza", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.confidence_score ? `${Math.round(r.confidence_score * 100)}%` : "—"}</span> },
+            ])}
+            {/* Summary cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+              {[
+                { label: "Por fuente", content: (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {["email", "whatsapp", "manual"].map(src => {
+                      const count = expenses.filter(r => r.source === src).length;
                       return (
-                        <div key={s.label}>
-                          <div className="flex justify-between text-xs mb-1"><span className="font-medium text-slate-700">{s.label}</span><span className="text-slate-900 font-semibold">{count}</span></div>
-                          <div className="w-full h-2 bg-slate-100 rounded-full">
-                            <div className="h-full rounded-full" style={{ width: expenses.length ? `${count / expenses.length * 100}%` : "0%", background: s.color }} />
+                        <div key={src}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                            <span style={{ textTransform: "capitalize", color: "var(--muted-foreground)" }}>{src}</span>
+                            <span style={{ fontWeight: 600 }}>{count}</span>
+                          </div>
+                          <div style={{ height: 4, borderRadius: 4, background: "var(--secondary)" }}>
+                            <div style={{ height: "100%", borderRadius: 4, background: src === "email" ? "#818cf8" : src === "whatsapp" ? "#34b96e" : "var(--muted-foreground)", width: expenses.length ? `${count / expenses.length * 100}%` : "0%" }} />
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                )},
+                { label: "Total", content: <div style={{ fontSize: 28, fontWeight: 800, color: "#e8353f" }}>{formatCLP(report?.expenses?.total_amount ?? null)}</div> },
+                { label: "Alertas IA", content: <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Documentos con confianza baja apareceran aqui para revision.</div> },
+              ].map(({ label, content }) => (
+                <div key={label} className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>{label}</div>
+                  {content}
                 </div>
-                <div className="bg-white rounded-xl border border-slate-200 p-5">
-                  <div className="text-sm font-semibold mb-4 text-slate-800">Total gastos</div>
-                  <div className="text-3xl font-bold text-red-600">{formatCLP(report?.expenses?.total_amount ?? null)}</div>
-                  <div className="text-xs text-slate-500 mt-2">{report?.expenses?.total_count ?? 0} registros totales</div>
-                </div>
-                <div className="bg-white rounded-xl border border-slate-200 p-5">
-                  <div className="text-sm font-semibold mb-4 text-slate-800">Alertas IA</div>
-                  <div className="text-xs text-slate-500">Los documentos con confianza baja aparecerán aquí para revisión.</div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         )}
 
+        {/* VENTAS */}
         {activeTab === "ventas" && (
           <div>
-            <div className="grid grid-cols-4 gap-4 mb-4">
-              <KpiCard label="Ventas mes" value={formatCLP(report?.sales?.total_amount ?? null)} subColor="#16a34a" sub="↑ vs mes anterior" />
-              <KpiCard label="Facturas emitidas" value={String(report?.sales?.total_count ?? 0)} sub="este mes" />
-              <KpiCard label="Por cobrar" value="—" subColor="#f59e0b" sub="pendientes" />
-              <KpiCard label="Ticket promedio" value="—" sub="por activación" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+              <KpiCard label="Total ventas" value={formatCLP(report?.sales?.total_amount ?? null)} color="#34b96e" />
+              <KpiCard label="Facturas" value={String(report?.sales?.total_count ?? 0)} />
+              <KpiCard label="Por cobrar" value="—" color="#f59e0b" />
             </div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <input type="text" placeholder="Buscar cliente, factura..." className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 bg-white text-slate-900" />
-                <select className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white text-slate-900"><option>Todos los estados</option><option>Cobradas</option><option>Pendientes</option></select>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm flex items-center gap-2 text-slate-700"><Download size={14} /> Exportar</button>
-                <button onClick={() => setUploadTarget("ventas")} className="text-white px-3 py-2 rounded-lg text-sm flex items-center gap-2" style={{ background: "linear-gradient(135deg,#6366f1,#8b5cf6)" }}>
-                  <Upload size={14} /> Subir documento <span className="text-[9px] bg-white/20 px-1 rounded uppercase">IA</span>
-                </button>
-                <button onClick={() => setManualTarget("ventas")} className="bg-white border-2 border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm flex items-center gap-2 font-medium">
-                  <Plus size={14} /> Agregar manual
-                </button>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-8">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                  <tr>{["Fecha", "N° Factura", "Cliente / Descripción", "Monto", "Estado", "Origen"].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {sales.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-sm">Sin registros de ventas.</td></tr>
-                  ) : sales.map(row => (
-                    <tr key={row.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{row.invoice_date ?? "—"}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-900">{row.numero_documento ?? "—"}</td>
-                      <td className="px-4 py-3 text-slate-900 font-medium">{row.vendor_name ?? row.description ?? "—"}</td>
-                      <td className="px-4 py-3 font-semibold text-green-600">+{formatCLP(row.amount)}</td>
-                      <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded" style={{ background: row.status === "approved" ? "#dcfce7" : "#fef3c7", color: row.status === "approved" ? "#16a34a" : "#92400e" }}>{row.status}</span></td>
-                      <td className="px-4 py-3"><SourceBadge source={row.source} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl border border-slate-200 p-5">
-                <div className="text-sm font-semibold mb-2 text-slate-800">Total ventas</div>
-                <div className="text-3xl font-bold text-green-600">{formatCLP(report?.sales?.total_amount ?? null)}</div>
-                <div className="text-xs text-slate-500 mt-2">{report?.sales?.total_count ?? 0} facturas</div>
-              </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-5">
-                <div className="text-sm font-semibold mb-2 text-slate-800">Por fuente</div>
-                <div className="space-y-2 mt-2">{["email", "whatsapp", "manual"].map(src => <div key={src} className="flex justify-between text-xs"><span className="capitalize text-slate-700">{src}</span><span className="font-semibold text-slate-900">{sales.filter(r => r.source === src).length}</span></div>)}</div>
-              </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-5">
-                <div className="text-sm font-semibold mb-2 text-slate-800">Insights IA</div>
-                <div className="text-xs text-slate-500">Los insights de cobranza y márgenes aparecerán aquí.</div>
-              </div>
-            </div>
+            <ActionBar tabKey="ventas" />
+            {renderTable(sales, [
+              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
+              { label: "N Factura", render: r => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.numero_documento ?? "—"}</span> },
+              { label: "Cliente", render: r => <span style={{ fontWeight: 500 }}>{r.vendor_name ?? r.description ?? "—"}</span> },
+              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "#34b96e" }}>+{formatCLP(r.amount)}</span> },
+              { label: "Estado", render: r => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: r.status === "approved" ? "rgba(42,157,92,0.15)" : "rgba(245,158,11,0.15)", color: r.status === "approved" ? "#34b96e" : "#f59e0b" }}>{r.status}</span> },
+              { label: "Origen", render: r => <SourceBadge source={r.source} /> },
+            ])}
           </div>
         )}
 
+        {/* COSTOS */}
         {activeTab === "costos" && (
           <div>
-            <div className="grid grid-cols-4 gap-4 mb-4">
-              <KpiCard label="Costos directos mes" value={formatCLP(report?.costs?.total_amount ?? null)} subColor="#ea580c" sub="sobre ventas" />
-              <KpiCard label="Margen bruto" value="—" subColor="#16a34a" sub="vs mes anterior" />
-              <KpiCard label="Proveedores activos" value="—" sub="este mes" />
-              <KpiCard label="Promedio por proyecto" value="—" sub="proyectos activos" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+              <KpiCard label="Total costos" value={formatCLP(report?.costs?.total_amount ?? null)} color="#f59e0b" />
+              <KpiCard label="Registros" value={String(report?.costs?.total_count ?? 0)} />
+              <KpiCard label="Margen bruto" value="—" color="#34b96e" />
             </div>
-            <div className="flex items-center justify-between mb-4">
-              <input type="text" placeholder="Buscar proveedor, OC, proyecto..." className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 bg-white text-slate-900" />
-              <div className="flex items-center gap-2">
-                <button className="bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm flex items-center gap-2 text-slate-700"><Download size={14} /> Exportar</button>
-                <button onClick={() => setUploadTarget("costos")} className="text-white px-3 py-2 rounded-lg text-sm flex items-center gap-2" style={{ background: "linear-gradient(135deg,#6366f1,#8b5cf6)" }}>
-                  <Upload size={14} /> Subir documento <span className="text-[9px] bg-white/20 px-1 rounded uppercase">IA</span>
-                </button>
-                <button onClick={() => setManualTarget("costos")} className="bg-white border-2 border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm flex items-center gap-2 font-medium">
-                  <Plus size={14} /> Agregar manual
-                </button>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-8">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                  <tr>{["Fecha", "OC / Factura", "Proveedor", "Tipo costo", "Monto", "Origen"].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {costs.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-sm">Sin registros de costos.</td></tr>
-                  ) : costs.map(row => (
-                    <tr key={row.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{row.invoice_date ?? "—"}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-900">{row.numero_documento ?? "—"}</td>
-                      <td className="px-4 py-3 text-slate-900 font-medium">{row.vendor_name ?? "—"}</td>
-                      <td className="px-4 py-3"><span className="text-xs bg-orange-50 text-orange-800 font-medium px-2 py-0.5 rounded">{row.description ?? "—"}</span></td>
-                      <td className="px-4 py-3 font-semibold text-orange-600">−{formatCLP(row.amount)}</td>
-                      <td className="px-4 py-3"><SourceBadge source={row.source} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl border border-slate-200 p-5">
-                <div className="text-sm font-semibold mb-2 text-slate-800">Total costos</div>
-                <div className="text-3xl font-bold text-orange-600">{formatCLP(report?.costs?.total_amount ?? null)}</div>
-                <div className="text-xs text-slate-500 mt-2">{report?.costs?.total_count ?? 0} registros</div>
-              </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-5">
-                <div className="text-sm font-semibold mb-2 text-slate-800">Por fuente</div>
-                <div className="space-y-2 mt-2">{["email", "whatsapp", "manual"].map(src => <div key={src} className="flex justify-between text-xs"><span className="capitalize text-slate-700">{src}</span><span className="font-semibold text-slate-900">{costs.filter(r => r.source === src).length}</span></div>)}</div>
-              </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-5">
-                <div className="text-sm font-semibold mb-2 text-slate-800">Márgenes</div>
-                <div className="text-xs text-slate-500">Los márgenes por proyecto aparecerán aquí.</div>
-              </div>
-            </div>
+            <ActionBar tabKey="costos" />
+            {renderTable(costs, [
+              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
+              { label: "OC / Factura", render: r => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.numero_documento ?? "—"}</span> },
+              { label: "Proveedor", render: r => <span style={{ fontWeight: 500 }}>{r.vendor_name ?? "—"}</span> },
+              { label: "Tipo", render: r => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>{r.description ?? "—"}</span> },
+              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "#f59e0b" }}>−{formatCLP(r.amount)}</span> },
+              { label: "Origen", render: r => <SourceBadge source={r.source} /> },
+            ])}
           </div>
         )}
       </div>

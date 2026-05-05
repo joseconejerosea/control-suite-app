@@ -18,6 +18,7 @@ export default function RendicionesPage() {
   const [loading, setLoading]         = useState(true);
   const [filtroEstado, setFiltroEstado] = useState("");
   const [selected, setSelected]       = useState<any>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchData = () => {
     setLoading(true);
@@ -36,8 +37,15 @@ export default function RendicionesPage() {
 
   useEffect(() => { fetchData(); }, [filtroEstado]);
 
-  const aprobar = (id: string) =>
-    api.patch(`/rendiciones/${id}/aprobar`, {}).then(fetchData).catch(console.error);
+  const action = async (id: string, endpoint: string) => {
+    setActionLoading(true);
+    try {
+      await api.patch(`/rendiciones/${id}/${endpoint}`, {});
+      setSelected(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+    finally { setActionLoading(false); }
+  };
 
   const fmtCLP = (v: any) =>
     v == null ? "—" : `$${parseFloat(String(v)).toLocaleString("es-CL")}`;
@@ -116,9 +124,15 @@ export default function RendicionesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
-                        <button onClick={() => setSelected(r)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Ver</button>
+                        <button onClick={() => setSelected(r)} className="text-xs px-2 py-1 rounded"
+                          style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Ver</button>
                         {r.estado === "enviada" && (
-                          <button onClick={() => aprobar(r.id)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--red-dim)", color: "var(--red-light)", border: "none", cursor: "pointer" }}>Aprobar</button>
+                          <button onClick={() => action(r.id, "aprobar")} className="text-xs px-2 py-1 rounded"
+                            style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e", border: "none", cursor: "pointer" }}>Aprobar</button>
+                        )}
+                        {r.estado === "aprobada" && (
+                          <button onClick={() => action(r.id, "marcar-pagada")} className="text-xs px-3 py-1 rounded font-semibold"
+                            style={{ background: "#4F46E5", color: "#fff", border: "none", cursor: "pointer" }}>Marcar Pagada</button>
                         )}
                       </div>
                     </td>
@@ -129,6 +143,7 @@ export default function RendicionesPage() {
           </table>
         </div>
 
+        {/* Detail Modal */}
         {selected && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setSelected(null)}>
             <div className="rounded-2xl border p-6 w-full max-w-lg" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={(e) => e.stopPropagation()}>
@@ -137,7 +152,33 @@ export default function RendicionesPage() {
                   <h3 className="font-bold text-lg">Rendición</h3>
                   <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>{selected.project_name} · {selected.periodo}</p>
                 </div>
-                <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20 }}>✕</button>
+                {/* Action buttons in header */}
+                <div className="flex items-center gap-2">
+                  {selected.estado === "aprobada" && (
+                    <button
+                      disabled={actionLoading}
+                      onClick={() => action(selected.id, "marcar-pagada")}
+                      className="text-sm px-4 py-2 rounded-lg font-semibold"
+                      style={{ background: "#4F46E5", color: "#fff", border: "none", cursor: "pointer", opacity: actionLoading ? 0.5 : 1 }}>
+                      {actionLoading ? "..." : "Marcar Pagada"}
+                    </button>
+                  )}
+                  {selected.estado === "enviada" && (
+                    <>
+                      <button disabled={actionLoading} onClick={() => action(selected.id, "aprobar")}
+                        className="text-sm px-3 py-2 rounded-lg font-semibold"
+                        style={{ background: "rgba(42,157,92,0.2)", color: "#34b96e", border: "none", cursor: "pointer" }}>
+                        {actionLoading ? "..." : "Aprobar"}
+                      </button>
+                      <button disabled={actionLoading} onClick={() => action(selected.id, "rechazar")}
+                        className="text-sm px-3 py-2 rounded-lg font-semibold"
+                        style={{ background: "rgba(200,32,44,0.15)", color: "#e8353f", border: "none", cursor: "pointer" }}>
+                        {actionLoading ? "..." : "Rechazar"}
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20, marginLeft: 4 }}>✕</button>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="rounded-xl p-3" style={{ background: "var(--secondary)" }}>
@@ -154,15 +195,9 @@ export default function RendicionesPage() {
                 </div>
               </div>
               {selected.requiere_admin && (
-                <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>
-                  ⚠ Aprobación manual requerida — excede {fmtCLP(selected.excede_por_clp)} el presupuesto
+                <div className="rounded-lg p-3 text-sm" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>
+                  Aprobacion manual requerida — excede {fmtCLP(selected.excede_por_clp)} el presupuesto
                 </div>
-              )}
-              {selected.estado === "enviada" && (
-                <button onClick={() => { aprobar(selected.id); setSelected(null); }} className="w-full py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
-                  Aprobar
-                </button>
               )}
             </div>
           </div>

@@ -52,6 +52,7 @@ const SUPER_ADMIN_ITEMS = [
   { label: "Onboarding", icon: Building2, href: "/admin/onboarding" },
   { label: "Clientes", icon: Users, href: "/admin/clientes" },
   { label: "Monitoreo", icon: Activity, href: "/admin/monitoring" },
+  { label: "Tickets", icon: Bell, href: "/admin/tickets" },
   { label: "Auditoría AI", icon: ShieldCheck, href: "/admin/audit" },
 ];
 

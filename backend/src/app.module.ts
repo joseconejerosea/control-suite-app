@@ -41,6 +41,7 @@ import { F5Module } from './modules/f5/f5.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { CronModule } from './modules/cron/cron.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { SupportModule } from './modules/support/support.module';
 import { AuditModule } from './modules/audit/audit.module';
 
 @Module({
@@ -84,6 +85,7 @@ import { AuditModule } from './modules/audit/audit.module';
     CronModule,
     MonitoringModule,
     AuditModule,
+    SupportModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
