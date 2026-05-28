@@ -1,13 +1,6 @@
 import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Req,
-  UseGuards,
+  Body, Controller, Get, Param, ParseUUIDPipe,
+  Patch, Post, Req, UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -17,10 +10,43 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
   user: { id: string; client_id: string; role: string };
 }
+
+// ── DTOs inline (small, project-specific) ────────────────────────────────────
+
+class ConvocatoriaItemDto {
+  @IsUUID() persona_id: string;
+  @IsDateString() dia: string;
+  @IsOptional() @IsString() local_nombre?: string;
+  @IsOptional() @IsString() local_direccion?: string;
+}
+
+class EnviarConvocatoriaDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ConvocatoriaItemDto)
+  items: ConvocatoriaItemDto[];
+
+  /** 'ai' = Mind redacta el mensaje | 'manual' = mensaje fijo estándar */
+  @IsOptional()
+  @IsIn(['ai', 'manual'])
+  modo?: 'ai' | 'manual' = 'manual';
+}
+
+class ResponderConvocatoriaDto {
+  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada']) estado: string;
+}
+
+class AprobarProyectoDto {
+  @IsOptional() @IsString() comentario?: string;
+}
+
+// ── Controller ────────────────────────────────────────────────────────────────
 
 @Controller('projects')
 @UseGuards(AuthGuard, RolesGuard, ClientActiveGuard)
@@ -59,5 +85,69 @@ export class ProjectsController {
   @Roles('admin_cliente', 'super_admin', 'user')
   summary(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.summary(req.user.client_id, id);
+  }
+
+  // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────
+
+  @Post(':id/aprobar')
+  @Roles('admin_cliente', 'super_admin')
+  aprobar(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AprobarProyectoDto,
+  ) {
+    return this.service.aprobarProyecto(req.user.client_id, id, req.user.id, dto.comentario);
+  }
+
+  // ── F4: Shift calendar — persona × día ───────────────────────────────────
+  //   GET  /projects/:id/turno-equipo        → matriz persona × día
+  //   POST /projects/:id/turno-equipo        → asignar persona a día(s)
+
+  @Get(':id/turno-equipo')
+  @Roles('admin_cliente', 'super_admin', 'user')
+  getTurnoEquipo(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getTurnoEquipo(req.user.client_id, id);
+  }
+
+  @Post(':id/turno-equipo')
+  @Roles('admin_cliente', 'super_admin')
+  asignarTurno(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { persona_id: string; dias: string[]; local_nombre?: string; local_direccion?: string },
+  ) {
+    return this.service.asignarTurno(req.user.client_id, id, body);
+  }
+
+  // ── F4: Convocatoria por WhatsApp ─────────────────────────────────────────
+  //   POST /projects/:id/convocar        → enviar WA a promotores seleccionados
+  //   GET  /projects/:id/convocatorias   → lista de convocatorias del proyecto
+  //   PATCH /projects/:id/convocatorias/:convId → actualizar estado manualmente
+
+  @Post(':id/convocar')
+  @Roles('admin_cliente', 'super_admin')
+  enviarConvocatoria(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EnviarConvocatoriaDto,
+  ) {
+    return this.service.enviarConvocatoria(req.user.client_id, id, dto.items, dto.modo ?? 'manual');
+  }
+
+  @Get(':id/convocatorias')
+  @Roles('admin_cliente', 'super_admin', 'user')
+  getConvocatorias(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getConvocatorias(req.user.client_id, id);
+  }
+
+  @Patch(':id/convocatorias/:convId')
+  @Roles('admin_cliente', 'super_admin')
+  updateConvocatoria(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('convId', ParseUUIDPipe) convId: string,
+    @Body() dto: ResponderConvocatoriaDto,
+  ) {
+    return this.service.updateConvocatoria(req.user.client_id, id, convId, dto.estado);
   }
 }

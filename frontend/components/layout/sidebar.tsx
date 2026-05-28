@@ -8,6 +8,7 @@ import {
   FileText, UserCircle, Zap, Building2, ChevronRight,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
+  Settings,
 } from "lucide-react";
 
 const CLIENT_SECTIONS = [
@@ -26,7 +27,8 @@ const CLIENT_SECTIONS = [
     { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
   ]},
   { label: "Configuración", items: [
-    { label: "Equivalencias OCR", icon: GitCompare, href: "/client/equivalencias" },
+    { label: "Configuración",     icon: Settings,    href: "/client/config" },
+    { label: "Equivalencias OCR", icon: GitCompare,  href: "/client/equivalencias" },
     { label: "Reglas Aprobación", icon: ShieldCheck, href: "/client/rendiciones-config" },
   ]},
   { label: "IA", items: [{ label: "Control Mind", icon: Brain, href: "/client/mind" }] },

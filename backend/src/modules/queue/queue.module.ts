@@ -7,12 +7,15 @@ import { NotificationProcessor } from './processors/notification.processor';
 import { OcrProcessor } from './processors/ocr.processor';
 import { ClassifyProcessor } from './processors/classify.processor';
 import { PersistProcessor } from './processors/persist.processor';
+import { MindProactiveProcessor } from './processors/mind-proactive.processor';
 import { MetricsModule } from '../metrics/metrics.module';
 import { SheetsModule } from '../sheets/sheets.module';
+import { MindModule } from '../mind/mind.module';
 
-const QUEUE_OCR      = 'ocr';
-const QUEUE_CLASSIFY = 'classify';
-const QUEUE_PERSIST  = 'persist';
+const QUEUE_OCR            = 'ocr';
+const QUEUE_CLASSIFY       = 'classify';
+const QUEUE_PERSIST        = 'persist';
+export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
 
 @Module({
   imports: [
@@ -32,9 +35,11 @@ const QUEUE_PERSIST  = 'persist';
       { name: QUEUE_OCR },
       { name: QUEUE_CLASSIFY },
       { name: QUEUE_PERSIST },
+      { name: QUEUE_MIND_PROACTIVE },   // ← was missing
     ),
     MetricsModule,
     SheetsModule,
+    MindModule,                          // ← needed by MindProactiveProcessor
   ],
   providers: [
     EventProducer,
@@ -43,6 +48,7 @@ const QUEUE_PERSIST  = 'persist';
     OcrProcessor,
     ClassifyProcessor,
     PersistProcessor,
+    MindProactiveProcessor,             // ← was missing
   ],
   exports: [BullModule, EventProducer],
 })

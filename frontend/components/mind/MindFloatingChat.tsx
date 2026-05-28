@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('access_token') : '');
+// Must match the key used in lib/api.ts — was 'access_token' which caused permanent 401
+const token = () => (typeof window !== 'undefined' ? localStorage.getItem('cs_token') : '');
 const apiFetch = async (path: string, opts?: RequestInit) => {
   const r = await fetch(`${API}${path}`, {
     ...opts,

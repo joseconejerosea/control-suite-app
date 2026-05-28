@@ -6,6 +6,7 @@ import { ConfigModule } from './config/config.module';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
+import { ClientIsolationGuard } from './common/guards/client-isolation.guard';
 
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -41,7 +42,6 @@ import { F5Module } from './modules/f5/f5.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { CronModule } from './modules/cron/cron.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
-import { SupportModule } from './modules/support/support.module';
 import { AuditModule } from './modules/audit/audit.module';
 
 @Module({
@@ -85,9 +85,13 @@ import { AuditModule } from './modules/audit/audit.module';
     CronModule,
     MonitoringModule,
     AuditModule,
-    SupportModule,
   ],
   controllers: [AppController, HealthController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Brief Rule 09: "Every protected route through ClientIsolationGuard"
+    { provide: APP_GUARD, useClass: ClientIsolationGuard },
+  ],
 })
 export class AppModule {}

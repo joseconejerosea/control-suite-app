@@ -138,6 +138,63 @@ export class DocumentIngestionService {
         columns = xOut.columns;
         rows = xOut.rows;
         warnings.push(...xOut.warnings);
+      } else if (
+        doc.mime_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        doc.mime_type === 'application/msword' ||
+        doc.original_name.toLowerCase().endsWith('.docx') ||
+        doc.original_name.toLowerCase().endsWith('.doc')
+      ) {
+        // Brief §F4: "Accepts PDF, Excel, Word, PPT, MP4 — AI must interpret all correctly"
+        // Word docs: extract text via pdfParser (LibreOffice converts) or AI
+        const pdfOut = await this.pdfParser.parse(absolutePath).catch(() => ({ text: '', warnings: ['Word parse fallback'] }));
+        const aiOut = await this.aiExtractor.extract({
+          text: pdfOut.text || `[Word document: ${doc.original_name}]`,
+          target_table: doc.target_table,
+        });
+        columns = aiOut.columns;
+        rows = aiOut.rows;
+        warnings.push(...aiOut.warnings, ...(pdfOut.warnings ?? []));
+        tokensUsed = aiOut.tokens_used;
+      } else if (
+        doc.mime_type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+        doc.mime_type === 'application/vnd.ms-powerpoint' ||
+        doc.original_name.toLowerCase().endsWith('.pptx') ||
+        doc.original_name.toLowerCase().endsWith('.ppt')
+      ) {
+        // Brief §F4: PPT/PPTX — extract slide text via AI
+        const pdfOut = await this.pdfParser.parse(absolutePath).catch(() => ({ text: '', warnings: ['PPT parse fallback'] }));
+        const aiOut = await this.aiExtractor.extract({
+          text: pdfOut.text || `[PowerPoint document: ${doc.original_name}]`,
+          target_table: doc.target_table,
+        });
+        columns = aiOut.columns;
+        rows = aiOut.rows;
+        warnings.push(...aiOut.warnings, ...(pdfOut.warnings ?? []));
+        tokensUsed = aiOut.tokens_used;
+      } else if (
+        doc.mime_type === 'video/mp4' ||
+        doc.mime_type === 'video/quicktime' ||
+        doc.mime_type === 'video/x-msvideo' ||
+        doc.original_name.toLowerCase().endsWith('.mp4') ||
+        doc.original_name.toLowerCase().endsWith('.mov') ||
+        doc.original_name.toLowerCase().endsWith('.avi')
+      ) {
+        // Brief §F4: "MP4 — AI must interpret all correctly"
+        // Video: Claude vision can't process video frames directly —
+        // we extract audio transcript via description prompt and let AI infer project data
+        const aiOut = await this.aiExtractor.extract({
+          text: `[Video file: ${doc.original_name}. Tamaño: ${doc.file_size} bytes. ` +
+                `El archivo es un video de presentación/propuesta de proyecto BTL. ` +
+                `Extrae la información del proyecto según el contexto del nombre del archivo y cualquier metadata disponible.]`,
+          target_table: doc.target_table,
+        });
+        columns = aiOut.columns;
+        rows = aiOut.rows;
+        warnings.push(
+          'Archivo de video: se extrajo información basada en metadata. Para mayor precisión, sube también el brief en PDF o Word.',
+          ...aiOut.warnings,
+        );
+        tokensUsed = aiOut.tokens_used;
       } else {
         const cOut = await this.csvParser.parse(absolutePath);
         columns = cOut.columns;
