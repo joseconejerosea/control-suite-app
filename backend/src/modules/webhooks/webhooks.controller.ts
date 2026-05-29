@@ -14,6 +14,7 @@ import {
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.guard';
 import { WebhooksService } from './webhooks.service';
+import { Public } from '../../common/decorators/public.decorator';
 
 interface FastifyRequestWithRawBody extends FastifyRequest {
   rawBody: Buffer;
@@ -23,10 +24,7 @@ interface FastifyRequestWithRawBody extends FastifyRequest {
 export class WebhooksController {
   constructor(private readonly webhooksService: WebhooksService) {}
 
-  /**
-   * GET /api/webhooks/ingest/:canalEntradaId
-   * Meta webhook verification endpoint
-   */
+  @Public()
   @Get('ingest/:canalEntradaId')
   @HttpCode(HttpStatus.OK)
   verify(
@@ -37,7 +35,6 @@ export class WebhooksController {
     @Res() reply: FastifyReply,
   ) {
     const VERIFY_TOKEN = process.env.WEBHOOK_SECRET ?? 'change_me';
-
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       reply.status(200).send(challenge);
     } else {
@@ -45,9 +42,7 @@ export class WebhooksController {
     }
   }
 
-  /**
-   * POST /api/webhooks/ingest/:canalEntradaId
-   */
+  @Public()
   @Post('ingest/:canalEntradaId')
   @UseGuards(WebhookSignatureGuard)
   @HttpCode(HttpStatus.ACCEPTED)

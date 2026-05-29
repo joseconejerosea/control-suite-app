@@ -40,7 +40,7 @@ import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
  *   5. POST /onboarding/:clientId/complete
  */
 @Controller('onboarding')
-@UseGuards(AuthGuard, RolesGuard)
+@UseGuards(AuthGuard)
 @Roles('super_admin')
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}

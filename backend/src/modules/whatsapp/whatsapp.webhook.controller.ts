@@ -4,11 +4,11 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from './whatsapp.service';
+import { Public } from '../../common/decorators/public.decorator';
 
-const META_API     = 'https://graph.facebook.com/v19.0';
-const QUEUE_OCR    = 'ocr';
+const META_API  = 'https://graph.facebook.com/v19.0';
+const QUEUE_OCR = 'ocr';
 
-// In-memory session per phone — awaiting project selection
 const sessions = new Map<string, {
   state:     'awaiting_project';
   projects:  { id: string; name: string }[];
@@ -31,7 +31,7 @@ export class WhatsAppWebhookController {
     @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
   ) {}
 
-  // ── Webhook verification ──────────────────────────────────────────────────
+  @Public()
   @Get()
   verify(
     @Query('hub.mode')         mode:      string,
@@ -45,7 +45,7 @@ export class WhatsAppWebhookController {
     return 'Forbidden';
   }
 
-  // ── Incoming messages ─────────────────────────────────────────────────────
+  @Public()
   @Post()
   @HttpCode(200)
   async handleIncoming(@Body() body: any) {
@@ -55,7 +55,6 @@ export class WhatsAppWebhookController {
       const value   = changes?.value;
       if (!value) return 'ok';
 
-      // Route by phone_number_id → find client + canal
       const incomingPhoneNumberId: string | undefined =
         value?.metadata?.phone_number_id;
 
@@ -104,7 +103,7 @@ export class WhatsAppWebhookController {
           } else {
             await this.wa.sendText(
               from,
-              '👋 Hola! Envía una imagen de factura o documento para procesarla con IA.',
+              'Hola! Envia una imagen de factura o documento para procesarla con IA.',
             );
           }
         }
@@ -115,9 +114,6 @@ export class WhatsAppWebhookController {
     return 'ok';
   }
 
-  // ── Handle image → F1 pipeline ───────────────────────────────────────────
-  // Brief Rule 04: "Every event lands in EVENTOS_CRUDOS first, no exceptions"
-  // Brief §F1:    "WhatsApp (primary) → ingest → OCR → classify → persist → notify"
   private async handleImage(
     from:     string,
     msg:      any,
@@ -132,12 +128,10 @@ export class WhatsAppWebhookController {
       return;
     }
 
-    // ── 1. Download image from Meta + convert to base64 ───────────────────
     let base64   = '';
     let mimeType = 'image/jpeg';
 
     try {
-      // Get download URL
       const mediaRes  = await fetch(`${META_API}/${imageId}`, {
         headers: { Authorization: `Bearer ${this.token}` },
       });
@@ -147,19 +141,17 @@ export class WhatsAppWebhookController {
 
       if (!imageUrl) throw new Error('No URL returned from Meta media API');
 
-      // Download actual bytes
-      const imgRes  = await fetch(imageUrl, {
+      const imgRes = await fetch(imageUrl, {
         headers: { Authorization: `Bearer ${this.token}` },
       });
-      const buffer  = await imgRes.arrayBuffer();
-      base64        = Buffer.from(buffer).toString('base64');
+      const buffer = await imgRes.arrayBuffer();
+      base64       = Buffer.from(buffer).toString('base64');
     } catch (e: any) {
       this.logger.error('[WhatsApp] Image download error:', e.message);
-      await this.wa.sendText(from, '⚠️ No pude descargar la imagen. Por favor intenta de nuevo.');
+      await this.wa.sendText(from, 'No pude descargar la imagen. Por favor intenta de nuevo.');
       return;
     }
 
-    // ── 2. Ask for project if multiple active projects exist ──────────────
     let projects: { id: string; name: string }[] = [];
     if (clientId) {
       projects = await this.ds.query(
@@ -171,28 +163,20 @@ export class WhatsAppWebhookController {
     }
 
     if (projects.length > 1) {
-      // Save session and ask which project
       sessions.set(from, {
-        state:    'awaiting_project',
-        projects,
-        base64,
-        mimeType,
-        caption,
-        clientId,
-        canalId,
+        state: 'awaiting_project',
+        projects, base64, mimeType, caption, clientId, canalId,
       });
       const list    = projects.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-      const message = `📁 *¿A qué proyecto pertenece este documento?*\n\n${list}\n\nResponde con el número (ej: 1)`;
+      const message = `A que proyecto pertenece este documento?\n\n${list}\n\nResponde con el numero (ej: 1)`;
       await this.wa.sendText(from, message);
       return;
     }
 
-    // Single or no project → go straight to F1 pipeline
     const projectId = projects[0]?.id ?? null;
     await this.ingestIntoF1Pipeline(from, base64, mimeType, caption, clientId, canalId, projectId);
   }
 
-  // ── Handle project selection reply ────────────────────────────────────────
   private async handleProjectSelection(
     from:    string,
     text:    string,
@@ -200,23 +184,17 @@ export class WhatsAppWebhookController {
   ) {
     const num = parseInt(text);
     if (isNaN(num) || num < 1 || num > session.projects.length) {
-      await this.wa.sendText(from, `⚠️ Responde con un número entre 1 y ${session.projects.length}.`);
+      await this.wa.sendText(from, `Responde con un numero entre 1 y ${session.projects.length}.`);
       return;
     }
     const project = session.projects[num - 1];
     sessions.delete(from);
     await this.ingestIntoF1Pipeline(
-      from,
-      session.base64,
-      session.mimeType,
-      session.caption,
-      session.clientId,
-      session.canalId,
-      project.id,
+      from, session.base64, session.mimeType, session.caption,
+      session.clientId, session.canalId, project.id,
     );
   }
 
-  // ── Core: persist to eventos_crudos → push to OCR queue ──────────────────
   private async ingestIntoF1Pipeline(
     from:      string,
     base64:    string,
@@ -227,7 +205,6 @@ export class WhatsAppWebhookController {
     projectId: string | null,
   ) {
     try {
-      // Brief Rule 04: every event in EVENTOS_CRUDOS first
       const result = await this.ds.query(
         `INSERT INTO eventos_crudos
            (client_id, canal_entrada_id, canal, phone_e164, source,
@@ -239,15 +216,8 @@ export class WhatsAppWebhookController {
             false, 0, NOW(), NOW())
          RETURNING id`,
         [
-          clientId,
-          canalId,
-          from,
-          JSON.stringify({
-            file_base64: base64,
-            caption,
-            from,
-            project_id: projectId,
-          }),
+          clientId, canalId, from,
+          JSON.stringify({ file_base64: base64, caption, from, project_id: projectId }),
           mimeType,
         ],
       );
@@ -255,41 +225,35 @@ export class WhatsAppWebhookController {
       const eventoCrudoId = result[0]?.id;
       if (!eventoCrudoId) throw new Error('eventos_crudos insert returned no ID');
 
-      // Brief §F1: ingest → OCR → classify → persist → notify
       await this.ocrQueue.add(
         'ocr',
         { evento_crudo_id: eventoCrudoId, client_id: clientId, canal: 'whatsapp' },
-        {
-          attempts: 3,
-          backoff:  { type: 'exponential', delay: 2000 },
-        },
+        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
       );
 
       this.logger.log(
         `[WhatsApp] F1 pipeline started eventoCrudoId=${eventoCrudoId} client=${clientId}`,
       );
 
-      // Acknowledge receipt immediately
       await this.wa.sendText(
         from,
-        '✅ *Documento recibido* — procesando con IA...\n\nTe avisamos cuando esté listo.',
+        'Documento recibido. Procesando con IA. Te avisamos cuando este listo.',
       );
     } catch (err: any) {
       this.logger.error('[WhatsApp] F1 ingest error:', err.message);
       await this.wa.sendText(
         from,
-        '⚠️ Error al procesar el documento. Por favor intenta de nuevo.',
+        'Error al procesar el documento. Por favor intenta de nuevo.',
       );
     }
   }
 
-  // ── Handle convocatoria reply (si/no) ────────────────────────────────────
   private async handleConvocatoriaReply(from: string, reply: 'si' | 'no') {
     const estado   = reply === 'si' ? 'confirmada' : 'rechazada';
     const texto    = reply === 'si' ? 'SI - Confirmado' : 'NO - Rechazado';
     const replyMsg = reply === 'si'
-      ? '✅ ¡Perfecto! Tu participación ha sido confirmada. Nos vemos en la activación.'
-      : '❌ Entendido. Buscaremos otro promotor. ¡Gracias!';
+      ? 'Perfecto! Tu participacion ha sido confirmada. Nos vemos en la activacion.'
+      : 'Entendido. Buscaremos otro promotor. Gracias!';
 
     await this.ds.query(
       `UPDATE convocatorias

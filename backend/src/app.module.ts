@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { ClientIsolationGuard } from './common/guards/client-isolation.guard';
+import { AuthGuard } from './common/guards/auth.guard';
 
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -29,14 +30,12 @@ import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { GmailModule } from './modules/gmail/gmail.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
-
 import { RendicionesModule } from './modules/rendiciones/rendiciones.module';
 import { BodegasModule } from './modules/bodegas/bodegas.module';
 import { SkusModule } from './modules/skus/skus.module';
 import { MovimientosPopModule } from './modules/movimientos-pop/movimientos-pop.module';
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { MindModule } from './modules/mind/mind.module';
-
 import { EquivalenciasModule } from './modules/equivalencias/equivalencias.module';
 import { F5Module } from './modules/f5/f5.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
@@ -90,7 +89,9 @@ import { AuditModule } from './modules/audit/audit.module';
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    // Brief Rule 09: "Every protected route through ClientIsolationGuard"
+    // Global AuthGuard — runs first, decodes JWT, respects @Public()
+    { provide: APP_GUARD, useClass: AuthGuard },
+    // Brief Rule 09: isolation check runs after user is set
     { provide: APP_GUARD, useClass: ClientIsolationGuard },
   ],
 })
