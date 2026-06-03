@@ -4,6 +4,8 @@ import {
 } from '@nestjs/common';
 import { SupportService } from './support.service';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -54,7 +56,8 @@ export class SupportController {
 
 // ── Admin ticket routes ───────────────────────────────────────────────────────
 @Controller('admin/support/tickets')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
+@Roles('super_admin')
 export class AdminSupportController {
   constructor(private readonly svc: SupportService) {}
 

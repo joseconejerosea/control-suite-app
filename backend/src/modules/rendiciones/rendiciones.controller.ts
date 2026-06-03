@@ -8,6 +8,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @Controller('rendiciones')
@@ -38,18 +39,21 @@ export class RendicionesController {
 
   @Patch(':id/cerrar')
   @HttpCode(HttpStatus.OK)
+  @AuditAction({ action: 'CLOSE_RENDITION', entity: 'Rendicion' })
   cerrar(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.cerrarManual(user.client_id, id);
   }
 
   @Patch(':id/aprobar')
   @HttpCode(HttpStatus.OK)
+  @AuditAction({ action: 'APPROVE_RENDITION', entity: 'Rendicion' })
   aprobar(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.aprobar(user.client_id, id, user.sub);
   }
 
   @Patch(':id/rechazar')
   @HttpCode(HttpStatus.OK)
+  @AuditAction({ action: 'REJECT_RENDITION', entity: 'Rendicion' })
   rechazar(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -60,6 +64,7 @@ export class RendicionesController {
 
   @Patch(':id/marcar-pagada')
   @HttpCode(HttpStatus.OK)
+  @AuditAction({ action: 'MARK_RENDITION_PAID', entity: 'Rendicion' })
   marcarPagada(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

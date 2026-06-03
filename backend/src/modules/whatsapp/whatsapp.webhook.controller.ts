@@ -4,32 +4,25 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from './whatsapp.service';
+import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
+import { WhatsAppMediaService } from './whatsapp-media.service';
 import { Public } from '../../common/decorators/public.decorator';
 
-const META_API  = 'https://graph.facebook.com/v19.0';
 const QUEUE_OCR = 'ocr';
-
-const sessions = new Map<string, {
-  state:     'awaiting_project';
-  projects:  { id: string; name: string }[];
-  base64:    string;
-  mimeType:  string;
-  caption:   string;
-  clientId:  string | null;
-  canalId:   string | null;
-}>();
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppWebhookController {
   private readonly logger = new Logger(WhatsAppWebhookController.name);
-  private readonly token  =
-    process.env.META_SYSTEM_USER_TOKEN ?? process.env.WHATSAPP_ACCESS_TOKEN ?? '';
 
   constructor(
     private readonly wa: WhatsAppService,
+    private readonly sessions: WhatsAppSessionService,
+    private readonly media: WhatsAppMediaService,
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
   ) {}
+
+  // ── Webhook verification (Meta challenge) ─────────────────────────────────
 
   @Public()
   @Get()
@@ -45,6 +38,8 @@ export class WhatsAppWebhookController {
     return 'Forbidden';
   }
 
+  // ── Incoming messages ─────────────────────────────────────────────────────
+
   @Public()
   @Post()
   @HttpCode(200)
@@ -55,57 +50,45 @@ export class WhatsAppWebhookController {
       const value   = changes?.value;
       if (!value) return 'ok';
 
-      const incomingPhoneNumberId: string | undefined =
-        value?.metadata?.phone_number_id;
-
-      let clientId: string | null = null;
-      let canalId:  string | null = null;
-
-      if (incomingPhoneNumberId) {
-        const rows = await this.ds.query(
-          `SELECT client_id, id FROM canal_entrada
-           WHERE config->>'phone_number_id' = $1 AND is_active = true
-           LIMIT 1`,
-          [incomingPhoneNumberId],
-        ).catch(() => []);
-
-        clientId = rows?.[0]?.client_id ?? null;
-        canalId  = rows?.[0]?.id ?? null;
-
-        if (!clientId) {
-          this.logger.warn(
-            `[WhatsApp] No active canal for phone_number_id=${incomingPhoneNumberId}`,
-          );
-          return 'ok';
-        }
-      }
+      const { clientId, canalId } = await this.resolveChannel(value);
+      if (!clientId) return 'ok';
 
       const messages = value?.messages;
       if (!messages?.length) return 'ok';
 
       for (const msg of messages) {
-        const from    = msg.from as string;
-        const msgType = msg.type as string;
-        const text    = (msg.text?.body as string | undefined)?.trim() ?? '';
+        const messageId = msg.id as string;
+        const from      = msg.from as string;
+        const msgType   = msg.type as string;
 
-        this.logger.log(`[WhatsApp] From=${from} type=${msgType} clientId=${clientId}`);
+        if (await this.isDuplicate(messageId)) {
+          this.logger.log(`[WhatsApp] Duplicate message ${messageId} — skipping`);
+          continue;
+        }
 
-        if (msgType === 'image') {
-          await this.handleImage(from, msg, clientId, canalId);
-        } else if (msgType === 'text') {
-          const session = sessions.get(from);
-          if (session?.state === 'awaiting_project') {
-            await this.handleProjectSelection(from, text, session);
-          } else if (/^s[ií]$/i.test(text)) {
-            await this.handleConvocatoriaReply(from, 'si');
-          } else if (/^no$/i.test(text)) {
-            await this.handleConvocatoriaReply(from, 'no');
-          } else {
-            await this.wa.sendText(
-              from,
-              'Hola! Envia una imagen de factura o documento para procesarla con IA.',
-            );
-          }
+        this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${messageId}`);
+
+        switch (msgType) {
+          case 'image':
+            await this.handleImage(from, msg, clientId, canalId, messageId);
+            break;
+          case 'audio':
+            await this.handleAudio(from, msg, clientId, canalId, messageId);
+            break;
+          case 'video':
+            await this.handleVideo(from, msg, clientId, canalId, messageId);
+            break;
+          case 'document':
+            await this.handleDocument(from, msg, clientId, canalId, messageId);
+            break;
+          case 'location':
+            await this.handleLocation(from, msg, clientId, canalId, messageId);
+            break;
+          case 'text':
+            await this.handleText(from, msg, clientId, canalId, messageId);
+            break;
+          default:
+            this.logger.warn(`[WhatsApp] Unsupported message type: ${msgType}`);
         }
       }
     } catch (err: any) {
@@ -114,145 +97,311 @@ export class WhatsAppWebhookController {
     return 'ok';
   }
 
-  private async handleImage(
-    from:     string,
-    msg:      any,
-    clientId: string | null,
-    canalId:  string | null,
-  ) {
-    const imageId = msg.image?.id as string | undefined;
-    const caption = (msg.image?.caption as string | undefined) ?? '';
+  // ── Channel resolution ────────────────────────────────────────────────────
 
-    if (!imageId) {
-      this.logger.warn('[WhatsApp] Image received without ID');
-      return;
+  private async resolveChannel(value: any): Promise<{ clientId: string | null; canalId: string | null }> {
+    const phoneNumberId = value?.metadata?.phone_number_id;
+    if (!phoneNumberId) return { clientId: null, canalId: null };
+
+    const rows = await this.ds.query(
+      `SELECT client_id, id FROM canal_entrada
+       WHERE config->>'phone_number_id' = $1 AND is_active = true
+       LIMIT 1`,
+      [phoneNumberId],
+    ).catch(() => []);
+
+    const clientId = rows?.[0]?.client_id ?? null;
+    const canalId  = rows?.[0]?.id ?? null;
+
+    if (!clientId) {
+      this.logger.warn(`[WhatsApp] No active canal for phone_number_id=${phoneNumberId}`);
     }
 
-    let base64   = '';
-    let mimeType = 'image/jpeg';
-
-    try {
-      const mediaRes  = await fetch(`${META_API}/${imageId}`, {
-        headers: { Authorization: `Bearer ${this.token}` },
-      });
-      const mediaData = await mediaRes.json() as { url?: string; mime_type?: string };
-      const imageUrl  = mediaData?.url ?? '';
-      mimeType        = mediaData?.mime_type ?? 'image/jpeg';
-
-      if (!imageUrl) throw new Error('No URL returned from Meta media API');
-
-      const imgRes = await fetch(imageUrl, {
-        headers: { Authorization: `Bearer ${this.token}` },
-      });
-      const buffer = await imgRes.arrayBuffer();
-      base64       = Buffer.from(buffer).toString('base64');
-    } catch (e: any) {
-      this.logger.error('[WhatsApp] Image download error:', e.message);
-      await this.wa.sendText(from, 'No pude descargar la imagen. Por favor intenta de nuevo.');
-      return;
-    }
-
-    let projects: { id: string; name: string }[] = [];
-    if (clientId) {
-      projects = await this.ds.query(
-        `SELECT id, name FROM projects
-         WHERE client_id = $1 AND status = 'active'
-         ORDER BY created_at DESC LIMIT 10`,
-        [clientId],
-      ).catch(() => []);
-    }
-
-    if (projects.length > 1) {
-      sessions.set(from, {
-        state: 'awaiting_project',
-        projects, base64, mimeType, caption, clientId, canalId,
-      });
-      const list    = projects.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-      const message = `A que proyecto pertenece este documento?\n\n${list}\n\nResponde con el numero (ej: 1)`;
-      await this.wa.sendText(from, message);
-      return;
-    }
-
-    const projectId = projects[0]?.id ?? null;
-    await this.ingestIntoF1Pipeline(from, base64, mimeType, caption, clientId, canalId, projectId);
+    return { clientId, canalId };
   }
 
+  // ── Idempotency ───────────────────────────────────────────────────────────
+
+  private async isDuplicate(messageId: string): Promise<boolean> {
+    const existing = await this.ds.query(
+      `SELECT id FROM eventos_crudos WHERE idempotency_key = $1 LIMIT 1`,
+      [messageId],
+    ).catch(() => []);
+    return existing.length > 0;
+  }
+
+  // ── Persist to eventos_crudos ─────────────────────────────────────────────
+
+  private async persistEvent(opts: {
+    clientId: string | null;
+    canalId: string | null;
+    messageId: string;
+    from: string;
+    type: string;
+    flow: string | null;
+    payload: Record<string, unknown>;
+  }): Promise<string> {
+    const result = await this.ds.query(
+      `INSERT INTO eventos_crudos
+         (client_id, canal_entrada_id, source, idempotency_key,
+          flow, payload, status, processed, attempts,
+          created_at, updated_at)
+       VALUES
+         ($1, $2, 'whatsapp', $3,
+          $4, $5::jsonb, 'queued', false, 0,
+          NOW(), NOW())
+       RETURNING id`,
+      [
+        opts.clientId,
+        opts.canalId,
+        opts.messageId,
+        opts.flow,
+        JSON.stringify({ ...opts.payload, from: opts.from, type: opts.type }),
+      ],
+    );
+
+    return result[0]?.id;
+  }
+
+  // ── Image handler ─────────────────────────────────────────────────────────
+
+  private async handleImage(
+    from: string, msg: any,
+    clientId: string, canalId: string | null,
+    messageId: string,
+  ) {
+    const imageId = msg.image?.id;
+    const caption = msg.image?.caption ?? '';
+
+    if (!imageId) {
+      this.logger.warn('[WhatsApp] Image without media ID');
+      return;
+    }
+
+    try {
+      const result = await this.media.downloadAndStore(imageId, clientId, 'documents');
+
+      let projects: { id: string; name: string }[] = [];
+      projects = await this.ds.query(
+        `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 10`,
+        [clientId],
+      ).catch(() => []);
+
+      if (projects.length > 1) {
+        await this.sessions.set(from, {
+          state: 'awaiting_project',
+          projects,
+          base64: result.buffer.toString('base64'),
+          mimeType: result.mimeType,
+          caption,
+          clientId,
+          canalId,
+          updatedAt: new Date().toISOString(),
+        });
+        const list = projects.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+        await this.wa.sendText(from, `A que proyecto pertenece este documento?\n\n${list}\n\nResponde con el numero.`);
+        return;
+      }
+
+      const projectId = projects[0]?.id ?? null;
+      const eventId = await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'image', flow: 'F1',
+        payload: { storage_path: result.storagePath, mime_type: result.mimeType, caption, project_id: projectId },
+      });
+
+      await this.ocrQueue.add('ocr', {
+        evento_crudo_id: eventId, client_id: clientId, canal: 'whatsapp',
+      }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
+
+      await this.wa.sendText(from, 'Documento recibido. Procesando con IA...');
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] Image handling error: ${err.message}`);
+      await this.wa.sendText(from, 'No pude procesar la imagen. Intenta de nuevo.');
+    }
+  }
+
+  // ── Audio handler ─────────────────────────────────────────────────────────
+
+  private async handleAudio(
+    from: string, msg: any,
+    clientId: string, canalId: string | null,
+    messageId: string,
+  ) {
+    const audioId = msg.audio?.id;
+    if (!audioId) return;
+
+    try {
+      const result = await this.media.downloadAndStore(audioId, clientId, 'evidence');
+
+      await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'audio', flow: null,
+        payload: { storage_path: result.storagePath, mime_type: result.mimeType },
+      });
+
+      await this.wa.sendText(from, 'Audio recibido y almacenado.');
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] Audio handling error: ${err.message}`);
+      await this.wa.sendText(from, 'No pude procesar el audio. Intenta de nuevo.');
+    }
+  }
+
+  // ── Video handler ─────────────────────────────────────────────────────────
+
+  private async handleVideo(
+    from: string, msg: any,
+    clientId: string, canalId: string | null,
+    messageId: string,
+  ) {
+    const videoId = msg.video?.id;
+    if (!videoId) return;
+
+    try {
+      const result = await this.media.downloadAndStore(videoId, clientId, 'evidence');
+
+      await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'video', flow: null,
+        payload: { storage_path: result.storagePath, mime_type: result.mimeType, caption: msg.video?.caption ?? '' },
+      });
+
+      await this.wa.sendText(from, 'Video recibido y almacenado.');
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] Video handling error: ${err.message}`);
+      await this.wa.sendText(from, 'No pude procesar el video. Intenta de nuevo.');
+    }
+  }
+
+  // ── Document handler (PDF, Excel, Word) ───────────────────────────────────
+
+  private async handleDocument(
+    from: string, msg: any,
+    clientId: string, canalId: string | null,
+    messageId: string,
+  ) {
+    const docId   = msg.document?.id;
+    const docName = msg.document?.filename ?? 'document';
+    if (!docId) return;
+
+    try {
+      const result = await this.media.downloadAndStore(docId, clientId, 'documents');
+
+      const eventId = await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'document', flow: 'F1',
+        payload: {
+          storage_path: result.storagePath,
+          mime_type: result.mimeType,
+          original_name: docName,
+          caption: msg.document?.caption ?? '',
+        },
+      });
+
+      await this.ocrQueue.add('ocr', {
+        evento_crudo_id: eventId, client_id: clientId, canal: 'whatsapp',
+      }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
+
+      await this.wa.sendText(from, `Documento "${docName}" recibido. Procesando...`);
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] Document handling error: ${err.message}`);
+      await this.wa.sendText(from, 'No pude procesar el documento. Intenta de nuevo.');
+    }
+  }
+
+  // ── Location handler (F5 — GPS validation) ───────────────────────────────
+
+  private async handleLocation(
+    from: string, msg: any,
+    clientId: string, canalId: string | null,
+    messageId: string,
+  ) {
+    const lat  = msg.location?.latitude as number | undefined;
+    const lng  = msg.location?.longitude as number | undefined;
+    const name = msg.location?.name ?? '';
+    const address = msg.location?.address ?? '';
+
+    if (lat == null || lng == null) return;
+
+    try {
+      await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'location', flow: 'F5',
+        payload: { lat, lng, name, address },
+      });
+
+      await this.wa.sendText(from, `Ubicacion recibida (${lat.toFixed(4)}, ${lng.toFixed(4)}). Verificando...`);
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] Location handling error: ${err.message}`);
+    }
+  }
+
+  // ── Text handler ──────────────────────────────────────────────────────────
+
+  private async handleText(
+    from: string, msg: any,
+    clientId: string, canalId: string | null,
+    messageId: string,
+  ) {
+    const text = (msg.text?.body as string | undefined)?.trim() ?? '';
+
+    const session = await this.sessions.get(from);
+    if (session?.state === 'awaiting_project') {
+      await this.handleProjectSelection(from, text, session, messageId, canalId);
+      return;
+    }
+
+    if (/^s[ií]$/i.test(text)) {
+      await this.handleConvocatoriaReply(from, 'si');
+      return;
+    }
+    if (/^no$/i.test(text)) {
+      await this.handleConvocatoriaReply(from, 'no');
+      return;
+    }
+
+    await this.persistEvent({
+      clientId, canalId, messageId, from, type: 'text', flow: null,
+      payload: { text },
+    });
+
+    await this.wa.sendText(from, 'Mensaje recibido. Envia una imagen o documento para procesarlo con IA.');
+  }
+
+  // ── Project selection (multi-project disambiguation) ──────────────────────
+
   private async handleProjectSelection(
-    from:    string,
-    text:    string,
-    session: NonNullable<ReturnType<typeof sessions['get']>>,
+    from: string, text: string, session: WhatsAppSession,
+    messageId: string, canalId: string | null,
   ) {
     const num = parseInt(text);
     if (isNaN(num) || num < 1 || num > session.projects.length) {
       await this.wa.sendText(from, `Responde con un numero entre 1 y ${session.projects.length}.`);
       return;
     }
+
     const project = session.projects[num - 1];
-    sessions.delete(from);
-    await this.ingestIntoF1Pipeline(
-      from, session.base64, session.mimeType, session.caption,
-      session.clientId, session.canalId, project.id,
-    );
+    await this.sessions.delete(from);
+
+    const eventId = await this.persistEvent({
+      clientId: session.clientId, canalId, messageId, from, type: 'image', flow: 'F1',
+      payload: {
+        file_base64: session.base64,
+        mime_type: session.mimeType,
+        caption: session.caption,
+        project_id: project.id,
+      },
+    });
+
+    await this.ocrQueue.add('ocr', {
+      evento_crudo_id: eventId, client_id: session.clientId, canal: 'whatsapp',
+    }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
+
+    await this.wa.sendText(from, `Asignado a "${project.name}". Procesando con IA...`);
   }
 
-  private async ingestIntoF1Pipeline(
-    from:      string,
-    base64:    string,
-    mimeType:  string,
-    caption:   string,
-    clientId:  string | null,
-    canalId:   string | null,
-    projectId: string | null,
-  ) {
-    try {
-      const result = await this.ds.query(
-        `INSERT INTO eventos_crudos
-           (client_id, canal_entrada_id, canal, phone_e164, source,
-            payload, doc_mime_type, status, processing_status_new,
-            processed, attempts, created_at, updated_at)
-         VALUES
-           ($1, $2, 'whatsapp', $3, 'whatsapp',
-            $4::jsonb, $5, 'queued', 'queued',
-            false, 0, NOW(), NOW())
-         RETURNING id`,
-        [
-          clientId, canalId, from,
-          JSON.stringify({ file_base64: base64, caption, from, project_id: projectId }),
-          mimeType,
-        ],
-      );
-
-      const eventoCrudoId = result[0]?.id;
-      if (!eventoCrudoId) throw new Error('eventos_crudos insert returned no ID');
-
-      await this.ocrQueue.add(
-        'ocr',
-        { evento_crudo_id: eventoCrudoId, client_id: clientId, canal: 'whatsapp' },
-        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-      );
-
-      this.logger.log(
-        `[WhatsApp] F1 pipeline started eventoCrudoId=${eventoCrudoId} client=${clientId}`,
-      );
-
-      await this.wa.sendText(
-        from,
-        'Documento recibido. Procesando con IA. Te avisamos cuando este listo.',
-      );
-    } catch (err: any) {
-      this.logger.error('[WhatsApp] F1 ingest error:', err.message);
-      await this.wa.sendText(
-        from,
-        'Error al procesar el documento. Por favor intenta de nuevo.',
-      );
-    }
-  }
+  // ── Convocation reply (F4) ────────────────────────────────────────────────
 
   private async handleConvocatoriaReply(from: string, reply: 'si' | 'no') {
     const estado   = reply === 'si' ? 'confirmada' : 'rechazada';
     const texto    = reply === 'si' ? 'SI - Confirmado' : 'NO - Rechazado';
     const replyMsg = reply === 'si'
-      ? 'Perfecto! Tu participacion ha sido confirmada. Nos vemos en la activacion.'
+      ? 'Perfecto! Tu participacion ha sido confirmada.'
       : 'Entendido. Buscaremos otro promotor. Gracias!';
 
     await this.ds.query(

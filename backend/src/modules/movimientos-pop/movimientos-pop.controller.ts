@@ -5,6 +5,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @UseGuards(AuthGuard, ClientIsolationGuard, ClientActiveGuard)
@@ -33,6 +34,7 @@ export class MovimientosPopController {
   }
 
   @Post('manual')
+  @AuditAction({ action: 'CREATE_STOCK_MOVEMENT', entity: 'MovimientoPop' })
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateMovimientoDto) {
     return this.svc.create(user.client_id, dto);
   }

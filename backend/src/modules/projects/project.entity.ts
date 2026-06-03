@@ -31,4 +31,16 @@ export class Project extends TenantBaseEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   config: Record<string, unknown> | null;
+
+  @Column({ type: 'text', nullable: true })
+  objectives: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  kpis: Record<string, unknown> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  staff_requirements: Record<string, unknown> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  pop_required: Record<string, unknown> | null;
 }

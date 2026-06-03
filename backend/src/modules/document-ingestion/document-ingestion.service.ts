@@ -7,9 +7,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-import { promises as fs } from 'fs';
+import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { TenantRepository } from '../../common/repositories/tenant.repository';
+import { StorageService } from '../../common/storage/storage.service';
 import {
   DocumentUpload,
   ParseResult,
@@ -51,6 +53,7 @@ export class DocumentIngestionService {
     private readonly columnMapper: ColumnMapperService,
     private readonly validator: ValidationService,
     private readonly populator: DbPopulatorService,
+    private readonly storage: StorageService,
   ) {
     this.repo = new TenantRepository<DocumentUpload>(dataSource, DocumentUpload);
     this.uploadDir = this.config.get<string>('UPLOAD_DIR', './uploads');
@@ -103,8 +106,10 @@ export class DocumentIngestionService {
     });
 
     try {
-      const absolutePath = path.resolve(this.uploadDir, doc.storage_path);
-      await fs.access(absolutePath);
+      const fileBuffer = await this.storage.download(doc.storage_path);
+      const tmpDir = os.tmpdir();
+      const absolutePath = path.join(tmpDir, `cs-${doc.id}${path.extname(doc.original_name)}`);
+      fs.writeFileSync(absolutePath, fileBuffer);
 
       let columns: string[] = [];
       let rows: Record<string, string>[] = [];

@@ -57,6 +57,12 @@ export class EventoCrudo {
   @Column({ type: 'varchar', nullable: true, unique: false })
   idempotency_key: string | null;
 
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  flow: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  parsed_data: Record<string, unknown> | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

@@ -28,9 +28,12 @@ import * as Joi from 'joi';
         REDIS_PASSWORD: Joi.string().allow('').default(''),
         // ── AI Configuration (H5 — optional, app works without it) ───────
         AI_PROVIDER: Joi.string().valid('openai', 'anthropic').default('openai'),
-        AI_API_KEY: Joi.string().optional(),
+        AI_API_KEY: Joi.string().allow('').optional(),
         AI_MODEL: Joi.string().default('gpt-4o-mini'),
         AI_MAX_TOKENS: Joi.number().default(4096),
+        // ── Supabase Storage ─────────────────────────────────────────────
+        SUPABASE_URL: Joi.string().allow('').optional(),
+        SUPABASE_SERVICE_ROLE_KEY: Joi.string().allow('').optional(),
         // ── File Upload (H5) ─────────────────────────────────────────────
         UPLOAD_MAX_SIZE_MB: Joi.number().default(10),
         UPLOAD_DIR: Joi.string().default('./uploads'),

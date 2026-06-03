@@ -33,6 +33,9 @@ export class User {
   @Column({ type: 'varchar', length: 100, nullable: true })
   full_name!: string | null;
 
+  @Column({ type: 'varchar', length: 5, default: 'es' })
+  language!: string;
+
   @Column({ default: true })
   is_active!: boolean;
 

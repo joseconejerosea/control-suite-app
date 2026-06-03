@@ -7,6 +7,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -55,6 +56,7 @@ export class ProjectsController {
 
   @Post()
   @Roles('admin_cliente', 'super_admin')
+  @AuditAction({ action: 'CREATE_PROJECT', entity: 'Project' })
   create(@Req() req: AuthedRequest, @Body() dto: CreateProjectDto) {
     return this.service.create(req.user.client_id, dto);
   }
@@ -73,6 +75,7 @@ export class ProjectsController {
 
   @Patch(':id')
   @Roles('admin_cliente', 'super_admin')
+  @AuditAction({ action: 'UPDATE_PROJECT', entity: 'Project' })
   update(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -91,6 +94,7 @@ export class ProjectsController {
 
   @Post(':id/aprobar')
   @Roles('admin_cliente', 'super_admin')
+  @AuditAction({ action: 'APPROVE_PROJECT', entity: 'Project' })
   aprobar(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -126,6 +130,7 @@ export class ProjectsController {
 
   @Post(':id/convocar')
   @Roles('admin_cliente', 'super_admin')
+  @AuditAction({ action: 'SEND_CONVOCATION', entity: 'Project' })
   enviarConvocatoria(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,

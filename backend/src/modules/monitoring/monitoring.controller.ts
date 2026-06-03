@@ -2,11 +2,14 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 const SAVINGS_RATE_USD_PER_HOUR = 15;
 const HOURS_SAVED_PER_DAY       = 3;
 
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
+@Roles('super_admin')
 @Controller('admin/monitoring')
 export class MonitoringController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}

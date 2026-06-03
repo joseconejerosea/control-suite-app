@@ -17,6 +17,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @Controller('campaigns')
@@ -39,6 +40,7 @@ export class CampaignsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @AuditAction({ action: 'CREATE_CAMPAIGN', entity: 'Campaign' })
   create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateCampaignDto,
@@ -47,6 +49,7 @@ export class CampaignsController {
   }
 
   @Patch(':id')
+  @AuditAction({ action: 'UPDATE_CAMPAIGN', entity: 'Campaign' })
   update(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -57,6 +60,7 @@ export class CampaignsController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @AuditAction({ action: 'DELETE_CAMPAIGN', entity: 'Campaign' })
   remove(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

@@ -5,7 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigModule } from './config/config.module';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ClientIsolationGuard } from './common/guards/client-isolation.guard';
 import { AuthGuard } from './common/guards/auth.guard';
 
@@ -42,6 +42,8 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { CronModule } from './modules/cron/cron.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { StorageModule } from './common/storage/storage.module';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
   imports: [
@@ -57,6 +59,9 @@ import { AuditModule } from './modules/audit/audit.module';
         database: config.get<string>('DB_NAME'),
         entities:   [__dirname + '/**/*.entity{.ts,.js}'],
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
+        ssl: config.get('NODE_ENV') === 'production' || config.get('DB_SSL') === 'true'
+          ? { rejectUnauthorized: false }
+          : false,
         synchronize: false,
         logging: config.get('NODE_ENV') === 'development',
       }),
@@ -84,6 +89,7 @@ import { AuditModule } from './modules/audit/audit.module';
     CronModule,
     MonitoringModule,
     AuditModule,
+    StorageModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
@@ -93,6 +99,7 @@ import { AuditModule } from './modules/audit/audit.module';
     { provide: APP_GUARD, useClass: AuthGuard },
     // Brief Rule 09: isolation check runs after user is set
     { provide: APP_GUARD, useClass: ClientIsolationGuard },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })
 export class AppModule {}

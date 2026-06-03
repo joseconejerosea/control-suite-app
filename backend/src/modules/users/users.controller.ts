@@ -7,6 +7,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard'; 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @Controller('users')
@@ -20,6 +21,7 @@ export class UserController {
   }
 
   @Post()
+  @AuditAction({ action: 'CREATE_USER', entity: 'User' })
   create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateUserDto,
