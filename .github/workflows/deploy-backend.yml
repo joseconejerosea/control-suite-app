@@ -1,0 +1,107 @@
+name: Deploy Backend to Hetzner
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [dev, main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - 'nginx/**'
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            cd ~/control-suite
+            git pull origin ${{ github.base_ref }}
+
+            if [ "${{ github.base_ref }}" = "main" ]; then
+              ENV_FILE="backend/.env.prod"
+              SERVICE="backend-prod"
+              cat > $ENV_FILE << 'EOF'
+            DB_HOST=${{ secrets.PROD_DB_HOST }}
+            DB_PORT=5432
+            DB_USERNAME=${{ secrets.PROD_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+            DB_NAME=${{ secrets.PROD_DB_NAME }}
+            DB_SSL=true
+            JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
+            JWT_REFRESH_SECRET=${{ secrets.PROD_JWT_REFRESH_SECRET }}
+            JWT_EXPIRES_IN=8h
+            JWT_REFRESH_EXPIRES_IN=7d
+            PORT=3002
+            NODE_ENV=production
+            ALLOWED_ORIGIN=${{ secrets.PROD_ALLOWED_ORIGIN }}
+            WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            REDIS_HOST=
+            REDIS_PORT=6379
+            REDIS_PASSWORD=
+            AI_PROVIDER=anthropic
+            AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            AI_MODEL=gpt-4o-mini
+            AI_MAX_TOKENS=4096
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
+            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+            WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            META_WABA_ID=${{ secrets.META_WABA_ID }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            SUPABASE_URL=${{ secrets.PROD_SUPABASE_URL }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}
+            UPLOAD_MAX_SIZE_MB=10
+            UPLOAD_DIR=./uploads
+            EOF
+            else
+              ENV_FILE="backend/.env.dev"
+              SERVICE="backend-dev"
+              cat > $ENV_FILE << 'EOF'
+            DB_HOST=${{ secrets.DEV_DB_HOST }}
+            DB_PORT=5432
+            DB_USERNAME=${{ secrets.DEV_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.DEV_DB_PASSWORD }}
+            DB_NAME=${{ secrets.DEV_DB_NAME }}
+            DB_SSL=true
+            JWT_SECRET=${{ secrets.DEV_JWT_SECRET }}
+            JWT_REFRESH_SECRET=${{ secrets.DEV_JWT_REFRESH_SECRET }}
+            JWT_EXPIRES_IN=8h
+            JWT_REFRESH_EXPIRES_IN=7d
+            PORT=3001
+            NODE_ENV=development
+            ALLOWED_ORIGIN=${{ secrets.DEV_ALLOWED_ORIGIN }}
+            WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            REDIS_HOST=
+            REDIS_PORT=6379
+            REDIS_PASSWORD=
+            AI_PROVIDER=anthropic
+            AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            AI_MODEL=gpt-4o-mini
+            AI_MAX_TOKENS=4096
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
+            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+            WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            META_WABA_ID=${{ secrets.META_WABA_ID }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            SUPABASE_URL=${{ secrets.DEV_SUPABASE_URL }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}
+            UPLOAD_MAX_SIZE_MB=10
+            UPLOAD_DIR=./uploads
+            EOF
+            fi
+
+            docker compose up --build -d $SERVICE nginx
+            docker image prune -f
