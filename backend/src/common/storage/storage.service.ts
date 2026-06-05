@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 const BUCKET = 'control-suite';
 
@@ -25,7 +26,9 @@ export class StorageService implements OnModuleInit {
       return;
     }
 
-    this.supabase = createClient(url, key);
+    this.supabase = createClient(url, key, {
+      realtime: { transport: ws },
+    });
     this.logger.log('Supabase Storage initialized');
   }
 
