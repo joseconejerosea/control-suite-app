@@ -70,9 +70,9 @@ jobs:
             ALLOWED_ORIGIN=$ALLOWED_ORIGIN
             WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
             REDIS_URL=${{ secrets.REDIS_URL }}
-            REDIS_HOST=
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
             REDIS_PORT=6379
-            REDIS_PASSWORD=
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             AI_PROVIDER=anthropic
             AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
             AI_MODEL=gpt-4o-mini
