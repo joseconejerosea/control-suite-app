@@ -1,36 +1,10 @@
 services:
-  backend-dev:
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: controlsuite-backend-dev
-    env_file: ./backend/.env.dev
-    restart: always
-    expose:
-      - "3001"
-
-  backend-prod:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: controlsuite-backend-prod
-    env_file: ./backend/.env.prod
-    restart: always
-    expose:
-      - "3002"
-    environment:
-      - PORT=3002
-
-  nginx:
-    image: nginx:alpine
-    container_name: controlsuite-nginx
+    container_name: controlsuite-backend-${ENV:-dev}
+    env_file: ./backend/.env
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      - backend-dev
-      - backend-prod
+      - "${PORT:-3001}:${PORT:-3001}"
     restart: always

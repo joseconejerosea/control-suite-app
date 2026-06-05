@@ -7,7 +7,6 @@ on:
     paths:
       - 'backend/**'
       - 'docker-compose.yml'
-      - 'nginx/**'
 
 jobs:
   deploy:
@@ -22,86 +21,74 @@ jobs:
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
-            cd ~/control-suite
-            git pull origin ${{ github.base_ref }}
-
             if [ "${{ github.base_ref }}" = "main" ]; then
-              ENV_FILE="backend/.env.prod"
-              SERVICE="backend-prod"
-              cat > $ENV_FILE << 'EOF'
-            DB_HOST=${{ secrets.PROD_DB_HOST }}
-            DB_PORT=5432
-            DB_USERNAME=${{ secrets.PROD_DB_USERNAME }}
-            DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
-            DB_NAME=${{ secrets.PROD_DB_NAME }}
-            DB_SSL=true
-            JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
-            JWT_REFRESH_SECRET=${{ secrets.PROD_JWT_REFRESH_SECRET }}
-            JWT_EXPIRES_IN=8h
-            JWT_REFRESH_EXPIRES_IN=7d
-            PORT=3002
-            NODE_ENV=production
-            ALLOWED_ORIGIN=${{ secrets.PROD_ALLOWED_ORIGIN }}
-            WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
-            REDIS_URL=${{ secrets.REDIS_URL }}
-            REDIS_HOST=
-            REDIS_PORT=6379
-            REDIS_PASSWORD=
-            AI_PROVIDER=anthropic
-            AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            AI_MODEL=gpt-4o-mini
-            AI_MAX_TOKENS=4096
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
-            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
-            WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
-            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
-            META_WABA_ID=${{ secrets.META_WABA_ID }}
-            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
-            SUPABASE_URL=${{ secrets.PROD_SUPABASE_URL }}
-            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}
-            UPLOAD_MAX_SIZE_MB=10
-            UPLOAD_DIR=./uploads
-            EOF
+              DIR="$HOME/entornos/control-suite-prod"
+              PORT=3002
+              NODE_ENV=production
+              DB_HOST="${{ secrets.PROD_DB_HOST }}"
+              DB_USERNAME="${{ secrets.PROD_DB_USERNAME }}"
+              DB_PASSWORD="${{ secrets.PROD_DB_PASSWORD }}"
+              DB_NAME="${{ secrets.PROD_DB_NAME }}"
+              JWT_SECRET="${{ secrets.PROD_JWT_SECRET }}"
+              JWT_REFRESH_SECRET="${{ secrets.PROD_JWT_REFRESH_SECRET }}"
+              ALLOWED_ORIGIN="${{ secrets.PROD_ALLOWED_ORIGIN }}"
+              SUPABASE_URL="${{ secrets.PROD_SUPABASE_URL }}"
+              SUPABASE_SERVICE_ROLE_KEY="${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}"
+              ENV_LABEL="prod"
             else
-              ENV_FILE="backend/.env.dev"
-              SERVICE="backend-dev"
-              cat > $ENV_FILE << 'EOF'
-            DB_HOST=${{ secrets.DEV_DB_HOST }}
-            DB_PORT=5432
-            DB_USERNAME=${{ secrets.DEV_DB_USERNAME }}
-            DB_PASSWORD=${{ secrets.DEV_DB_PASSWORD }}
-            DB_NAME=${{ secrets.DEV_DB_NAME }}
-            DB_SSL=true
-            JWT_SECRET=${{ secrets.DEV_JWT_SECRET }}
-            JWT_REFRESH_SECRET=${{ secrets.DEV_JWT_REFRESH_SECRET }}
-            JWT_EXPIRES_IN=8h
-            JWT_REFRESH_EXPIRES_IN=7d
-            PORT=3001
-            NODE_ENV=development
-            ALLOWED_ORIGIN=${{ secrets.DEV_ALLOWED_ORIGIN }}
-            WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
-            REDIS_URL=${{ secrets.REDIS_URL }}
-            REDIS_HOST=
-            REDIS_PORT=6379
-            REDIS_PASSWORD=
-            AI_PROVIDER=anthropic
-            AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            AI_MODEL=gpt-4o-mini
-            AI_MAX_TOKENS=4096
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
-            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
-            WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
-            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
-            META_WABA_ID=${{ secrets.META_WABA_ID }}
-            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
-            SUPABASE_URL=${{ secrets.DEV_SUPABASE_URL }}
-            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}
-            UPLOAD_MAX_SIZE_MB=10
-            UPLOAD_DIR=./uploads
-            EOF
+              DIR="$HOME/entornos/control-suite-dev"
+              PORT=3001
+              NODE_ENV=development
+              DB_HOST="${{ secrets.DEV_DB_HOST }}"
+              DB_USERNAME="${{ secrets.DEV_DB_USERNAME }}"
+              DB_PASSWORD="${{ secrets.DEV_DB_PASSWORD }}"
+              DB_NAME="${{ secrets.DEV_DB_NAME }}"
+              JWT_SECRET="${{ secrets.DEV_JWT_SECRET }}"
+              JWT_REFRESH_SECRET="${{ secrets.DEV_JWT_REFRESH_SECRET }}"
+              ALLOWED_ORIGIN="${{ secrets.DEV_ALLOWED_ORIGIN }}"
+              SUPABASE_URL="${{ secrets.DEV_SUPABASE_URL }}"
+              SUPABASE_SERVICE_ROLE_KEY="${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}"
+              ENV_LABEL="dev"
             fi
 
-            docker compose up --build -d $SERVICE nginx
+            cd "$DIR"
+            git pull origin ${{ github.base_ref }}
+
+            cat > backend/.env << EOF
+            DB_HOST=$DB_HOST
+            DB_PORT=5432
+            DB_USERNAME=$DB_USERNAME
+            DB_PASSWORD=$DB_PASSWORD
+            DB_NAME=$DB_NAME
+            DB_SSL=true
+            JWT_SECRET=$JWT_SECRET
+            JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
+            JWT_EXPIRES_IN=8h
+            JWT_REFRESH_EXPIRES_IN=7d
+            PORT=$PORT
+            NODE_ENV=$NODE_ENV
+            ALLOWED_ORIGIN=$ALLOWED_ORIGIN
+            WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            REDIS_HOST=
+            REDIS_PORT=6379
+            REDIS_PASSWORD=
+            AI_PROVIDER=anthropic
+            AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            AI_MODEL=gpt-4o-mini
+            AI_MAX_TOKENS=4096
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
+            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+            WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            META_WABA_ID=${{ secrets.META_WABA_ID }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            SUPABASE_URL=$SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+            UPLOAD_MAX_SIZE_MB=10
+            UPLOAD_DIR=./uploads
+            EOF
+
+            ENV=$ENV_LABEL PORT=$PORT docker compose up --build -d
             docker image prune -f
