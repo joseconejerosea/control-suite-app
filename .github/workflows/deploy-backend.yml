@@ -1,4 +1,4 @@
-name: Deploy Backend to Hetzner
+name: Deploy to Hetzner
 
 on:
   pull_request:
@@ -6,7 +6,9 @@ on:
     branches: [dev, main]
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - 'docker-compose.yml'
+      - 'nginx/**'
 
 jobs:
   deploy:
@@ -35,6 +37,8 @@ jobs:
               SUPABASE_URL="${{ secrets.PROD_SUPABASE_URL }}"
               SUPABASE_SERVICE_ROLE_KEY="${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}"
               ENV_LABEL="prod"
+              FRONTEND_PORT=3100
+              NEXT_PUBLIC_API_URL="https://api.controlsuitte.com"
             else
               DIR="$HOME/entornos/control-suite-dev"
               PORT=3001
@@ -49,6 +53,8 @@ jobs:
               SUPABASE_URL="${{ secrets.DEV_SUPABASE_URL }}"
               SUPABASE_SERVICE_ROLE_KEY="${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}"
               ENV_LABEL="dev"
+              FRONTEND_PORT=3000
+              NEXT_PUBLIC_API_URL="http://dev-api.controlsuitte.com"
             fi
 
             cd "$DIR"
@@ -90,5 +96,5 @@ jobs:
             UPLOAD_DIR=./uploads
             EOF
 
-            ENV=$ENV_LABEL PORT=$PORT docker compose up --build -d
+            ENV=$ENV_LABEL PORT=$PORT FRONTEND_PORT=$FRONTEND_PORT NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL docker compose up --build -d
             docker image prune -f
