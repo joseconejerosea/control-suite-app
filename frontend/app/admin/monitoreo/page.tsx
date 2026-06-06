@@ -30,7 +30,7 @@ export default function MonitoreoPage() {
     { label: "Activaciones live",    value: overview?.live_activations ?? "—",      color: "#f59e0b" },
     { label: "Tasa de exito",        value: overview?.success_rate ? `${overview.success_rate}%` : "—", color: "#60a5fa" },
     { label: "Latencia avg (ms)",    value: overview?.avg_latency_ms ?? "—",        color: "#a78bfa" },
-    { label: "Clientes activos",     value: overview?.active_clients ?? clients.length || "—", color: "#34b96e" },
+    { label: "Clientes activos",     value: (overview?.active_clients ?? clients.length) || "—", color: "#34b96e" },
   ];
 
   const flows = [
