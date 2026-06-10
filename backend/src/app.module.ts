@@ -44,6 +44,8 @@ import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { StorageModule } from './common/storage/storage.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { ProjectResolverModule } from './modules/project-resolver/project-resolver.module';
+import { F1ReviewModule } from './modules/f1-review/f1-review.module';
 
 @Module({
   imports: [
@@ -90,6 +92,8 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
     MonitoringModule,
     AuditModule,
     StorageModule,
+    ProjectResolverModule,
+    F1ReviewModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
