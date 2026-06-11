@@ -1,7 +1,7 @@
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestFastifyApplication, FastifyAdapter } from '@nestjs/platform-fastify';
-import { ValidationPipe, Logger, ClassSerializerInterceptor } from '@nestjs/common';
+import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import helmet from '@fastify/helmet';
@@ -11,17 +11,18 @@ import { HttpExceptionFilter } from './common/filter/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { SanitizeInputPipe } from './common/pipes/sanitize-input.pipe';
+import { winstonLogger } from './common/logger/winston.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
-    { rawBody: true },
+    { rawBody: true, logger: winstonLogger },
   );
 
   app.enableShutdownHooks();
 
-  const logger = new Logger('Bootstrap');
+  const logger = winstonLogger;
   const configService = app.get(ConfigService);
   const fastifyInstance = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
   

@@ -338,7 +338,7 @@ export class WhatsAppWebhookController {
     }
   }
 
-  // ── Location handler (F5 — GPS validation) ───────────────────────────────
+  // ── Location handler (F5 — GPS validation with Haversine) ─────────────────
 
   private async handleLocation(
     from: string, msg: any,
@@ -353,15 +353,77 @@ export class WhatsAppWebhookController {
     if (lat == null || lng == null) return;
 
     try {
-      await this.persistEvent({
+      const eventId = await this.persistEvent({
         clientId, canalId, messageId, from, type: 'location', flow: 'F5',
         payload: { lat, lng, name, address },
       });
 
-      await this.wa.sendText(from, `Ubicacion recibida (${lat.toFixed(4)}, ${lng.toFixed(4)}). Verificando...`);
+      const activations = await this.ds.query(
+        `SELECT a.id, a.location, a.status
+         FROM activations a
+         WHERE a.client_id = $1
+           AND a.status IN ('scheduled','in_progress')
+           AND a.location IS NOT NULL
+         ORDER BY a.activation_date DESC`,
+        [clientId],
+      ).catch(() => []);
+
+      let matched = false;
+
+      for (const act of activations) {
+        const loc = typeof act.location === 'string' ? JSON.parse(act.location) : act.location;
+        if (!loc?.lat || !loc?.lng) continue;
+
+        const distance = this.haversine(lat, lng, loc.lat, loc.lng);
+        const radius = loc.radiusMeters ?? 200;
+        const locationStatus = distance <= radius ? 'VERIFIED' : 'MISMATCH';
+
+        await this.ds.query(
+          `INSERT INTO activation_events
+             (client_id, activation_id, event_type, location_status, lat, lng, metadata, created_at)
+           VALUES ($1, $2, 'LOCATION_CHECK', $3, $4, $5, $6::jsonb, NOW())`,
+          [
+            clientId, act.id, locationStatus, lat, lng,
+            JSON.stringify({ distance_m: Math.round(distance), radius_m: radius, from }),
+          ],
+        ).catch(() => {});
+
+        if (locationStatus === 'VERIFIED') {
+          if (act.status === 'scheduled') {
+            await this.ds.query(
+              `UPDATE activations SET status = 'in_progress', estado_f5 = 'en_vivo', updated_at = NOW() WHERE id = $1`,
+              [act.id],
+            ).catch(() => {});
+          }
+          await this.wa.sendText(from,
+            `Ubicacion verificada. Estas a ${Math.round(distance)}m del punto de activacion.`);
+          matched = true;
+          break;
+        } else {
+          await this.wa.sendText(from,
+            `Ubicacion fuera del rango permitido. Distancia: ${Math.round(distance)}m (maximo: ${radius}m).`);
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched) {
+        await this.wa.sendText(from, `Ubicacion recibida (${lat.toFixed(4)}, ${lng.toFixed(4)}). No hay activacion activa para validar.`);
+      }
     } catch (err: any) {
       this.logger.error(`[WhatsApp] Location handling error: ${err.message}`);
     }
+  }
+
+  private haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   // ── Text handler ──────────────────────────────────────────────────────────

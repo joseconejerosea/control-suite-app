@@ -1,5 +1,7 @@
 import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
@@ -14,6 +16,7 @@ export class F5Controller {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly emailService: ResendEmailService,
+    @InjectQueue('report-gen') private readonly reportQueue: Queue,
   ) {}
 
   @Get('activaciones/:id/checkins')
@@ -61,6 +64,14 @@ export class F5Controller {
     return res[0];
   }
 
+  @Get('activaciones/:id/eventos')
+  async getEventos(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ds.query(
+      `SELECT * FROM activation_events WHERE activation_id=$1 AND client_id=$2 ORDER BY created_at DESC`,
+      [id, user.client_id],
+    ).catch(() => []);
+  }
+
   @Get('activaciones/:id/reportes-avance')
   async getReportesAvance(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ds.query(
@@ -79,6 +90,25 @@ export class F5Controller {
       [user.client_id, id, body.momento ?? 'inicio', body.observacion ?? null, user.sub],
     );
     return res[0];
+  }
+
+  @Post('activaciones/:id/reporte-cliente/generar')
+  async generarReporte(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.reportQueue.add('report', {
+      client_id: user.client_id,
+      activation_id: id,
+      user_id: user.sub,
+    }, { attempts: 2, backoff: { type: 'exponential', delay: 3000 } });
+    return { queued: true, activation_id: id };
+  }
+
+  @Get('activaciones/:id/reporte-cliente')
+  async getReporteCliente(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.ds.query(
+      `SELECT * FROM reportes_cliente WHERE activacion_id=$1 AND client_id=$2 ORDER BY aprobado_at DESC LIMIT 1`,
+      [id, user.client_id],
+    ).catch(() => []);
+    return rows[0] ?? null;
   }
 
   @Post('activaciones/:id/reporte-cliente/enviar')

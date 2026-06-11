@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
+
+const POLL_INTERVAL = 30_000;
 
 export default function TerrenoPage() {
   const router = useRouter();
@@ -12,26 +14,39 @@ export default function TerrenoPage() {
   const [selected, setSelected]         = useState<any>(null);
   const [checkins, setCheckins]         = useState<any[]>([]);
   const [incidencias, setIncidencias]   = useState<any[]>([]);
+  const [eventos, setEventos]           = useState<any[]>([]);
   const [incModal, setIncModal]         = useState(false);
   const [incText, setIncText]           = useState("");
   const [incSeveridad, setIncSeveridad] = useState("media");
-  const [detailTab, setDetailTab]       = useState<"checkins"|"incidencias">("checkins");
+  const [detailTab, setDetailTab]       = useState<"checkins"|"incidencias"|"eventos">("checkins");
+  const [lastPoll, setLastPoll]         = useState<Date>(new Date());
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  const fetchActivaciones = useCallback(async () => {
+    try {
+      const r = await api.get<any>("/activations");
+      setActivaciones(Array.isArray(r) ? r : (r?.data ?? []));
+      setLastPoll(new Date());
+    } catch {}
+  }, []);
 
   useEffect(() => {
-    api.get<any>("/activations")
-      .then((r) => setActivaciones(Array.isArray(r) ? r : (r?.data ?? [])))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+    fetchActivaciones().finally(() => setLoading(false));
+    pollRef.current = setInterval(fetchActivaciones, POLL_INTERVAL);
+    return () => clearInterval(pollRef.current);
+  }, [fetchActivaciones]);
 
   const openDetail = async (a: any) => {
     setSelected(a);
-    const [c, i] = await Promise.all([
+    setDetailTab("checkins");
+    const [c, i, ev] = await Promise.all([
       api.get<any>(`/f5/activaciones/${a.id}/checkins`).catch(() => []),
       api.get<any>(`/f5/activaciones/${a.id}/incidencias`).catch(() => []),
+      api.get<any>(`/f5/activaciones/${a.id}/eventos`).catch(() => []),
     ]);
     setCheckins(Array.isArray(c) ? c : (c?.data ?? []));
     setIncidencias(Array.isArray(i) ? i : (i?.data ?? []));
+    setEventos(Array.isArray(ev) ? ev : (ev?.data ?? []));
   };
 
   const reportarIncidencia = async () => {
@@ -49,8 +64,7 @@ export default function TerrenoPage() {
     if (!selected) return;
     await api.post(`/f5/activaciones/${selected.id}/cerrar`, {}).catch(console.error);
     setSelected(null);
-    const r = await api.get<any>("/activations").catch(() => []);
-    setActivaciones(Array.isArray(r) ? r : (r?.data ?? []));
+    fetchActivaciones();
   };
 
   const enVivo   = activaciones.filter((a: any) => a.status === "in_progress");
@@ -61,20 +75,34 @@ export default function TerrenoPage() {
     critica: "#e8353f", alta: "#f97316", media: "#f59e0b", baja: "#94a3b8",
   };
 
+  const LOC_BADGE: Record<string, { bg: string; color: string; label: string }> = {
+    VERIFIED: { bg: "rgba(42,157,92,0.15)", color: "#34b96e", label: "Verificada" },
+    MISMATCH: { bg: "rgba(245,115,0,0.15)", color: "#f97316", label: "Desfasada" },
+    PENDING:  { bg: "rgba(100,116,139,0.15)", color: "#94a3b8", label: "Pendiente" },
+  };
+
+  const EVENT_ICON: Record<string, string> = {
+    LOCATION_CHECK: "📍", REPORT: "📋", PHOTO: "📸", INCIDENT: "⚠️",
+  };
+
   return (
     <AppShell>
       <div className="animate-fade-up">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold">Terreno</h1>
-            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Monitoreo en vivo de activaciones</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+              Monitoreo en vivo · {lastPoll.toLocaleTimeString("es-CL")}
+            </p>
           </div>
-          {enVivo.length > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold" style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e" }}>
-              <span className="w-2 h-2 rounded-full" style={{ background: "#34b96e" }} />
-              {enVivo.length} EN VIVO
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {enVivo.length > 0 && (
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold" style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e" }}>
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#34b96e" }} />
+                {enVivo.length} EN VIVO
+              </div>
+            )}
+          </div>
         </div>
 
         {loading && <div className="text-center py-20" style={{ color: "var(--muted-foreground)" }}>Cargando...</div>}
@@ -107,13 +135,12 @@ export default function TerrenoPage() {
                     <button onClick={() => { setSelected(a); setIncModal(true); }}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium"
                       style={{ background: "var(--red-dim)", color: "var(--red-light)", border: "none", cursor: "pointer" }}>
-                      ⚠ Incidencia
+                      Incidencia
                     </button>
-                    {/* ✅ NUEVO: Reporte Cliente button */}
-                    <button onClick={() => router.push(`/client/reporte-cliente?id=${a.id}`)}
+                    <button onClick={() => router.push(`/client/terreno-detail?id=${a.id}`)}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium"
                       style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)", cursor: "pointer" }}>
-                      📋 Reporte Cliente
+                      Reporte
                     </button>
                   </div>
                 </div>
@@ -139,7 +166,7 @@ export default function TerrenoPage() {
                 <h2 className="text-sm font-semibold mb-3" style={{ color: "var(--muted-foreground)" }}>Cerradas</h2>
                 <div className="grid grid-cols-3 gap-4">
                   {cerradas.map((a: any) => (
-                    <div key={a.id} className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+                    <div key={a.id} className="rounded-xl border p-4 cursor-pointer" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={() => openDetail(a)}>
                       <div className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>{a.activation_date ?? "—"}</div>
                       <div className="font-semibold text-sm">{a.notes ?? `Activación ${a.id.slice(0,8)}`}</div>
                       <div className="mt-2 text-xs px-2 py-1 rounded" style={{ background: "var(--secondary)", color: "var(--muted-foreground)", display: "inline-block" }}>Cerrada</div>
@@ -151,7 +178,7 @@ export default function TerrenoPage() {
           </div>
         )}
 
-        {/* Detail Modal */}
+        {/* Detail Slide-over */}
         {selected && !incModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-end p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setSelected(null)}>
             <div className="rounded-2xl border w-full max-w-lg h-full max-h-screen overflow-y-auto" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={(e) => e.stopPropagation()}>
@@ -161,18 +188,21 @@ export default function TerrenoPage() {
                   <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20 }}>✕</button>
                 </div>
 
-                <div className="flex mb-4" style={{ borderBottom: "1px solid var(--border)" }}>
-                  {(["checkins", "incidencias"] as const).map((t) => (
-                    <button key={t} onClick={() => setDetailTab(t)}
-                      className="px-4 py-2 text-sm capitalize"
-                      style={{
-                        borderBottom: detailTab === t ? "2px solid var(--red)" : "2px solid transparent",
-                        background: "none", cursor: "pointer", marginBottom: "-1px",
-                        color: detailTab === t ? "var(--foreground)" : "var(--muted-foreground)",
-                      }}>
-                      {t} ({detailTab === "checkins" ? checkins.length : incidencias.length})
-                    </button>
-                  ))}
+                <div className="flex mb-4 gap-1" style={{ borderBottom: "1px solid var(--border)" }}>
+                  {(["checkins", "incidencias", "eventos"] as const).map((t) => {
+                    const count = t === "checkins" ? checkins.length : t === "incidencias" ? incidencias.length : eventos.length;
+                    return (
+                      <button key={t} onClick={() => setDetailTab(t)}
+                        className="px-3 py-2 text-sm capitalize"
+                        style={{
+                          borderBottom: detailTab === t ? "2px solid var(--red)" : "2px solid transparent",
+                          background: "none", cursor: "pointer", marginBottom: "-1px",
+                          color: detailTab === t ? "var(--foreground)" : "var(--muted-foreground)",
+                        }}>
+                        {t} ({count})
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {detailTab === "checkins" && (
@@ -204,23 +234,52 @@ export default function TerrenoPage() {
                   </div>
                 )}
 
+                {detailTab === "eventos" && (
+                  <div className="space-y-2">
+                    {eventos.length === 0 ? (
+                      <p className="text-sm text-center py-8" style={{ color: "var(--muted-foreground)" }}>Sin eventos</p>
+                    ) : eventos.map((e: any) => {
+                      const badge = e.location_status ? LOC_BADGE[e.location_status] : null;
+                      return (
+                        <div key={e.id} className="rounded-lg p-3 flex items-start gap-3" style={{ background: "var(--secondary)" }}>
+                          <span className="text-lg mt-0.5">{EVENT_ICON[e.event_type] ?? "📌"}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium">{e.event_type.replace(/_/g, " ")}</span>
+                              {badge && (
+                                <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: badge.bg, color: badge.color }}>{badge.label}</span>
+                              )}
+                            </div>
+                            <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>{new Date(e.created_at).toLocaleString("es-CL")}</div>
+                            {e.content && <p className="text-sm mt-1">{e.content}</p>}
+                            {e.lat && e.lng && (
+                              <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>
+                                {Number(e.lat).toFixed(5)}, {Number(e.lng).toFixed(5)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => { setSelected(selected); setIncModal(true); }}
                     className="flex-1 py-2 rounded-lg text-sm font-medium"
                     style={{ background: "var(--red-dim)", color: "var(--red-light)", border: "none", cursor: "pointer" }}>
-                    ⚠ Reportar incidencia
+                    Reportar incidencia
                   </button>
-                  {/* ✅ NUEVO: Reporte Cliente en modal detail */}
-                  <button onClick={() => router.push(`/client/reporte-cliente?id=${selected.id}`)}
+                  <button onClick={() => router.push(`/client/terreno-detail?id=${selected.id}`)}
                     className="flex-1 py-2 rounded-lg text-sm font-medium"
                     style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)", cursor: "pointer" }}>
-                    📋 Reporte Cliente
+                    Vista completa
                   </button>
                   {selected.status === "in_progress" && (
                     <button onClick={cerrarActivacion}
                       className="flex-1 py-2 rounded-lg text-sm font-semibold"
                       style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
-                      Cerrar activación
+                      Cerrar
                     </button>
                   )}
                 </div>

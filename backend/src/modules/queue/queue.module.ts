@@ -8,6 +8,7 @@ import { OcrProcessor } from './processors/ocr.processor';
 import { ClassifyProcessor } from './processors/classify.processor';
 import { PersistProcessor } from './processors/persist.processor';
 import { MindProactiveProcessor } from './processors/mind-proactive.processor';
+import { ReportProcessor } from './processors/report.processor';
 import { MetricsModule } from '../metrics/metrics.module';
 import { SheetsModule } from '../sheets/sheets.module';
 import { MindModule } from '../mind/mind.module';
@@ -36,7 +37,8 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
       { name: QUEUE_OCR },
       { name: QUEUE_CLASSIFY },
       { name: QUEUE_PERSIST },
-      { name: QUEUE_MIND_PROACTIVE },   // ← was missing
+      { name: QUEUE_MIND_PROACTIVE },
+      { name: 'report-gen' },
     ),
     MetricsModule,
     SheetsModule,
@@ -50,7 +52,8 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
     OcrProcessor,
     ClassifyProcessor,
     PersistProcessor,
-    MindProactiveProcessor,             // ← was missing
+    MindProactiveProcessor,
+    ReportProcessor,
   ],
   exports: [BullModule, EventProducer],
 })
