@@ -6,6 +6,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import Anthropic from '@anthropic-ai/sdk';
 import { QUEUE_MIND_PROACTIVE } from '../queue/queue.module';
+import { RendicionesService } from '../rendiciones/rendiciones.service';
 
 // Brief: F5 hourly mini-reports use Haiku (cheap), not Opus
 const F5_CRON_MODEL     = 'claude-haiku-4-5-20251001';
@@ -23,6 +24,7 @@ export class CronService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_MIND_PROACTIVE) private readonly mindQueue: Queue,
+    private readonly rendicionesService: RendicionesService,
   ) {}
 
   // ── F5: Hourly mini-reports for live activations ──────────────────────────
@@ -156,6 +158,55 @@ export class CronService {
       this.logger.log(`[Cron] Sales-invoice reminder done — ${proyectos.length} alertas`);
     } catch (err) {
       this.logger.error('[Cron] Sales-invoice reminder error:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── F3: 24h return reminder — daily at 10:00 UTC ──
+  @Cron('0 10 * * *')
+  async returnReminder24h(): Promise<void> {
+    this.logger.log('[Cron] Return reminder 24h running...');
+    try {
+      const overdue = await this.ds.query(
+        `SELECT srr.id, srr.client_id, srr.project_id, srr.persona_id,
+                p.name as project_name,
+                EXTRACT(EPOCH FROM (NOW() - srr.requested_at))/3600 as hours
+         FROM stock_return_requests srr
+         JOIN projects p ON p.id = srr.project_id
+         WHERE srr.status = 'pending'
+           AND srr.photo_key IS NULL
+           AND srr.requested_at < NOW() - INTERVAL '24 hours'`,
+      ).catch(() => []);
+
+      for (const row of overdue) {
+        await this.ds.query(
+          `INSERT INTO mind_propuestas
+             (client_id, tipo, titulo, descripcion, datos_soporte, prioridad, estado, created_at)
+           VALUES ($1, 'alerta_devolucion', $2, $3, $4::jsonb, 'alta', 'pendiente', NOW())
+           ON CONFLICT DO NOTHING`,
+          [
+            row.client_id,
+            `Devolución pendiente: proyecto "${row.project_name}"`,
+            `Han pasado más de ${Math.floor(row.hours)}h sin respuesta de devolución de material POP.`,
+            JSON.stringify({ return_request_id: row.id, project_id: row.project_id, persona_id: row.persona_id }),
+          ],
+        ).catch(() => {});
+      }
+
+      this.logger.log(`[Cron] Return reminder done — ${overdue.length} overdue`);
+    } catch (err) {
+      this.logger.error('[Cron] Return reminder error:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── F2: Weekly rendition close (Sunday 23:00 Chile = Monday 02:00/03:00 UTC) ──
+  @Cron('0 3 * * 1')
+  async weeklyRenditionClose(): Promise<void> {
+    this.logger.log('[Cron] Weekly rendition close running...');
+    try {
+      await this.rendicionesService.cerrarRendicionesSemana();
+      this.logger.log('[Cron] Weekly rendition close done');
+    } catch (err) {
+      this.logger.error('[Cron] Weekly rendition close error:', err instanceof Error ? err.message : err);
     }
   }
 }

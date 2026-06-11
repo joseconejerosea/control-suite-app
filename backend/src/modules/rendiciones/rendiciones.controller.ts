@@ -1,7 +1,8 @@
 import {
-  Controller, Get, Patch, Param, Body, Query,
+  Controller, Get, Patch, Param, Body, Query, Res,
   UseGuards, ParseUUIDPipe, HttpCode, HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { RendicionesService } from './rendiciones.service';
 import { RechazarRendicionDto, MarcarPagadaDto, RendicionFiltersDto } from './dto/rendicion.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -60,6 +61,21 @@ export class RendicionesController {
     @Body() dto: RechazarRendicionDto,
   ) {
     return this.svc.rechazar(user.client_id, id, dto);
+  }
+
+  @Get(':id/export')
+  async exportPdf(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.svc.exportPdf(user.client_id, id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="rendicion-${id.slice(0, 8)}.pdf"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @Patch(':id/marcar-pagada')

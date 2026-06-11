@@ -18,5 +18,6 @@ export class Sku extends TenantBaseEntity {
   @Column({ type: 'varchar', length: 512, nullable: true }) foto_key: string | null;
   @Column({ type: 'varchar', length: 512, nullable: true }) ficha_tecnica_key: string | null;
   @Column({ type: 'varchar', length: 20, default: 'reusable' }) tipo: SkuTipo;
+  @Column({ type: 'int', default: 0 }) min_stock: number;
   @Column({ type: 'boolean', default: true }) active: boolean;
 }

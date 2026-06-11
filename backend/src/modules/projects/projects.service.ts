@@ -6,6 +6,7 @@ import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
 
 export interface ProjectSummary {
   project_id:       string;
@@ -33,6 +34,7 @@ export class ProjectsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly stockReturns: StockReturnsService,
   ) {
     this.repo = new TenantRepository<Project>(dataSource, Project);
   }
@@ -69,7 +71,7 @@ export class ProjectsService {
     if (nextStart && nextEnd && nextStart > nextEnd) {
       throw new BadRequestException('start_date cannot be after end_date');
     }
-    return this.repo.update(clientId, id, {
+    const updated = await this.repo.update(clientId, id, {
       name:        dto.name        ?? existing.name,
       description: dto.description ?? existing.description,
       status:      dto.status      ?? existing.status,
@@ -78,6 +80,14 @@ export class ProjectsService {
       budget:      dto.budget      ?? existing.budget,
       config:      dto.config      ?? existing.config,
     });
+
+    if (dto.status === 'closed' && existing.status !== 'closed') {
+      this.stockReturns.triggerReturnRequests(clientId, id).catch((err) =>
+        this.logger.warn(`[F3Returns] trigger failed project=${id}: ${err.message}`),
+      );
+    }
+
+    return updated;
   }
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
