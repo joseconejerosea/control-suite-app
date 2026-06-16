@@ -14,7 +14,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://dev-api.controlsuitte.com}
     container_name: controlsuite-frontend-${ENV:-dev}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
