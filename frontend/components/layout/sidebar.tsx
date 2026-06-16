@@ -8,7 +8,7 @@ import {
   FileText, UserCircle, Zap, Building2, ChevronRight,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
-  Settings,
+  Settings, CalendarDays,
 } from "lucide-react";
 
 const CLIENT_SECTIONS = [
@@ -19,6 +19,7 @@ const CLIENT_SECTIONS = [
     { label: "Inventario POP", icon: Package, href: "/client/inventario" },
     { label: "Rendiciones", icon: Receipt, href: "/client/rendiciones" },
     { label: "Terreno", icon: Radio, href: "/client/terreno" },
+    { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
     { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
     { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
     { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
@@ -56,6 +57,7 @@ const SUPER_ADMIN_ITEMS = [
   { label: "Monitoreo", icon: Activity, href: "/admin/monitoring" },
   { label: "Tickets", icon: Bell, href: "/admin/tickets" },
   { label: "Auditoría AI", icon: ShieldCheck, href: "/admin/audit" },
+  { label: "Usuarios", icon: UserCircle, href: "/admin/usuarios" },
 ];
 
 export default function Sidebar() {

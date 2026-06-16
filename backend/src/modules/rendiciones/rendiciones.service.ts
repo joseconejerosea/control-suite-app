@@ -12,12 +12,17 @@ import {
   MarcarPagadaDto,
   RendicionFiltersDto,
 } from './dto/rendicion.dto';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import PDFDocument from 'pdfkit';
 
 @Injectable()
 export class RendicionesService {
   private readonly logger = new Logger(RendicionesService.name);
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly wa: WhatsAppService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // Agrupación automática: llamado desde F1 persist processor
@@ -146,6 +151,59 @@ export class RendicionesService {
         [rendicionId, excede, pct],
       );
       this.logger.warn(`[F2] Rendición ${rendicionId} excede presupuesto en $${excede.toLocaleString('es-CL')}`);
+
+      await this.notifyBudgetExceeded(clientId, projectId, rendicionId, pct ?? 0, excede);
+    }
+  }
+
+  private async notifyBudgetExceeded(
+    clientId: string,
+    projectId: string,
+    rendicionId: string,
+    pct: number,
+    excedeClp: number,
+  ): Promise<void> {
+    try {
+      const proj = await this.ds.query(
+        `SELECT name FROM projects WHERE id = $1`, [projectId],
+      );
+      const projectName = proj[0]?.name ?? 'Sin nombre';
+
+      // Dashboard alert via mind_propuestas
+      await this.ds.query(
+        `INSERT INTO mind_propuestas
+           (client_id, tipo, titulo, descripcion, datos_soporte, prioridad, estado, created_at)
+         VALUES ($1, 'alerta_presupuesto', $2, $3, $4::jsonb, 'alta', 'pendiente', NOW())
+         ON CONFLICT DO NOTHING`,
+        [
+          clientId,
+          `Presupuesto excedido: ${projectName}`,
+          `La rendición supera el presupuesto del proyecto en $${Math.round(excedeClp).toLocaleString('es-CL')} CLP (${pct.toFixed(1)}% del budget). Requiere aprobación manual.`,
+          JSON.stringify({
+            project_id: projectId,
+            rendicion_id: rendicionId,
+            porcentaje: pct,
+            excede_clp: excedeClp,
+          }),
+        ],
+      ).catch(() => {});
+
+      // WhatsApp notification to admin
+      const admins = await this.ds.query(
+        `SELECT u.phone, u.language FROM users u
+         WHERE u.client_id = $1 AND u.role = 'admin_cliente' AND u.phone IS NOT NULL`,
+        [clientId],
+      ).catch(() => []);
+
+      for (const admin of admins) {
+        if (!admin.phone) continue;
+        const msg = admin.language === 'en'
+          ? `Budget alert: Project "${projectName}" exceeded budget by $${Math.round(excedeClp).toLocaleString('es-CL')} CLP (${pct.toFixed(1)}%). Manual approval required.`
+          : `Alerta presupuesto: Proyecto "${projectName}" excede el budget en $${Math.round(excedeClp).toLocaleString('es-CL')} CLP (${pct.toFixed(1)}%). Requiere aprobación manual.`;
+        await this.wa.sendText(admin.phone, msg).catch(() => {});
+      }
+    } catch (err: any) {
+      this.logger.warn(`[F2] Budget notification failed: ${err.message}`);
     }
   }
 
@@ -249,6 +307,96 @@ export class RendicionesService {
       [clientId],
     );
     return res[0];
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Export PDF
+  // ─────────────────────────────────────────────────────────────────────────
+  async exportPdf(clientId: string, id: string): Promise<Buffer> {
+    const rendicion = await this.findOne(clientId, id);
+    const items = rendicion.items ?? [];
+
+    const clientRows = await this.ds.query(
+      `SELECT nombre FROM clients WHERE id = $1`, [clientId],
+    ).catch(() => []);
+    const clientName = clientRows[0]?.nombre ?? 'Cliente';
+
+    const personaRows = await this.ds.query(
+      `SELECT full_name FROM users WHERE id = $1
+       UNION ALL SELECT CONCAT(nombre, ' ', apellido) FROM promoters WHERE id = $1
+       LIMIT 1`,
+      [rendicion.persona_id],
+    ).catch(() => []);
+    const personaName = personaRows[0]?.full_name ?? personaRows[0]?.concat ?? rendicion.persona_id?.slice(0, 8) ?? '—';
+
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      // Header
+      doc.fontSize(18).text('Rendición de Gastos', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#666')
+        .text(`Control Suite · ${clientName}`, { align: 'center' });
+      doc.moveDown(1.5);
+
+      // Info
+      doc.fillColor('#000').fontSize(11);
+      doc.text(`Período: ${rendicion.periodo}`);
+      doc.text(`Proyecto: ${rendicion.project_name ?? '—'}`);
+      doc.text(`Persona: ${personaName}`);
+      doc.text(`Estado: ${rendicion.estado.toUpperCase()}`);
+      doc.text(`Total: $${Number(rendicion.monto_total).toLocaleString('es-CL')} CLP`);
+      if (rendicion.porcentaje_presupuesto) {
+        doc.text(`% Presupuesto: ${Number(rendicion.porcentaje_presupuesto).toFixed(1)}%`);
+      }
+      doc.moveDown(1);
+
+      // Table header
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#ccc');
+      doc.moveDown(0.3);
+      const headerY = doc.y;
+      doc.fontSize(9).fillColor('#666');
+      doc.text('Fecha', 50, headerY, { width: 80 });
+      doc.text('Proveedor', 130, headerY, { width: 180 });
+      doc.text('Categoría', 310, headerY, { width: 100 });
+      doc.text('Monto', 420, headerY, { width: 120, align: 'right' });
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#ccc');
+      doc.moveDown(0.3);
+
+      // Rows
+      doc.fillColor('#000').fontSize(9);
+      for (const item of items) {
+        if (doc.y > 720) {
+          doc.addPage();
+        }
+        const rowY = doc.y;
+        doc.text(item.invoice_date ?? '—', 50, rowY, { width: 80 });
+        doc.text(item.vendor_name ?? item.descripcion ?? '—', 130, rowY, { width: 180 });
+        doc.text(item.category ?? '—', 310, rowY, { width: 100 });
+        doc.text(`$${Number(item.monto).toLocaleString('es-CL')}`, 420, rowY, { width: 120, align: 'right' });
+        doc.moveDown(0.6);
+      }
+
+      // Footer line
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#ccc');
+      doc.moveDown(0.5);
+      doc.fontSize(11).text(
+        `TOTAL: $${Number(rendicion.monto_total).toLocaleString('es-CL')} CLP`,
+        { align: 'right' },
+      );
+
+      doc.moveDown(2);
+      doc.fontSize(8).fillColor('#999')
+        .text(`Generado por Control Suite · ${new Date().toLocaleDateString('es-CL')}`, { align: 'center' });
+
+      doc.end();
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────

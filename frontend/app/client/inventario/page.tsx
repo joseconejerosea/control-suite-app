@@ -5,7 +5,7 @@ import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 import { Plus, X, Package, Warehouse, ArrowLeftRight } from "lucide-react";
 
-const TABS = ["Bodega", "SKUs", "Movimientos"];
+const TABS = ["Bodega", "SKUs", "Movimientos", "Devoluciones"];
 
 const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
   ok:      { background: "rgba(42,157,92,0.12)",  color: "#34b96e" },
@@ -195,6 +195,10 @@ export default function InventarioPage() {
   const [showSkuModal, setShowSkuModal] = useState(false);
   const [showMovModal, setShowMovModal] = useState(false);
   const [alertas, setAlertas] = useState<any[]>([]);
+  const [devoluciones, setDevoluciones] = useState<any[]>([]);
+  const [rejectModal, setRejectModal] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchAll = () => {
     setLoading(true);
@@ -204,12 +208,14 @@ export default function InventarioPage() {
       api.get<any>("/bodegas").catch(() => []),
       api.get<any>("/skus").catch(() => []),
       api.get<any>("/skus/alertas-stock").catch(() => []),
-    ]).then(([inv, mov, bod, sk, al]) => {
+      api.get<any>("/v1/app/stock/returns/pending").catch(() => []),
+    ]).then(([inv, mov, bod, sk, al, dev]) => {
       setInventario(Array.isArray(inv) ? inv : (inv?.data ?? []));
       setMovimientos(Array.isArray(mov) ? mov : (mov?.data ?? []));
       setBodegas(Array.isArray(bod) ? bod : (bod?.data ?? []));
       setSkus(Array.isArray(sk) ? sk : (sk?.data ?? []));
       setAlertas(Array.isArray(al) ? al : (al?.data ?? []));
+      setDevoluciones(Array.isArray(dev) ? dev : (dev?.data ?? []));
     }).catch(console.error).finally(() => setLoading(false));
   };
 
@@ -369,6 +375,97 @@ export default function InventarioPage() {
               </table>
             </div>
           )
+        )}
+
+        {/* TAB: DEVOLUCIONES */}
+        {!loading && activeTab === "Devoluciones" && (
+          devoluciones.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "64px 0", color: "var(--muted-foreground)" }}>
+              Sin devoluciones pendientes
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {devoluciones.map((d: any) => {
+                const hours = Math.floor(parseFloat(d.hours_since_request ?? 0));
+                const isOverdue = hours >= 24;
+                const items = typeof d.items === "string" ? JSON.parse(d.items) : (d.items ?? []);
+                const classLabel = d.photo_classification === "looks_correct"
+                  ? { text: "Coincide", bg: "rgba(42,157,92,0.12)", color: "#34b96e" }
+                  : d.photo_classification === "does_not_match"
+                  ? { text: "No coincide", bg: "rgba(200,32,44,0.12)", color: "#e8353f" }
+                  : { text: "Sin foto", bg: "rgba(100,116,139,0.12)", color: "#94a3b8" };
+
+                return (
+                  <div key={d.id} className="rounded-xl border p-4" style={{ borderColor: isOverdue ? "rgba(200,32,44,0.4)" : "var(--border)", background: "var(--card)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div className="font-semibold text-sm">{d.project_name}</div>
+                        <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>
+                          Persona: {d.persona_id?.slice(0, 8)}... · Solicitado hace {hours}h
+                          {isOverdue && <span style={{ color: "#e8353f", fontWeight: 600, marginLeft: 8 }}>VENCIDO</span>}
+                        </div>
+                        <div className="mt-2 text-xs space-y-0.5">
+                          {items.map((it: any, i: number) => (
+                            <div key={i} style={{ color: "var(--muted-foreground)" }}>
+                              {it.sku_nombre} ({it.codigo}): <span style={{ fontWeight: 600, color: "var(--foreground)" }}>{it.pendiente} uds</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                        <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: classLabel.bg, color: classLabel.color }}>
+                          {classLabel.text}
+                        </span>
+                        {d.has_photo && (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              disabled={actionLoading}
+                              onClick={async () => {
+                                setActionLoading(true);
+                                try { await api.put(`/v1/app/stock/returns/${d.id}/confirm`); fetchAll(); } catch (e) { console.error(e); }
+                                finally { setActionLoading(false); }
+                              }}
+                              style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: "rgba(42,157,92,0.15)", color: "#34b96e", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              Confirmar
+                            </button>
+                            <button
+                              onClick={() => { setRejectModal(d.id); setRejectReason(""); }}
+                              style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: "rgba(200,32,44,0.15)", color: "#e8353f", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              Rechazar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* Reject reason modal */}
+        {rejectModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setRejectModal(null)}>
+            <div className="rounded-2xl border p-6 w-full max-w-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={e => e.stopPropagation()}>
+              <h3 className="font-bold mb-3">Motivo de rechazo</h3>
+              <input value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Foto no coincide con material..."
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", marginBottom: 12 }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setRejectModal(null)} style={{ flex: 1, padding: 9, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
+                <button
+                  disabled={actionLoading}
+                  onClick={async () => {
+                    setActionLoading(true);
+                    try { await api.put(`/v1/app/stock/returns/${rejectModal}/reject`, { reason: rejectReason }); setRejectModal(null); fetchAll(); } catch (e) { console.error(e); }
+                    finally { setActionLoading(false); }
+                  }}
+                  style={{ flex: 2, padding: 9, borderRadius: 8, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
+                  {actionLoading ? "..." : "Rechazar"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </AppShell>

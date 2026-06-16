@@ -37,6 +37,24 @@ export default function RendicionesPage() {
 
   useEffect(() => { fetchData(); }, [filtroEstado]);
 
+  const exportPdf = async (id: string) => {
+    try {
+      const token = localStorage.getItem("cs_token");
+      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+      const res = await fetch(`${base}/api/rendiciones/${id}/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Error al exportar");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rendicion-${id.slice(0, 8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); }
+  };
+
   const action = async (id: string, endpoint: string) => {
     setActionLoading(true);
     try {
@@ -177,6 +195,10 @@ export default function RendicionesPage() {
                       </button>
                     </>
                   )}
+                  <button onClick={() => exportPdf(selected.id)} className="text-sm px-3 py-2 rounded-lg font-semibold"
+                    style={{ background: "var(--secondary)", color: "var(--foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>
+                    PDF
+                  </button>
                   <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20, marginLeft: 4 }}>✕</button>
                 </div>
               </div>

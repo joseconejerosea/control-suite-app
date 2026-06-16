@@ -6,6 +6,7 @@ import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
 
 export interface ProjectSummary {
   project_id:       string;
@@ -33,6 +34,7 @@ export class ProjectsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly stockReturns: StockReturnsService,
   ) {
     this.repo = new TenantRepository<Project>(dataSource, Project);
   }
@@ -69,7 +71,7 @@ export class ProjectsService {
     if (nextStart && nextEnd && nextStart > nextEnd) {
       throw new BadRequestException('start_date cannot be after end_date');
     }
-    return this.repo.update(clientId, id, {
+    const updated = await this.repo.update(clientId, id, {
       name:        dto.name        ?? existing.name,
       description: dto.description ?? existing.description,
       status:      dto.status      ?? existing.status,
@@ -78,6 +80,14 @@ export class ProjectsService {
       budget:      dto.budget      ?? existing.budget,
       config:      dto.config      ?? existing.config,
     });
+
+    if (dto.status === 'closed' && existing.status !== 'closed') {
+      this.stockReturns.triggerReturnRequests(clientId, id).catch((err) =>
+        this.logger.warn(`[F3Returns] trigger failed project=${id}: ${err.message}`),
+      );
+    }
+
+    return updated;
   }
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
@@ -297,6 +307,91 @@ export class ProjectsService {
        WHERE id=$2 AND client_id=$3 AND proyecto_id=$4`,
       [estado, convId, clientId, projectId],
     );
+    return { ok: true };
+  }
+
+  async getReemplazos(
+    clientId:  string,
+    projectId: string,
+    convId:    string,
+  ): Promise<{ sugeridos: unknown[] }> {
+    const [conv] = await this.dataSource.query(
+      `SELECT persona_id, dia FROM convocatorias WHERE id=$1 AND client_id=$2 AND proyecto_id=$3`,
+      [convId, clientId, projectId],
+    );
+    if (!conv) throw new NotFoundException('Convocatoria no encontrada');
+
+    const sugeridos = await this.dataSource.query(
+      `SELECT p.id, p.name, p.phone, p.skills
+       FROM promoters p
+       WHERE p.client_id = $1
+         AND p.active = true
+         AND p.id != $2
+         AND p.id NOT IN (
+           SELECT c.persona_id FROM convocatorias c
+           WHERE c.client_id = $1 AND c.dia = $3
+             AND c.estado NOT IN ('rechazada', 'no_show')
+         )
+       ORDER BY p.name
+       LIMIT 10`,
+      [clientId, conv.persona_id, conv.dia],
+    );
+
+    return { sugeridos };
+  }
+
+  async asignarReemplazo(
+    clientId:   string,
+    projectId:  string,
+    convId:     string,
+    newPersonaId: string,
+  ): Promise<{ ok: boolean }> {
+    const [conv] = await this.dataSource.query(
+      `SELECT dia, local_nombre, local_direccion FROM convocatorias
+       WHERE id=$1 AND client_id=$2 AND proyecto_id=$3`,
+      [convId, clientId, projectId],
+    );
+    if (!conv) throw new NotFoundException('Convocatoria no encontrada');
+
+    await this.dataSource.query(
+      `UPDATE convocatorias SET estado='reemplazada', updated_at=NOW() WHERE id=$1`,
+      [convId],
+    );
+
+    await this.dataSource.query(
+      `INSERT INTO proyecto_equipo (client_id, proyecto_id, persona_id, rol)
+       VALUES ($1,$2,$3,'Promotor')
+       ON CONFLICT (client_id, proyecto_id, persona_id) DO NOTHING`,
+      [clientId, projectId, newPersonaId],
+    );
+
+    await this.dataSource.query(
+      `INSERT INTO convocatorias
+         (client_id, proyecto_id, persona_id, dia, local_nombre, local_direccion, estado)
+       VALUES ($1,$2,$3,$4,$5,$6,'pendiente')`,
+      [clientId, projectId, newPersonaId, conv.dia, conv.local_nombre, conv.local_direccion],
+    );
+
+    const [promotor] = await this.dataSource.query(
+      `SELECT name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
+      [newPersonaId, clientId],
+    ).catch(() => []);
+
+    if (promotor?.phone) {
+      const [proyecto] = await this.dataSource.query(
+        `SELECT name FROM projects WHERE id=$1`, [projectId],
+      );
+      await this.wa.enviarConvocatoria({
+        telefono:       promotor.phone,
+        nombrePromotor: promotor.name,
+        proyecto:       proyecto?.name ?? '',
+        fecha:          conv.dia,
+        local:          conv.local_nombre ?? 'Por confirmar',
+        direccion:      conv.local_direccion ?? 'Por confirmar',
+      });
+    }
+
+    this.logger.log(`[F4] Reemplazo asignado conv=${convId} → persona=${newPersonaId}`);
     return { ok: true };
   }
 }

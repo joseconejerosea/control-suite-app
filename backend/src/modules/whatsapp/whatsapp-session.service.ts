@@ -12,6 +12,14 @@ export interface WhatsAppSession {
   canalId: string | null;
   lastProjectId?: string | null;
   updatedAt: string;
+  // Clarification flow
+  clarification?: {
+    eventoCrudoId: string;
+    type: 'project' | 'data';
+    attempts: number;
+    pendingFields?: string[];
+    options?: { id: string; label: string }[];
+  } | null;
 }
 
 const PREFIX = 'wa:session:';

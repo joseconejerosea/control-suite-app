@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Job } from 'bullmq';
 import { SheetsService } from '../../sheets/sheets.service';
+import { RendicionesService } from '../../rendiciones/rendiciones.service';
 
 @Processor('persist')
 export class PersistProcessor extends WorkerHost {
@@ -12,6 +13,7 @@ export class PersistProcessor extends WorkerHost {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly sheetsService: SheetsService,
+    private readonly rendicionesService: RendicionesService,
   ) {
     super();
   }
@@ -77,6 +79,23 @@ export class PersistProcessor extends WorkerHost {
 
       this.logger.log(`[F1Persist] Invoice created: ${invoiceId} from evento: ${evento_crudo_id}`);
 
+      // ─── f2-rendicion: agrupar gasto en rendición semanal ─────────────────
+      if (category === 'expense') {
+        try {
+          const projectId = classification.proyecto_id_sugerido
+            ?? (typeof payload === 'object' ? payload?.project_id : null)
+            ?? null;
+          const personaId = await this.resolvePersonaId(client_id, payload, canal);
+          if (personaId) {
+            await this.rendicionesService.asignarFacturaARendicion(
+              client_id, invoiceId, personaId, projectId, amount, invoiceDate,
+            );
+          }
+        } catch (err: any) {
+          this.logger.warn(`[F1Persist] F2 rendición assignment failed: ${err.message}`);
+        }
+      }
+
       // ─── f1-sheets-export ─────────────────────────────────────────────────
       await this.sheetsService.exportInvoice(client_id, {
         id: invoiceId,
@@ -110,6 +129,42 @@ export class PersistProcessor extends WorkerHost {
       );
       throw err;
     }
+  }
+
+  private async resolvePersonaId(
+    clientId: string,
+    payload: any,
+    canal: string,
+  ): Promise<string | null> {
+    const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone) : null;
+    const email = typeof payload === 'object' ? payload?.email_from : null;
+
+    if (phone) {
+      const rows = await this.dataSource.query(
+        `SELECT id FROM promoters WHERE client_id = $1 AND phone = $2 LIMIT 1`,
+        [clientId, phone],
+      ).catch(() => []);
+      if (rows.length) return rows[0].id;
+    }
+
+    if (email) {
+      const rows = await this.dataSource.query(
+        `SELECT id FROM users WHERE client_id = $1 AND email = $2 LIMIT 1`,
+        [clientId, email],
+      ).catch(() => []);
+      if (rows.length) return rows[0].id;
+    }
+
+    if (canal === 'whatsapp' && phone) {
+      const rows = await this.dataSource.query(
+        `SELECT id FROM collaborators WHERE client_id = $1 AND phone = $2 LIMIT 1`,
+        [clientId, phone],
+      ).catch(() => []);
+      if (rows.length) return rows[0].id;
+    }
+
+    this.logger.warn(`[F1Persist] Could not resolve persona_id for canal=${canal}`);
+    return null;
   }
 
   private async sendNotification(opts: {

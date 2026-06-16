@@ -155,4 +155,28 @@ export class ProjectsController {
   ) {
     return this.service.updateConvocatoria(req.user.client_id, id, convId, dto.estado);
   }
+
+  // ── F4: Reemplazos ────────────────────────────────────────────────────────
+
+  @Get(':id/convocatorias/:convId/reemplazos')
+  @Roles('admin_cliente', 'super_admin')
+  getReemplazos(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('convId', ParseUUIDPipe) convId: string,
+  ) {
+    return this.service.getReemplazos(req.user.client_id, id, convId);
+  }
+
+  @Post(':id/convocatorias/:convId/reemplazar')
+  @Roles('admin_cliente', 'super_admin')
+  @AuditAction({ action: 'REPLACE_CONVOCATION', entity: 'Convocatoria' })
+  asignarReemplazo(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('convId', ParseUUIDPipe) convId: string,
+    @Body('persona_id') personaId: string,
+  ) {
+    return this.service.asignarReemplazo(req.user.client_id, id, convId, personaId);
+  }
 }

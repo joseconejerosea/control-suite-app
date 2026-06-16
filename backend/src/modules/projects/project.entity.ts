@@ -5,7 +5,7 @@ import {
 } from 'typeorm';
 import { TenantBaseEntity } from '../../common/entities/tenant-base.entity';
 
-export type ProjectStatus = 'active' | 'paused' | 'archived';
+export type ProjectStatus = 'active' | 'paused' | 'archived' | 'closed';
 
 @Entity({ name: 'projects' })
 @Index('IDX_PROJECTS_STATUS', ['status'])
