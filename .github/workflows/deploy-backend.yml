@@ -36,6 +36,7 @@ jobs:
               ALLOWED_ORIGIN="${{ secrets.PROD_ALLOWED_ORIGIN }}"
               SUPABASE_URL="${{ secrets.PROD_SUPABASE_URL }}"
               SUPABASE_SERVICE_ROLE_KEY="${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}"
+              ANTHROPIC_API_KEY="${{ secrets.PROD_ANTHROPIC_API_KEY }}"
               ENV_LABEL="prod"
               FRONTEND_PORT=3100
               NEXT_PUBLIC_API_URL="https://api.controlsuitte.com"
@@ -52,9 +53,10 @@ jobs:
               ALLOWED_ORIGIN="${{ secrets.DEV_ALLOWED_ORIGIN }}"
               SUPABASE_URL="${{ secrets.DEV_SUPABASE_URL }}"
               SUPABASE_SERVICE_ROLE_KEY="${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}"
+              ANTHROPIC_API_KEY="${{ secrets.DEV_ANTHROPIC_API_KEY }}"
               ENV_LABEL="dev"
               FRONTEND_PORT=3000
-              NEXT_PUBLIC_API_URL="http://dev-api.controlsuitte.com"
+              NEXT_PUBLIC_API_URL="https://dev-api.controlsuitte.com"
             fi
 
             cd "$DIR"
@@ -83,7 +85,7 @@ jobs:
             AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
             AI_MODEL=gpt-4o-mini
             AI_MAX_TOKENS=4096
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
             META_APP_SECRET=${{ secrets.META_APP_SECRET }}
             WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
             WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
