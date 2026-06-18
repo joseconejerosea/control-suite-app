@@ -98,7 +98,11 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación (cada uno)**: test "A no toca recurso de B" para ese endpoint; revisión de la query final.
 - **Rollback**: por commit.
 
-### 1.6 Colisión de teléfono cross-tenant
+### 1.6 Colisión de teléfono cross-tenant — ✅ HECHO
+- `whatsapp.webhook.controller.ts` `handleConvocatoriaReply`: ahora recibe `clientId` (enhebrado desde `handleText`); UPDATE de convocatorias scopeado `WHERE client_id=$4 AND persona_id IN (SELECT id FROM promoters WHERE phone=$3 AND client_id=$4 ...)`.
+- `classify.processor.ts` `getUserLanguage(phoneNumber, clientId)` (del job) + `AND p.client_id=$2`.
+- `clarification.service.ts` `getUserLanguage(phoneNumber, clientId)` + `AND p.client_id=$2`; 3 llamadores pasan `session.clientId`/`clientId`.
+- Paths de webhook/job (no request-reachable), severidad MEDIA/MINOR. Sin test dedicado (requiere simular webhook WA + 2 tenants con mismo phone); verificado por revisión + suite 19/19 sin regresión + grep confirmó cero llamadores sin clientId.
 - **Archivos**: `whatsapp.webhook.controller.ts:506`, `clarification.service.ts:178`, `classify.processor.ts:270`.
 - **Qué**: agregar `client_id` al match por `phone` (el tenant ya se conoce por el mapping del canal/job).
 - **Verificación**: revisión; (opcional) test con dos tenants compartiendo teléfono.
@@ -110,7 +114,7 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación**: el modelo no puede emitir SQL que lea otra tabla/tenant; tests de intento de fuga.
 - **Rollback**: por commit. *(Se puede diferir si se prioriza, pero queda explícito como pendiente crítico.)*
 
-**Salida de Fase 1** — ✅ COMPLETA (1.1–1.5). Cero fugas request-reachable conocidas. 19 tests e2e verde (7 suites), cada fix request-reachable probado RED→GREEN. Pendiente 1.7 (mind-chat AI-SQL, sub-plan crítico aparte). Bugs bonus descubiertos: bodegas update() shape de retorno, users.phone inexistente (resolvePhone + support.broadcast), nombre/apellido inexistente en promoters (rendiciones export), patrón `.catch(()=>[])` enmascara errores.
+**Salida de Fase 1** — 🚧 1.1–1.5 ✅ HECHOS. FALTAN 1.6 (colisión de teléfono) y 1.7 (mind-chat AI-SQL). Cero fugas request-reachable conocidas. 19 tests e2e verde (7 suites), cada fix request-reachable probado RED→GREEN. Pendiente 1.7 (mind-chat AI-SQL, sub-plan crítico aparte). Bugs bonus descubiertos: bodegas update() shape de retorno, users.phone inexistente (resolvePhone + support.broadcast), nombre/apellido inexistente en promoters (rendiciones export), patrón `.catch(()=>[])` enmascara errores.
 
 ---
 

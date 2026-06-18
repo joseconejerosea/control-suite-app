@@ -155,7 +155,7 @@ export class ClassifyProcessor extends WorkerHost {
               [client_id],
             );
             if (activeProjects.length > 1) {
-              const userLang = await this.getUserLanguage(phoneNumber);
+              const userLang = await this.getUserLanguage(phoneNumber, client_id);
               await this.clarificationService.requestProjectClarification({
                 eventoCrudoId: evento_crudo_id,
                 clientId: client_id,
@@ -266,12 +266,12 @@ Responde SOLO con este JSON:
     return JSON.parse(cleaned);
   }
 
-  private async getUserLanguage(phoneNumber: string): Promise<string> {
+  private async getUserLanguage(phoneNumber: string, clientId: string): Promise<string> {
     const rows = await this.dataSource.query(
       `SELECT u.language FROM users u
        JOIN promoters p ON p.client_id = u.client_id
-       WHERE p.phone = $1 LIMIT 1`,
-      [phoneNumber],
+       WHERE p.phone = $1 AND p.client_id = $2 LIMIT 1`,
+      [phoneNumber, clientId],
     ).catch(() => []);
     return rows[0]?.language ?? 'es';
   }

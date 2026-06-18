@@ -104,7 +104,7 @@ export class ClarificationService {
 
       await this.sessions.set(phoneNumber, session);
 
-      const language = await this.getUserLanguage(phoneNumber);
+      const language = await this.getUserLanguage(phoneNumber, session.clientId);
       const retryMsg = language === 'en'
         ? `Invalid option. Please reply with a number between 1 and ${options.length}. Last attempt.`
         : `Opción inválida. Responde con un número entre 1 y ${options.length}. Último intento.`;
@@ -140,7 +140,7 @@ export class ClarificationService {
       canal: 'whatsapp',
     }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
 
-    const language = await this.getUserLanguage(phoneNumber);
+    const language = await this.getUserLanguage(phoneNumber, session.clientId);
     const confirmMsg = language === 'en'
       ? `Assigned to "${selected.label.replace(/^\d+\.\s*/, '')}". Processing...`
       : `Asignado a "${selected.label.replace(/^\d+\.\s*/, '')}". Procesando...`;
@@ -165,7 +165,7 @@ export class ClarificationService {
       ],
     );
 
-    const language = await this.getUserLanguage(phoneNumber);
+    const language = await this.getUserLanguage(phoneNumber, clientId);
     const msg = language === 'en'
       ? 'I will forward this to an operator for manual review. Thank you.'
       : 'Voy a derivar esto a un operador para revisión manual. Gracias.';
@@ -174,13 +174,13 @@ export class ClarificationService {
     this.logger.warn(`[Clarification] Escalated evento ${eventoCrudoId} after ${MAX_ATTEMPTS} failed attempts`);
   }
 
-  private async getUserLanguage(phoneNumber: string): Promise<string> {
+  private async getUserLanguage(phoneNumber: string, clientId: string): Promise<string> {
     const rows = await this.ds.query(
       `SELECT u.language FROM users u
        JOIN promoters p ON p.client_id = u.client_id
-       WHERE p.phone = $1
+       WHERE p.phone = $1 AND p.client_id = $2
        LIMIT 1`,
-      [phoneNumber],
+      [phoneNumber, clientId],
     ).catch(() => []);
     return rows[0]?.language ?? 'es';
   }

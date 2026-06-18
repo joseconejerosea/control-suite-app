@@ -446,11 +446,11 @@ export class WhatsAppWebhookController {
     }
 
     if (/^s[ií]$/i.test(text)) {
-      await this.handleConvocatoriaReply(from, 'si');
+      await this.handleConvocatoriaReply(from, 'si', clientId);
       return;
     }
     if (/^no$/i.test(text)) {
-      await this.handleConvocatoriaReply(from, 'no');
+      await this.handleConvocatoriaReply(from, 'no', clientId);
       return;
     }
 
@@ -496,7 +496,7 @@ export class WhatsAppWebhookController {
 
   // ── Convocation reply (F4) ────────────────────────────────────────────────
 
-  private async handleConvocatoriaReply(from: string, reply: 'si' | 'no') {
+  private async handleConvocatoriaReply(from: string, reply: 'si' | 'no', clientId: string) {
     const estado   = reply === 'si' ? 'confirmada' : 'rechazada';
     const texto    = reply === 'si' ? 'SI - Confirmado' : 'NO - Rechazado';
     const replyMsg = reply === 'si'
@@ -506,10 +506,10 @@ export class WhatsAppWebhookController {
     await this.ds.query(
       `UPDATE convocatorias
        SET estado=$1, respuesta_texto=$2, respuesta_at=NOW(), updated_at=NOW()
-       WHERE persona_id IN (
-         SELECT id FROM promoters WHERE phone=$3 LIMIT 1
+       WHERE client_id=$4 AND persona_id IN (
+         SELECT id FROM promoters WHERE phone=$3 AND client_id=$4 LIMIT 1
        ) AND estado='pendiente'`,
-      [estado, texto, from],
+      [estado, texto, from, clientId],
     ).catch(() => {});
 
     await this.wa.sendText(from, replyMsg);
