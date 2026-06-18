@@ -36,8 +36,15 @@ export class AuthGuard implements CanActivate {
 
     try {
       const secret = this.configService.get<string>('JWT_SECRET');
-      const decoded = jwt.verify(token, secret) as JwtPayload;
-      request.user = decoded;
+      const decoded = jwt.verify(token, secret, {
+        algorithms: ['HS256'],
+      }) as JwtPayload;
+
+      // Single source of truth for the tenant id. Tokens carry `client_id`
+      // (snake_case); some older code/tokens used `clientId`. Normalise both so
+      // no consumer can read an undefined tenant id and silently drop the filter.
+      const clientId = decoded.client_id ?? decoded.clientId;
+      request.user = { ...decoded, client_id: clientId, clientId };
       return true;
     } catch (err) {
       throw new UnauthorizedException('Invalid token');
