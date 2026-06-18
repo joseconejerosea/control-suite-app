@@ -108,13 +108,14 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación**: revisión; (opcional) test con dos tenants compartiendo teléfono.
 - **Rollback**: por archivo.
 
-### 1.7 `mind-chat:277` — SQL generado por IA  *(sub-plan propio, NO un parche)*
+### 1.7 `mind-chat:277` — SQL generado por IA  ✅ HECHO  *(sub-plan propio, NO un parche)*
 - **Qué**: NO ejecutar SQL libre del modelo. Reemplazar por un set fijo de queries parametrizadas seleccionables por clave, con `AND client_id = $1` forzado server-side.
 - **Por qué**: es el agujero más grave; un `AND client_id` opcional no alcanza.
-- **Verificación**: el modelo no puede emitir SQL que lea otra tabla/tenant; tests de intento de fuga.
-- **Rollback**: por commit. *(Se puede diferir si se prioriza, pero queda explícito como pendiente crítico.)*
+- **Hecho**: tool `query_operaciones(sql)` → `consultar_datos(query_key)` con `query_key` enum cerrado (14 claves). `QUERY_CATALOG` exportado: cada SQL trae `client_id = $1` HARDCODEADO (único parámetro). Eliminados `executeReadOnlyQuery`, `ALLOWED_TABLES` y la regex/`includes` burlables (writable-CTE bypass + whitelist por substring). `executeCatalogQuery` rechaza key inválida. System prompt regla 5 actualizada.
+- **Verificación**: ✅ `test/tenant-isolation-mind-chat.e2e-spec.ts` (7 tests): invariante estructural (todo SQL del catálogo tiene `client_id = $1` y sólo `$1`), key inválida rechazada, las 14 queries corren contra esquema real sin fuga de marcadores del tenant B, + 4 leak checks puntuales. RED→GREEN confirmado (break-and-restore de una entrada del catálogo).
+- **Rollback**: por commit.
 
-**Salida de Fase 1** — 🚧 1.1–1.5 ✅ HECHOS. FALTAN 1.6 (colisión de teléfono) y 1.7 (mind-chat AI-SQL). Cero fugas request-reachable conocidas. 19 tests e2e verde (7 suites), cada fix request-reachable probado RED→GREEN. Pendiente 1.7 (mind-chat AI-SQL, sub-plan crítico aparte). Bugs bonus descubiertos: bodegas update() shape de retorno, users.phone inexistente (resolvePhone + support.broadcast), nombre/apellido inexistente en promoters (rendiciones export), patrón `.catch(()=>[])` enmascara errores.
+**Salida de Fase 1** — ✅ COMPLETA. 1.1–1.7 HECHOS. Cero fugas request-reachable conocidas. **26 tests e2e verde (8 suites)**, cada fix request-reachable probado RED→GREEN. Bugs bonus descubiertos: bodegas update() shape de retorno, users.phone inexistente (resolvePhone + support.broadcast), nombre/apellido inexistente en promoters (rendiciones export), patrón `.catch(()=>[])` enmascara errores.
 
 ---
 
