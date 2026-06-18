@@ -44,6 +44,7 @@ import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { StorageModule } from './common/storage/storage.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { ProjectResolverModule } from './modules/project-resolver/project-resolver.module';
 import { F1ReviewModule } from './modules/f1-review/f1-review.module';
 import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module';
@@ -105,6 +106,9 @@ import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module
     { provide: APP_GUARD, useClass: AuthGuard },
     // Brief Rule 09: isolation check runs after user is set
     { provide: APP_GUARD, useClass: ClientIsolationGuard },
+    // Tenant binding (Fase 2 · E4a) — el MÁS externo: abre la tx con
+    // app.current_tenant antes que cualquier otro interceptor (incl. audit).
+    { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })

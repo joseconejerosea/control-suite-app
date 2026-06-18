@@ -12,6 +12,8 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { SanitizeInputPipe } from './common/pipes/sanitize-input.pipe';
 import { winstonLogger } from './common/logger/winston.config';
+import { DataSource } from 'typeorm';
+import { installTenantQueryRouting } from './common/tenant/tenant-context';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -21,6 +23,11 @@ async function bootstrap() {
   );
 
   app.enableShutdownHooks();
+
+  // Fase 2 · E4b — rutea todo ds.query(...) al QueryRunner con el tenant seteado
+  // (vía el TenantInterceptor / runWithTenant). Sin contexto, usa la conexión
+  // normal (arranque, migraciones, jobs que aún no envuelven runWithTenant).
+  installTenantQueryRouting(app.get(DataSource));
 
   const logger = winstonLogger;
   const configService = app.get(ConfigService);

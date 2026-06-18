@@ -78,3 +78,37 @@ export function makeTenantAwareDataSource(ds: DataSource): DataSource {
     },
   });
 }
+
+const ROUTING_FLAG = Symbol.for('control-suite.tenantQueryRouting');
+
+/**
+ * Instala el ruteo tenant sobre el DataSource real mutando su método `.query`:
+ * dentro de un contexto de tenant (ALS) rutea al QueryRunner con el GUC seteado;
+ * fuera, llama al `.query` original. Así los ~511 `ds.query(...)` ya inyectados
+ * quedan tenant-aware sin tocar la inyección de dependencias de TypeORM.
+ *
+ * Elegido sobre un override de DI por ser predecible y verificable (el harness
+ * e2e no levanta AppModule). Idempotente. Devuelve una función para revertir
+ * (usada en tests). Si la llamada pasa un QueryRunner explícito (3er arg), se
+ * respeta y NO se rutea — preserva las transacciones manuales existentes.
+ */
+export function installTenantQueryRouting(ds: DataSource): () => void {
+  const anyDs = ds as any;
+  if (anyDs[ROUTING_FLAG]) return anyDs[ROUTING_FLAG];
+
+  const original = ds.query.bind(ds);
+  anyDs.query = function (this: unknown, ...args: any[]) {
+    const store = storage.getStore();
+    if (store && args.length <= 2) {
+      return store.queryRunner.query(args[0], args[1]);
+    }
+    return (original as any)(...args);
+  };
+
+  const restore = () => {
+    anyDs.query = original;
+    delete anyDs[ROUTING_FLAG];
+  };
+  anyDs[ROUTING_FLAG] = restore;
+  return restore;
+}
