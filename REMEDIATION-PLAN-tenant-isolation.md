@@ -56,7 +56,7 @@
 
 > Orden pensado para que el primer paso ya neutralice la categoría más grande.
 
-### 1.1 Unificar el shape del JWT en el AuthGuard  *(KEYSTONE — mata CAT 1 entera)*
+### 1.1 Unificar el shape del JWT en el AuthGuard  *(KEYSTONE — mata CAT 1 entera)* — ✅ HECHO (tests eventos-crudos RED→GREEN)
 - **Archivo**: `common/guards/auth.guard.ts`.
 - **Qué**: tras `jwt.verify`, normalizar:
   ```ts
@@ -68,20 +68,20 @@
 - **Verificación**: test 0.3 de eventos-crudos/canal-entrada pasa a VERDE. Login real sigue funcionando.
 - **Rollback**: revertir el archivo.
 
-### 1.2 Resolver `jwt.strategy.ts` (código muerto/roto)
+### 1.2 Resolver `jwt.strategy.ts` (código muerto/roto) — ✅ HECHO (borrado + cero refs; deps passport quedan, barrido aparte)
 - **Archivos**: `modules/auth/strategies/jwt.strategy.ts`, `modules/auth/auth.module.ts`.
 - **Qué**: confirmar que NO se usa como guard en ninguna ruta (`AuthGuard('jwt')`). Si es muerto → quitar de `providers` y borrar. Si se decide conservar passport → corregir `payload.clientId` → `payload.client_id`.
 - **Verificación**: la app arranca; ninguna ruta dependía de él.
 - **Rollback**: restaurar archivo + provider.
 
-### 1.3 Decorator `@CurrentClientId()` (accesor sancionado para código futuro)
+### 1.3 Decorator `@CurrentClientId()` (accesor sancionado para código futuro) — ✅ HECHO (fail closed)
 - **Archivo nuevo**: `common/decorators/current-client.decorator.ts`.
 - **Qué**: devuelve `request.user.client_id`; lanza `ForbiddenException('No tenant context')` si falta.
 - **Por qué**: cierra la puerta a que código nuevo vuelva a leer mal el tenant.
 - **Verificación**: usado en 1.4; falla fuerte si el token no trae tenant.
 - **Rollback**: borrar archivo.
 
-### 1.4 Hacer explícitos los controllers de CAT 1
+### 1.4 Hacer explícitos los controllers de CAT 1 — ✅ HECHO (3 controllers → @CurrentClientId; specs canal-entrada+users; users probado RED al romper; 10/10 verde)
 - **Archivos**: `users.controller.ts` (:20,:31), `eventos-crudos.controller.ts` (:28,:36,:48), `canal-entrada.controller.ts` (:32,:40,:48,:57,:66).
 - **Qué**: reemplazar `user.clientId` por `@CurrentClientId()` / `user.client_id`. (1.1 ya lo cubre, pero dejamos el código correcto e intencional, no dependiente del parche del guard.)
 - **Verificación**: tests 0.3 verdes; revisión de que no quede ningún `user.clientId` (`rg "user\.clientId|\.clientId"`).
