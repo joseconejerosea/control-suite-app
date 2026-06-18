@@ -130,23 +130,32 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación**: con `app.current_tenant` sin setear, un `SELECT` del rol de app sobre una tabla tenant devuelve **0 filas** (prueba de que RLS muerde).
 - **Rollback**: `NO FORCE` / revertir rol en config.
 
-### 2.2 Extender cobertura RLS a tablas faltantes
-- **Archivo**: nueva migración `...-ExtendRLSCoverage.ts`.
-- **Qué**: enumerar TODAS las entidades con `client_id`/`tenant_id` (barrido de `*.entity.ts` + tablas creadas en migraciones) y agregar las que faltan: `eventos_crudos`, `stock_return_requests`, `mind_propuestas` (y demás `mind_*`), `gmail_tokens`, `convocatorias`, `proyecto_equipo`, `equivalencias_ocr_cc`, `tickets`, `ai_costs_log`, `f1_reprocess_log`, etc.
-- **Verificación**: query a `pg_policies` confirma policy por cada tabla tenant; lista cruzada contra el inventario de entidades (cero faltantes).
-- **Rollback**: `down()` que dropea las nuevas policies.
+### 2.2 Extender cobertura RLS a tablas faltantes  ✅ HECHO (E3)
+- **Archivo**: `src/migrations/1700000000040-ExtendRLSCoverage.ts` (14 tablas).
+- **Grupo A (12, client_id estándar NULLIF + WITH CHECK)**: `eventos_crudos`, `stock_return_requests`, `mind_propuestas`, `mind_acciones_log`, `mind_chat_history`, `ai_costs_log`, `f1_inbound_channels`, `proyecto_equipo`, `convocatorias`, `proyecto_versiones`, `inventario`, `tickets`.
+- **Casos especiales**:
+  - `equivalencias_ocr_cc`: tiene filas GLOBALES (`client_id IS NULL`) que el OCR usa para todos (project-resolver:182, classify.processor:64). Policy `USING (client_id = tenant OR client_id IS NULL)` (globales visibles) + `WITH CHECK (client_id = tenant)` (no se pueden crear globales desde runtime). Caso real de USING ≠ WITH CHECK.
+  - `f1_reprocess_log`: NO tiene client_id → `USING/WITH CHECK (evento_crudo_id IN (SELECT id FROM eventos_crudos))`; se apoya en el RLS de eventos_crudos.
+  - `users`: EXCLUIDA a propósito. El login busca por email sin tenant (auth.service:39); con RLS nadie loguearía. Protegida app-level (Capa 1, Fase 1.4).
+- **Verificación**: ✅ `test/rls-extend-coverage.e2e-spec.ts` (5 tests) corre la migración real contra rol sin BYPASSRLS: estándar + WITH CHECK, globales visibles/no-creables, subquery f1. RED→GREEN confirmado (break de las 2 policies especiales). Cobertura total verificada por query a `information_schema`: única tabla tenant sin policy = `users` (intencional).
+- **Hallazgo anotado (para E6)**: `eventos_crudos.client_id` quedó NULLABLE en la DB (la migración original lo creó NOT NULL; una posterior lo aflojó). Si hubiera filas con `client_id` NULL legítimas, la policy estándar las ocultaría — revisar en el ensayo general.
+- **Rollback**: `down()` dropea las policies y `DISABLE ROW LEVEL SECURITY`.
 
-### 2.3 Agregar `WITH CHECK` (bloquear escritura cross-tenant)
-- **Archivo**: nueva migración.
-- **Qué**: recrear policies con `USING (...) WITH CHECK (client_id = current_setting('app.current_tenant', true)::uuid)` → impide INSERT/UPDATE que muevan filas a otro tenant.
-- **Verificación**: INSERT con `client_id` ajeno bajo `SET app.current_tenant` propio → rechazado.
-- **Rollback**: `down()` restaura policies solo-`USING`.
+### 2.3 Agregar `WITH CHECK` (bloquear escritura cross-tenant)  ✅ HECHO (junto con robustez NULLIF)
+- **Archivo**: `src/migrations/1700000000039-HardenRLSPolicies.ts`.
+- **Qué**: recrea las 22 policies existentes con `USING (...) WITH CHECK (...)` y, CRÍTICO, envuelve el GUC en `NULLIF(current_setting('app.current_tenant', true), '')::uuid`.
+- **HALLAZGO (PoC)**: tras una tx, el GUC custom (`app.*`) vuelve a `''` (no NULL) en la conexión del pool → el casteo directo `''::uuid` LANZA error en vez de filtrar a 0 filas. El `NULLIF` es el fix de seguridad/robustez REAL de esta migración.
+- **Matiz verificado empíricamente**: el `WITH CHECK` explícito NO abre/cierra agujero — Postgres ya usa `USING` como check de escritura cuando falta `WITH CHECK`, así que la escritura cross-tenant ya estaba bloqueada. Se deja explícito por claridad de intención.
+- **Verificación**: ✅ `test/rls-harden-policies.e2e-spec.ts` (6 tests) corre la migración REAL (up/down) contra rol sin BYPASSRLS: NULLIF en conexión reusada (pool max:1) → 0 filas sin error (RED→GREEN confirmado), INSERT/UPDATE cross-tenant rechazados, lectura aislada.
+- **Seguro de aplicar ANTES del binding**: con el rol runtime aún BYPASSRLS, estas policies siguen inertes; no rompe nada.
+- **Rollback**: `down()` restaura policies originales solo-`USING` sin NULLIF.
 
 ### 2.4 Binding en runtime — `SET LOCAL app.current_tenant`  *(el paso pesado)*
 - **Qué**: cada unidad de trabajo corre dentro de una transacción con `SET LOCAL app.current_tenant = '<client_id>'`.
   - **HTTP**: interceptor/middleware request-scoped que obtiene un `QueryRunner`, abre transacción, setea el GUC, y expone esa conexión a los servicios de esa request.
   - **Jobs/cron/webhooks**: setear el GUC al inicio de cada unidad (el `client_id` ya viaja en el payload/fila).
-- **Decisión de diseño a resolver**: cómo enrutar los 292 `ds.query` a la conexión con el GUC seteado (opciones: provider request-scoped `TenantDataSource`, wrapper sobre `DataSource`, o `cls-hooked`/AsyncLocalStorage con un `QueryRunner` por request). Se elige una y se documenta.
+- **Decisión de diseño** ✅ RESUELTA: **AsyncLocalStorage nativo + Proxy sobre `DataSource`** (sin dependencia nueva). Implementado en `src/common/tenant/tenant-context.ts`: `runWithTenant(ds, clientId, fn)` (QueryRunner dedicado + tx + `set_config('app.current_tenant',$1,true)` parametrizado), `makeTenantAwareDataSource(ds)` (Proxy que rutea `.query()` al QueryRunner del ALS — las ~511 llamadas NO se tocan), `getTenantStore()`. PoC verde: `test/rls-poc.e2e-spec.ts` (5 tests) — rol sin BYPASSRLS, query SIN `WHERE client_id` aislada 100% por el motor.
+- **PENDIENTE del 2.4**: cablear global — `TenantInterceptor` HTTP que envuelve cada request con `runWithTenant(req.user.client_id)` + reemplazar el provider `DataSource` inyectado por `makeTenantAwareDataSource`; envolver jobs/cron/processors (cron.service 5 crons, persist/classify/mind-proactive processors, webhooks) con `runWithTenant`.
 - **Verificación**: e2e — request con token de A no puede leer filas de B aun forzando IDs; jobs siguen funcionando.
 - **Rollback**: desactivar el interceptor (RLS quedaría bloqueando → por eso va junto con 2.1).
 
