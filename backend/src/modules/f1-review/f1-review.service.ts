@@ -151,13 +151,14 @@ export class F1ReviewService {
         status = 'approved',
         parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb,
         updated_at = NOW()
-      WHERE id = $2`,
+      WHERE id = $2 AND client_id = $3`,
       [
         JSON.stringify({
           approved_by: userId,
           approved_at: new Date().toISOString(),
         }),
         id,
+        clientId,
       ],
     );
 
@@ -191,7 +192,7 @@ export class F1ReviewService {
         status = 'rejected',
         parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb,
         updated_at = NOW()
-      WHERE id = $2`,
+      WHERE id = $2 AND client_id = $3`,
       [
         JSON.stringify({
           rejected_by: userId,
@@ -199,6 +200,7 @@ export class F1ReviewService {
           rejection_reason: reason,
         }),
         id,
+        clientId,
       ],
     );
 

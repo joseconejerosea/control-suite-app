@@ -85,8 +85,8 @@ export class MindPropuestasService {
     await this.ds.query(
       `UPDATE mind_propuestas
        SET estado='aprobada', aprobada_at=NOW(), aprobada_por_user_id=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, userId],
+       WHERE id=$1 AND client_id=$3`,
+      [id, userId, clientId],
     );
 
     // Log
@@ -104,8 +104,8 @@ export class MindPropuestasService {
     await this.ds.query(
       `UPDATE mind_propuestas
        SET estado='rechazada', rechazada_motivo=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, motivo ?? 'Rechazado por el usuario'],
+       WHERE id=$1 AND client_id=$3`,
+      [id, motivo ?? 'Rechazado por el usuario', clientId],
     );
   }
 

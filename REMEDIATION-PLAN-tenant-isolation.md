@@ -89,12 +89,12 @@
 
 ### 1.5 Arreglar queries crudas request-reachable de CAT 2  *(un módulo por commit)*
 Cada sub-paso es un commit independiente, con su verificación:
-- **1.5a `support`** — `support.service.ts:36` (findOne) y `:75` (kpis): agregar `AND client_id = $n` (del JWT). Confirmar que la ruta cliente pasa `user.client_id`. → mata IDOR de tickets.
-- **1.5b `mind-analista`** — `:107,:108,:109`: agregar `AND client_id = $n`; además cortar el flujo si `:106` (ownership) no devolvió el proyecto.
-- **1.5c `bodegas`** — `:96`: corregir `client_id=${i}` → `client_id=$${i}` (bug de placeholder).
-- **1.5d `stock-returns`** — `:50` (projects name), `:115`/`:164`/`:198` (UPDATEs), `:250` (resolvePhone): agregar `client_id`.
-- **1.5e notif reads** — `rendiciones.service.ts:167,:324`, `projects.service.ts:381`: agregar `client_id`.
-- **1.5f gated-fragile (defensa en profundidad)** — agregar `client_id` inline a los UPDATE/DELETE hoy "seguros por SELECT previo": `f1-review:149,189`, `rendiciones:258,268,278,289,404,245`, `projects:356`, `mind-propuestas:85,93,104`, `invoices:219,223`.
+- **1.5a `support`** — ✅ HECHO. `findOne`/`kpis` ahora aceptan `clientId?` opcional: ruta cliente (`SupportController`) pasa `@CurrentClientId()` (scope), ruta admin (super_admin) no pasa nada (cross-tenant a propósito). Test `tenant-isolation-support` 3/3; probado RED al revertir (404→200, kpis 2→5). → mata IDOR de tickets + KPIs globales.
+- **1.5b `mind-analista`** — ✅ HECHO. `recopilarDatosProyecto` ahora corta con `NotFoundException` si el proyecto no es del tenant (antes seguía), y las 3 queries de plata (invoices/rendiciones/movimientos) llevan `AND client_id=$2` (defensa en profundidad). Test `tenant-isolation-mind-analista` 2/2; probado RED al desactivar el short-circuit.
+- **1.5c `bodegas`** — ✅ HECHO. `:96` `client_id=${i}` → `client_id=$${i}`. Test `tenant-isolation-bodegas` 2/2; probado RED al revertir (error real `operador no existe: uuid = integer`). NOTA bonus (fuera de scope, anotado): `update()` devuelve `res[0]` que para `UPDATE...RETURNING` en TypeORM es `[fila]` (array), no la fila — bug pre-existente de shape de retorno, NO afecta aislamiento; revisar aparte.
+- **1.5d `stock-returns`** — ✅ HECHO. `:50` projects read + `client_id`; los 3 UPDATEs (`:115`/`:164`/`:198`) + `client_id` (defensa en profundidad, ya gated); `resolvePhone` ahora recibe `clientId` y scopea promoters/collaborators (3 llamadores actualizados). Test `tenant-isolation-stock-returns` 2/2; probado RED faithful (A resolvía '+22222222' de B). **DESCUBRIMIENTOS**: (1) `resolvePhone` referenciaba `users.phone` que NO existe en el esquema (phone vive solo en promoters/collaborators) → la query fallaba SIEMPRE y `.catch(()=>[])` lo enmascaraba → resolvePhone devolvía null siempre (notificaciones de devolución rotas). Se quitó la rama `users`. (2) MISMO bug pendiente en `support.service.broadcast` (`SELECT u.phone FROM users`) — fuera de scope, anotado. (3) El `.catch(()=>[])` enmascara errores reales (smell).
+- **1.5e notif reads** — ✅ HECHO. `rendiciones:167` (project name) + `client_id`; `rendiciones:324` (persona en exportPdf) + `client_id` Y arreglada columna rota `CONCAT(nombre,' ',apellido)` → `name` (promoters tiene `name`, no nombre/apellido — mismo patrón que resolvePhone; nombre se resolvía siempre al fallback); `projects:381` (project name en convocatoria) + `client_id`. SIN test dedicado: son lecturas internas/defensa-en-profundidad (persona_id ya viene de rendición tenant-scopeada) embebidas en flujos con efectos (PDF/WhatsApp); verificado por revisión + suite 19/19 sin regresión. Grep confirmó que `apellido` no aparece en otra query.
+- **1.5f gated-fragile (defensa en profundidad)** — ✅ HECHO. `client_id` inline en: `f1-review` approve+reject, `mind-propuestas` aprobar+rechazar, `rendiciones` items+cerrarManual+aprobar+rechazar+marcarPagada+recalcTotal (firma enhebrada + caller), `projects:356`, `invoices` f1Reprocess UPDATE. EXCEPCIONES: `mind-propuestas:93` (INSERT ya lleva client_id), `invoices:219` (f1_reprocess_log NO tiene columna client_id). Sin test dedicado (paths gated, no alcanzables cross-tenant); verificado por revisión + suite 19/19 sin regresión.
 - **Verificación (cada uno)**: test "A no toca recurso de B" para ese endpoint; revisión de la query final.
 - **Rollback**: por commit.
 
@@ -110,7 +110,7 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación**: el modelo no puede emitir SQL que lea otra tabla/tenant; tests de intento de fuga.
 - **Rollback**: por commit. *(Se puede diferir si se prioriza, pero queda explícito como pendiente crítico.)*
 
-**Salida de Fase 1**: cero fugas request-reachable conocidas. Re-auditoría rápida de los puntos tocados.
+**Salida de Fase 1** — ✅ COMPLETA (1.1–1.5). Cero fugas request-reachable conocidas. 19 tests e2e verde (7 suites), cada fix request-reachable probado RED→GREEN. Pendiente 1.7 (mind-chat AI-SQL, sub-plan crítico aparte). Bugs bonus descubiertos: bodegas update() shape de retorno, users.phone inexistente (resolvePhone + support.broadcast), nombre/apellido inexistente en promoters (rendiciones export), patrón `.catch(()=>[])` enmascara errores.
 
 ---
 

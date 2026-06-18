@@ -93,7 +93,7 @@ export class BodegasService {
     if (!fields.length) return this.findOne(clientId, id);
     fields.push(`updated_at=NOW()`);
     const res = await this.ds.query(
-      `UPDATE bodegas SET ${fields.join(',')} WHERE id=$1 AND client_id=${i} RETURNING *`,
+      `UPDATE bodegas SET ${fields.join(',')} WHERE id=$1 AND client_id=$${i} RETURNING *`,
       [...params, clientId],
     );
     return res[0];

@@ -32,8 +32,16 @@ export class SupportService {
     return this.ds.query(q, params).catch(() => []);
   }
 
-  async findOne(id: string) {
-    const rows = await this.ds.query(`SELECT * FROM tickets WHERE id = $1`, [id]);
+  async findOne(id: string, clientId?: string) {
+    // clientId scopes the lookup for client-facing routes (prevents cross-tenant
+    // ticket IDOR). Admin (super_admin) routes pass no clientId → cross-tenant.
+    let q = `SELECT * FROM tickets WHERE id = $1`;
+    const params: unknown[] = [id];
+    if (clientId) {
+      q += ` AND client_id = $2`;
+      params.push(clientId);
+    }
+    const rows = await this.ds.query(q, params);
     if (!rows.length) throw new NotFoundException(`Ticket ${id} no encontrado`);
     return rows[0];
   }
@@ -72,7 +80,10 @@ export class SupportService {
     return res[0];
   }
 
-  async kpis() {
+  async kpis(clientId?: string) {
+    // Scope to the caller tenant on client-facing routes; admin passes none.
+    const where = clientId ? `WHERE client_id = $1` : '';
+    const params: unknown[] = clientId ? [clientId] : [];
     const rows = await this.ds.query(`
       SELECT
         COUNT(*) as total,
@@ -81,7 +92,8 @@ export class SupportService {
         COUNT(CASE WHEN estado='cerrado'     THEN 1 END) as cerrados,
         COUNT(CASE WHEN prioridad='alta' AND estado != 'cerrado' THEN 1 END) as alta_abiertos
       FROM tickets
-    `).catch(() => [{ total: 0, abiertos: 0, en_proceso: 0, cerrados: 0, alta_abiertos: 0 }]);
+      ${where}
+    `, params).catch(() => [{ total: 0, abiertos: 0, en_proceso: 0, cerrados: 0, alta_abiertos: 0 }]);
     return rows[0];
   }
 
