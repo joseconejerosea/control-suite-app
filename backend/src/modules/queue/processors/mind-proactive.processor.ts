@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Job } from 'bullmq';
 import { MindPropuestasService } from '../../mind/mind-propuestas.service';
+import { runWithTenant, runAsSystem } from '../../../common/tenant/tenant-context';
 
 /**
  * Implementa los 10 triggers del Perfil Proactivo (spec §08):
@@ -32,16 +33,19 @@ export class MindProactiveProcessor extends WorkerHost {
 
   async process(job: Job<{ client_id?: string }>): Promise<void> {
     const { client_id } = job.data;
+    // clients NO tiene RLS → la lista se lee sin contexto de tenant.
     const clientes = client_id
       ? [{ id: client_id }]
       : await this.ds.query(`SELECT id FROM clients WHERE status='active'`);
 
     for (const c of clientes) {
-      await this.detectarParaCliente(c.id).catch((err) =>
+      // Cada cliente corre en su propia tx con app.current_tenant = c.id.
+      await runWithTenant(this.ds, c.id, () => this.detectarParaCliente(c.id)).catch((err) =>
         this.logger.error(`[MindProactive] Error cliente ${c.id}:`, err.message),
       );
     }
-    await this.mindSvc.expirarAntiguas();
+    // Expiración global (todos los tenants) → pool de sistema (cross-tenant).
+    await runAsSystem(() => this.mindSvc.expirarAntiguas());
   }
 
   private async detectarParaCliente(clientId: string): Promise<void> {

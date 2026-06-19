@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { Job } from 'bullmq';
 import { SheetsService } from '../../sheets/sheets.service';
 import { RendicionesService } from '../../rendiciones/rendiciones.service';
+import { runWithTenant } from '../../../common/tenant/tenant-context';
 
 @Processor('persist')
 export class PersistProcessor extends WorkerHost {
@@ -19,116 +20,126 @@ export class PersistProcessor extends WorkerHost {
   }
 
   async process(job: Job<{ evento_crudo_id: string; client_id: string; classification: any; processing_status: string }>): Promise<void> {
-    const { evento_crudo_id, client_id, classification, processing_status } = job.data;
-    this.logger.log(`[F1Persist] Persisting evento: ${evento_crudo_id}`);
-
+    const { evento_crudo_id, client_id } = job.data;
     try {
-      const datos     = classification.datos_extraidos ?? {};
-      const tipo      = classification.tipo;
-      const destino   = classification.destino;
-      const confidence = classification.confidence_score ?? 0;
-
-      const eventoRows = await this.dataSource.query(
-        `SELECT payload, canal, email_from FROM eventos_crudos WHERE id=$1`, [evento_crudo_id],
-      );
-      if (!eventoRows.length) throw new Error('Evento not found');
-      const { canal, payload, email_from } = eventoRows[0];
-
-      const category    = destino === 'gastos' ? 'expense' : destino === 'ventas' ? 'sale' : 'cost';
-      const amount      = datos.monto_total ?? 0;
-      const vendorName  = datos.razon_social_emisor ?? 'Unknown';
-      const invoiceDate = datos.fecha_emision ?? new Date().toISOString().split('T')[0];
-      const description = `${tipo} - ${classification.categoria ?? 'Sin categoría'} | Confidence: ${confidence}`;
-
-      // Natural key duplicate check
-      if (datos.numero_documento && datos.rut_emisor) {
-        const dupInvoice = await this.dataSource.query(
-          `SELECT id FROM invoices WHERE client_id=$1 AND numero_documento=$2 AND rut_emisor=$3 LIMIT 1`,
-          [client_id, datos.numero_documento, datos.rut_emisor],
-        );
-        if (dupInvoice.length) {
-          await this.dataSource.query(
-            `UPDATE eventos_crudos SET processing_status_new='duplicate', status='duplicate' WHERE id=$1`,
-            [evento_crudo_id],
-          );
-          this.logger.warn(`[F1Persist] Duplicate invoice: ${evento_crudo_id}`);
-          return;
-        }
-      }
-
-      const invoiceResult = await this.dataSource.query(
-        `INSERT INTO invoices (
-          client_id, source, vendor_name, amount, currency,
-          invoice_date, category, description, status,
-          raw_payload, ai_extracted
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        RETURNING id`,
-        [
-          client_id, canal, vendorName, amount, datos.moneda ?? 'CLP',
-          invoiceDate, category, description, 'pending',
-          JSON.stringify(classification), JSON.stringify(classification),
-        ],
-      );
-
-      const invoiceId = invoiceResult[0].id;
-
-      await this.dataSource.query(
-        `UPDATE eventos_crudos SET factura_id=$1, processing_status_new='processed', status='processed', processed_at=NOW() WHERE id=$2`,
-        [invoiceId, evento_crudo_id],
-      );
-
-      this.logger.log(`[F1Persist] Invoice created: ${invoiceId} from evento: ${evento_crudo_id}`);
-
-      // ─── f2-rendicion: agrupar gasto en rendición semanal ─────────────────
-      if (category === 'expense') {
-        try {
-          const projectId = classification.proyecto_id_sugerido
-            ?? (typeof payload === 'object' ? payload?.project_id : null)
-            ?? null;
-          const personaId = await this.resolvePersonaId(client_id, payload, canal);
-          if (personaId) {
-            await this.rendicionesService.asignarFacturaARendicion(
-              client_id, invoiceId, personaId, projectId, amount, invoiceDate,
-            );
-          }
-        } catch (err: any) {
-          this.logger.warn(`[F1Persist] F2 rendición assignment failed: ${err.message}`);
-        }
-      }
-
-      // ─── f1-sheets-export ─────────────────────────────────────────────────
-      await this.sheetsService.exportInvoice(client_id, {
-        id: invoiceId,
-        vendor_name: vendorName,
-        amount,
-        currency: datos.moneda ?? 'CLP',
-        invoice_date: invoiceDate,
-        category,
-        description,
-        source: canal,
-        confidence_score: confidence,
-        ai_classification: classification,
-      });
-
-      // ─── f1-notify: email reply to sender ────────────────────────────────
-      await this.sendNotification({
-        canal,
-        emailFrom: email_from ?? (typeof payload === 'object' ? payload?.from : null),
-        amount,
-        currency: datos.moneda ?? 'CLP',
-        destino,
-        categoria: classification.categoria ?? 'Sin categoría',
-        vendorName,
-      });
-
+      // Fase 2 — happy path dentro de una tx con app.current_tenant = client_id.
+      await runWithTenant(this.dataSource, client_id, () => this.persistEvento(job));
     } catch (err: any) {
       this.logger.error(`[F1Persist] Error: ${err.message}`);
-      await this.dataSource.query(
-        `UPDATE eventos_crudos SET processing_status_new='failed_classification', status='failed', error_message=$1 WHERE id=$2`,
-        [err.message, evento_crudo_id],
-      );
+      // setStatus de error en tx SEPARADA: persiste pese al rollback del happy path.
+      await runWithTenant(this.dataSource, client_id, () =>
+        this.dataSource.query(
+          `UPDATE eventos_crudos SET processing_status_new='failed_classification', status='failed', error_message=$1 WHERE id=$2`,
+          [err.message, evento_crudo_id],
+        ),
+      ).catch(() => {});
       throw err;
     }
+  }
+
+  private async persistEvento(
+    job: Job<{ evento_crudo_id: string; client_id: string; classification: any; processing_status: string }>,
+  ): Promise<void> {
+    const { evento_crudo_id, client_id, classification } = job.data;
+    this.logger.log(`[F1Persist] Persisting evento: ${evento_crudo_id}`);
+
+    const datos     = classification.datos_extraidos ?? {};
+    const tipo      = classification.tipo;
+    const destino   = classification.destino;
+    const confidence = classification.confidence_score ?? 0;
+
+    const eventoRows = await this.dataSource.query(
+      `SELECT payload, canal, email_from FROM eventos_crudos WHERE id=$1`, [evento_crudo_id],
+    );
+    if (!eventoRows.length) throw new Error('Evento not found');
+    const { canal, payload, email_from } = eventoRows[0];
+
+    const category    = destino === 'gastos' ? 'expense' : destino === 'ventas' ? 'sale' : 'cost';
+    const amount      = datos.monto_total ?? 0;
+    const vendorName  = datos.razon_social_emisor ?? 'Unknown';
+    const invoiceDate = datos.fecha_emision ?? new Date().toISOString().split('T')[0];
+    const description = `${tipo} - ${classification.categoria ?? 'Sin categoría'} | Confidence: ${confidence}`;
+
+    // Natural key duplicate check
+    if (datos.numero_documento && datos.rut_emisor) {
+      const dupInvoice = await this.dataSource.query(
+        `SELECT id FROM invoices WHERE client_id=$1 AND numero_documento=$2 AND rut_emisor=$3 LIMIT 1`,
+        [client_id, datos.numero_documento, datos.rut_emisor],
+      );
+      if (dupInvoice.length) {
+        await this.dataSource.query(
+          `UPDATE eventos_crudos SET processing_status_new='duplicate', status='duplicate' WHERE id=$1`,
+          [evento_crudo_id],
+        );
+        this.logger.warn(`[F1Persist] Duplicate invoice: ${evento_crudo_id}`);
+        return;
+      }
+    }
+
+    const invoiceResult = await this.dataSource.query(
+      `INSERT INTO invoices (
+        client_id, source, vendor_name, amount, currency,
+        invoice_date, category, description, status,
+        raw_payload, ai_extracted
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      RETURNING id`,
+      [
+        client_id, canal, vendorName, amount, datos.moneda ?? 'CLP',
+        invoiceDate, category, description, 'pending',
+        JSON.stringify(classification), JSON.stringify(classification),
+      ],
+    );
+
+    const invoiceId = invoiceResult[0].id;
+
+    await this.dataSource.query(
+      `UPDATE eventos_crudos SET factura_id=$1, processing_status_new='processed', status='processed', processed_at=NOW() WHERE id=$2`,
+      [invoiceId, evento_crudo_id],
+    );
+
+    this.logger.log(`[F1Persist] Invoice created: ${invoiceId} from evento: ${evento_crudo_id}`);
+
+    // ─── f2-rendicion: agrupar gasto en rendición semanal ─────────────────
+    if (category === 'expense') {
+      try {
+        const projectId = classification.proyecto_id_sugerido
+          ?? (typeof payload === 'object' ? payload?.project_id : null)
+          ?? null;
+        const personaId = await this.resolvePersonaId(client_id, payload, canal);
+        if (personaId) {
+          await this.rendicionesService.asignarFacturaARendicion(
+            client_id, invoiceId, personaId, projectId, amount, invoiceDate,
+          );
+        }
+      } catch (err: any) {
+        this.logger.warn(`[F1Persist] F2 rendición assignment failed: ${err.message}`);
+      }
+    }
+
+    // ─── f1-sheets-export ─────────────────────────────────────────────────
+    await this.sheetsService.exportInvoice(client_id, {
+      id: invoiceId,
+      vendor_name: vendorName,
+      amount,
+      currency: datos.moneda ?? 'CLP',
+      invoice_date: invoiceDate,
+      category,
+      description,
+      source: canal,
+      confidence_score: confidence,
+      ai_classification: classification,
+    });
+
+    // ─── f1-notify: email reply to sender ────────────────────────────────
+    await this.sendNotification({
+      canal,
+      emailFrom: email_from ?? (typeof payload === 'object' ? payload?.from : null),
+      amount,
+      currency: datos.moneda ?? 'CLP',
+      destino,
+      categoria: classification.categoria ?? 'Sin categoría',
+      vendorName,
+    });
   }
 
   private async resolvePersonaId(

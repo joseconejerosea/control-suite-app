@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../metrics/metrics.service';
 import { ProjectResolverService } from '../../project-resolver/project-resolver.service';
 import { ClarificationService } from '../../project-resolver/clarification.service';
+import { runWithTenant } from '../../../common/tenant/tenant-context';
 
 const QUEUE_F1_PERSIST   = 'persist';
 const F1_CONFIDENCE_AUTO = 0.85;
@@ -31,158 +32,168 @@ export class ClassifyProcessor extends WorkerHost {
 
   async process(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
     const { evento_crudo_id, client_id, canal } = job.data;
-    this.logger.log(`[F1Classify] Classifying evento: ${evento_crudo_id}`);
-
     try {
-      const rows = await this.dataSource.query(
-        `SELECT ocr_text, payload, canal FROM eventos_crudos WHERE id=$1`,
-        [evento_crudo_id],
-      );
-      if (!rows.length) throw new Error('Evento not found');
-      const { ocr_text, payload } = rows[0];
-
-      if (!ocr_text) {
-        await this.setStatus(evento_crudo_id, 'failed_classification', 'No OCR text available');
-        this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
-        return;
-      }
-
-      const clientRows = await this.dataSource.query(
-        `SELECT nombre, config FROM clients WHERE id=$1`, [client_id],
-      );
-      const client = clientRows[0] ?? { nombre: 'Unknown', config: {} };
-
-      let projects: any[] = [];
-      try {
-        projects = await this.dataSource.query(
-          `SELECT id FROM projects WHERE client_id=$1 LIMIT 10`, [client_id]
-        );
-      } catch { /* projects table may have different schema, skip */ }
-
-      const equivalencias = await this.dataSource.query(
-        `SELECT keyword, categoria, destino FROM equivalencias_ocr_cc
-         WHERE client_id=$1 OR client_id IS NULL LIMIT 20`, [client_id],
-      );
-
-      const sanitized = this.sanitize(ocr_text);
-      const prompt    = this.buildPrompt(sanitized, client, projects, equivalencias, payload, canal);
-
-      let classification: any = null;
-      let attempts = 0;
-
-      const aiStart = Date.now();
-
-      while (attempts < 3 && !classification) {
-        try {
-          classification = await this.callClaude(prompt);
-        } catch {
-          attempts++;
-          if (attempts >= 3) {
-            await this.setStatus(evento_crudo_id, 'failed_classification', 'AI failed after 3 attempts');
-            this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
-            return;
-          }
-          await new Promise(r => setTimeout(r, 2000 * attempts));
-        }
-        if (!classification) attempts++;
-      }
-
-      const aiDurationSec = (Date.now() - aiStart) / 1000;
-
-      // Record AI duration metric
-      this.metrics.f1AiDuration.observe({ model: 'claude-haiku-4-5-20251001' }, aiDurationSec);
-
-      if (!classification) {
-        await this.setStatus(evento_crudo_id, 'failed_classification', 'AI classification failed');
-        this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
-        return;
-      }
-
-      // Run ProjectResolverService to improve project assignment
-      try {
-        const messageText = ocr_text || payload?.text || '';
-        const phoneNumber = payload?.from || payload?.phone || null;
-        const resolved = await this.projectResolver.resolve(
-          messageText, null, client_id, phoneNumber as string,
-        );
-        if (resolved) {
-          classification.proyecto_id_sugerido = resolved.projectId;
-          classification.proyecto_alternativos = resolved.alternatives.map(a => a.id);
-          classification.resolver_method = resolved.method;
-          classification.resolver_confidence = resolved.confidence;
-        }
-      } catch (err: any) {
-        this.logger.warn(`[F1Classify] ProjectResolver error: ${err.message}`);
-      }
-
-      const confidence = classification.confidence_score ?? 0;
-
-      // Record confidence score metric
-      this.metrics.f1ConfidenceScore.observe({ client_id }, confidence);
-
-      let processingStatus: string;
-      if (classification.tipo === 'no_clasificable') {
-        processingStatus = 'unclassified';
-      } else if (confidence >= F1_CONFIDENCE_AUTO) {
-        processingStatus = 'processed';
-      } else {
-        processingStatus = 'low_confidence';
-      }
-
-      classification.prompt_version = F1_PROMPT_VERSION;
-
-      await this.dataSource.query(
-        `UPDATE eventos_crudos SET
-          ai_classification=$1::jsonb, ai_model='claude-haiku-4-5-20251001',
-          ai_attempted_at=NOW(), confidence_score=$2,
-          processing_status_new=$3::processing_status_f1, status=$4
-        WHERE id=$5`,
-        [JSON.stringify(classification), confidence, processingStatus, processingStatus, evento_crudo_id],
-      );
-
-      this.logger.log(`[F1Classify] Done: ${evento_crudo_id} → ${processingStatus} (${confidence})`);
-
-      // Record final event status metric
-      this.metrics.f1EventsTotal.inc({ client_id, canal, status: processingStatus });
-
-      // Trigger bidirectional clarification when confidence is low and no project resolved
-      if (processingStatus === 'low_confidence' && !classification.proyecto_id_sugerido) {
-        const phoneNumber = payload?.from as string;
-        if (phoneNumber && canal === 'whatsapp') {
-          try {
-            const activeProjects = await this.dataSource.query(
-              `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
-              [client_id],
-            );
-            if (activeProjects.length > 1) {
-              const userLang = await this.getUserLanguage(phoneNumber, client_id);
-              await this.clarificationService.requestProjectClarification({
-                eventoCrudoId: evento_crudo_id,
-                clientId: client_id,
-                phoneNumber,
-                projects: activeProjects,
-                language: userLang,
-              });
-              this.logger.log(`[F1Classify] Clarification requested for ${evento_crudo_id}`);
-              return;
-            }
-          } catch (err: any) {
-            this.logger.warn(`[F1Classify] Clarification trigger error: ${err.message}`);
-          }
-        }
-      }
-
-      if (classification.tipo !== 'no_clasificable') {
-        await this.persistQueue.add('persist', {
-          evento_crudo_id, client_id, classification, processing_status: processingStatus,
-        }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 } });
-      }
-
+      // Fase 2 — happy path dentro de una tx con app.current_tenant = client_id.
+      await runWithTenant(this.dataSource, client_id, () => this.classifyEvento(job));
     } catch (err: any) {
       this.logger.error(`[F1Classify] Error: ${err.message}`);
-      await this.setStatus(evento_crudo_id, 'failed_classification', err.message);
+      // setStatus en tx SEPARADA: debe persistir aunque el happy path hiciera rollback.
+      await runWithTenant(this.dataSource, client_id, () =>
+        this.setStatus(evento_crudo_id, 'failed_classification', err.message),
+      ).catch(() => {});
       this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
       throw err;
+    }
+  }
+
+  private async classifyEvento(
+    job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>,
+  ): Promise<void> {
+    const { evento_crudo_id, client_id, canal } = job.data;
+    this.logger.log(`[F1Classify] Classifying evento: ${evento_crudo_id}`);
+
+    const rows = await this.dataSource.query(
+      `SELECT ocr_text, payload, canal FROM eventos_crudos WHERE id=$1`,
+      [evento_crudo_id],
+    );
+    if (!rows.length) throw new Error('Evento not found');
+    const { ocr_text, payload } = rows[0];
+
+    if (!ocr_text) {
+      await this.setStatus(evento_crudo_id, 'failed_classification', 'No OCR text available');
+      this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+      return;
+    }
+
+    const clientRows = await this.dataSource.query(
+      `SELECT nombre, config FROM clients WHERE id=$1`, [client_id],
+    );
+    const client = clientRows[0] ?? { nombre: 'Unknown', config: {} };
+
+    let projects: any[] = [];
+    try {
+      projects = await this.dataSource.query(
+        `SELECT id FROM projects WHERE client_id=$1 LIMIT 10`, [client_id]
+      );
+    } catch { /* projects table may have different schema, skip */ }
+
+    const equivalencias = await this.dataSource.query(
+      `SELECT keyword, categoria, destino FROM equivalencias_ocr_cc
+       WHERE client_id=$1 OR client_id IS NULL LIMIT 20`, [client_id],
+    );
+
+    const sanitized = this.sanitize(ocr_text);
+    const prompt    = this.buildPrompt(sanitized, client, projects, equivalencias, payload, canal);
+
+    let classification: any = null;
+    let attempts = 0;
+
+    const aiStart = Date.now();
+
+    while (attempts < 3 && !classification) {
+      try {
+        classification = await this.callClaude(prompt);
+      } catch {
+        attempts++;
+        if (attempts >= 3) {
+          await this.setStatus(evento_crudo_id, 'failed_classification', 'AI failed after 3 attempts');
+          this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+          return;
+        }
+        await new Promise(r => setTimeout(r, 2000 * attempts));
+      }
+      if (!classification) attempts++;
+    }
+
+    const aiDurationSec = (Date.now() - aiStart) / 1000;
+
+    // Record AI duration metric
+    this.metrics.f1AiDuration.observe({ model: 'claude-haiku-4-5-20251001' }, aiDurationSec);
+
+    if (!classification) {
+      await this.setStatus(evento_crudo_id, 'failed_classification', 'AI classification failed');
+      this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+      return;
+    }
+
+    // Run ProjectResolverService to improve project assignment
+    try {
+      const messageText = ocr_text || payload?.text || '';
+      const phoneNumber = payload?.from || payload?.phone || null;
+      const resolved = await this.projectResolver.resolve(
+        messageText, null, client_id, phoneNumber as string,
+      );
+      if (resolved) {
+        classification.proyecto_id_sugerido = resolved.projectId;
+        classification.proyecto_alternativos = resolved.alternatives.map(a => a.id);
+        classification.resolver_method = resolved.method;
+        classification.resolver_confidence = resolved.confidence;
+      }
+    } catch (err: any) {
+      this.logger.warn(`[F1Classify] ProjectResolver error: ${err.message}`);
+    }
+
+    const confidence = classification.confidence_score ?? 0;
+
+    // Record confidence score metric
+    this.metrics.f1ConfidenceScore.observe({ client_id }, confidence);
+
+    let processingStatus: string;
+    if (classification.tipo === 'no_clasificable') {
+      processingStatus = 'unclassified';
+    } else if (confidence >= F1_CONFIDENCE_AUTO) {
+      processingStatus = 'processed';
+    } else {
+      processingStatus = 'low_confidence';
+    }
+
+    classification.prompt_version = F1_PROMPT_VERSION;
+
+    await this.dataSource.query(
+      `UPDATE eventos_crudos SET
+        ai_classification=$1::jsonb, ai_model='claude-haiku-4-5-20251001',
+        ai_attempted_at=NOW(), confidence_score=$2,
+        processing_status_new=$3::processing_status_f1, status=$4
+      WHERE id=$5`,
+      [JSON.stringify(classification), confidence, processingStatus, processingStatus, evento_crudo_id],
+    );
+
+    this.logger.log(`[F1Classify] Done: ${evento_crudo_id} → ${processingStatus} (${confidence})`);
+
+    // Record final event status metric
+    this.metrics.f1EventsTotal.inc({ client_id, canal, status: processingStatus });
+
+    // Trigger bidirectional clarification when confidence is low and no project resolved
+    if (processingStatus === 'low_confidence' && !classification.proyecto_id_sugerido) {
+      const phoneNumber = payload?.from as string;
+      if (phoneNumber && canal === 'whatsapp') {
+        try {
+          const activeProjects = await this.dataSource.query(
+            `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
+            [client_id],
+          );
+          if (activeProjects.length > 1) {
+            const userLang = await this.getUserLanguage(phoneNumber, client_id);
+            await this.clarificationService.requestProjectClarification({
+              eventoCrudoId: evento_crudo_id,
+              clientId: client_id,
+              phoneNumber,
+              projects: activeProjects,
+              language: userLang,
+            });
+            this.logger.log(`[F1Classify] Clarification requested for ${evento_crudo_id}`);
+            return;
+          }
+        } catch (err: any) {
+          this.logger.warn(`[F1Classify] Clarification trigger error: ${err.message}`);
+        }
+      }
+    }
+
+    if (classification.tipo !== 'no_clasificable') {
+      await this.persistQueue.add('persist', {
+        evento_crudo_id, client_id, classification, processing_status: processingStatus,
+      }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 } });
     }
   }
 
