@@ -91,6 +91,8 @@ export class MovimientosPopService {
     const queryRunner = this.ds.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
+    // Fase 2 — este QueryRunner manual no pasa por el patch del ds: setear el GUC acá.
+    await queryRunner.query(`SELECT set_config('app.current_tenant', $1, true)`, [clientId]);
     try {
       // OUT from origin
       const outRes = await queryRunner.query(

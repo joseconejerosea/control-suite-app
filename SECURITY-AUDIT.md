@@ -1,12 +1,46 @@
 # Informe de Auditoría de Seguridad — control-suite (backend)
 
 > Auditoría estática del backend NestJS (40 módulos) realizada por revisión de código en paralelo.
-> Fecha: 2026-06. Alcance: `backend/src`. **No existen tests** en el proyecto.
-> Estado: diagnóstico. Ningún archivo fue modificado.
+> Fecha: 2026-06. Alcance: `backend/src`.
+> Estado original: diagnóstico.
 
 ---
 
-## 0. Hallazgo de fondo (causa raíz)
+## ✅ Estado de remediación — eje AISLAMIENTO multi-tenant (2026-06-19)
+
+Se ejecutó el `REMEDIATION-PLAN-tenant-isolation.md` (Capa 1 app-level + Capa 2 RLS). **Solo el eje de aislamiento** — los hallazgos de auth/webhooks/validación/etc. (C2–C6, H5–H8, H10–H12, medios/bajos) **siguen ABIERTOS**, no eran parte de este plan.
+
+**Causa raíz (sección 0) — RESUELTA en arquitectura:**
+- Capa 1: `AuthGuard` normaliza `request.user.client_id` (+ pin `HS256`), decorator `@CurrentClientId` fail-closed; cada servicio request-reachable filtra por el `client_id` del JWT.
+- Capa 2 (backstop a nivel motor): RLS en ~36 tablas tenant (mig. `036`/`039` NULLIF+WITH CHECK/`040`), binding por AsyncLocalStorage (`runWithTenant`/`runAsSystem`/monkey-patch/`tenantManager` en `common/tenant/tenant-context.ts`), `TenantInterceptor` por request, rol app sin `BYPASSRLS` (mig. `041`, switch operativo pendiente).
+
+**Hallazgos de aislamiento — RESUELTOS (re-auditoría 2026-06-19, 9/9):**
+| # | Estado | Resuelto en |
+|---|--------|-------------|
+| C1 (mind-chat AI-SQL) | ✅ | Fase 1.7 — `QUERY_CATALOG` cerrado, sin SQL del modelo |
+| C7 (bodegas `${i}`) | ✅ | Fase 1.5c — placeholder `$$` |
+| H1 (users `clientId`) | ✅ | Fase 1.4 — `@CurrentClientId` |
+| H2 (eventos-crudos/canal-entrada `clientId`) | ✅ | Fase 1.4 |
+| H3 (support IDOR) | ✅ | Fase 1.5a — `AND client_id` |
+| H4 (rendiciones UPDATEs + cierre cross-tenant) | ✅ | Fase 1.5e/f + E4c (`cerrarRendicionesSemana` por tenant) |
+| H9 (jwt sin `algorithms`) | ✅ | Fase 1.1 |
+| M3 (stock-returns `resolvePhone`) | ✅ | Fase 1.5d |
+| M10 (mind-analista sub-queries) | ✅ | Fase 1.5b |
+
+**Verificación:** 7 suites e2e RLS + 8 suites tenant-isolation (Capa 1) verdes, incluido un ensayo integral con el rol real sin `BYPASSRLS`. Re-auditoría: **cero fugas de aislamiento residuales request-reachable**; **defensa en profundidad intacta** (`git diff main...HEAD`: cero líneas con `client_id` eliminadas — RLS es backstop, no reemplazo).
+
+**Observación menor — ✅ RESUELTA (2026-06-19):** `eventos-crudos.service.ts:81,94` — `repo.update` ahora filtra por `{ id, client_id }` (antes solo `id`). Defensa en profundidad consistente con el resto del código.
+
+---
+
+## 0. Hallazgo de fondo (causa raíz) — ✅ RESUELTO (2026-06-19)
+
+> **Estado:** la recomendación arquitectónica de abajo fue IMPLEMENTADA. El aislamiento pasó de "por convención" a "por arquitectura":
+> - **Enforce a nivel framework** → `TenantInterceptor` + RLS a nivel motor (`common/tenant/tenant-context.ts`, migraciones `036`/`039`/`040`).
+> - **Repositorio tenant-scoped** → `TenantRepository` ruteado al contexto + `tenantManager`.
+> - **Shape del JWT unificado** → `AuthGuard` normaliza `client_id`/`clientId` + pin `HS256` (Fase 1.1).
+>
+> Capa 1 (filtros app-level) activa y verificada (9/9 hallazgos resueltos, cero fugas). Capa 2 (RLS) construida y testeada; **muerde a nivel motor al hacer el switch al rol sin `BYPASSRLS` (E6d, operativo)**. Diagnóstico original abajo, conservado como contexto.
 
 **El aislamiento multi-tenant es por convención, no por arquitectura.**
 

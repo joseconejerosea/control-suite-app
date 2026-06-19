@@ -123,7 +123,28 @@ Cada sub-paso es un commit independiente, con su verificación:
 
 > Convierte el aislamiento en garantía del motor: aunque una query futura olvide el `WHERE`, la DB no devuelve filas ajenas.
 
-### 2.1 Hacer que RLS realmente aplique
+### 2.1 / E6 — El switch (rol sin BYPASSRLS)  🚧 EN PROGRESO
+- **E6a** ✅ migración `1700000000041-CreateAppRole.ts`: crea rol app `NOBYPASSRLS` + grants schema-wide + ALTER DEFAULT PRIVILEGES. Credenciales por env (`DB_APP_USERNAME`/`DB_APP_PASSWORD`); si falta el password, se omite (CI/local). Config Joi agregada.
+- **Ensayo general** ✅ `test/rls-e2e-integral.e2e-spec.ts` (8 tests): rol real NOBYPASSRLS + policies 039+040 aplicadas, dos tenants en projects/invoices/rendiciones/chat/equivalencias → aislamiento, WITH CHECK, globales, runAsSystem cross-tenant, sin contexto 0 filas. **Confirma que el switch aísla a nivel motor.**
+- **E6b** ✅ datasource de migraciones desacoplado: `src/data-source.ts` ahora usa `DB_MIGRATION_USERNAME`/`DB_MIGRATION_PASSWORD` (fallback a `DB_*`). El runtime (TypeOrmModule en app.module) sigue con `DB_USERNAME`. Config Joi agregada. Hasta el switch, sin fallback seteado → comportamiento idéntico.
+
+#### Checklist operativo (E6c ensayo + E6d switch) — lo ejecuta el operador en su infra
+
+**E6c — Ensayo en STAGING:**
+1. Migrar staging con el owner: `DB_APP_PASSWORD=… npm run migration:run` (corre 039, 040, 041 → crea el rol app con grants).
+2. Env de staging: `DB_MIGRATION_USERNAME=postgres`, `DB_USERNAME=controlsuite_app`, `DB_SYSTEM_USERNAME=postgres` (o rol BYPASSRLS dedicado), + sus passwords.
+3. Levantar la app y verificar: login OK (users fuera de RLS); lectura por tenant devuelve solo lo suyo; cross-tenant (token A vs recurso B) → 403/404/vacío; webhook → evento procesa por la cola (classify/persist) sin 0 filas; SSE mind responde; logs sin errores de permisos/RLS ni "0 filas" inesperados.
+4. A nivel DB: con el rol app y `app.current_tenant` sin setear, un `SELECT` sobre una tabla tenant = **0 filas** (prueba de que RLS muerde).
+
+**E6d — Switch en PRODUCCIÓN (punto de no retorno):**
+1. Ventana de mantenimiento + backup.
+2. Confirmar que 041 corrió en prod (rol app existe).
+3. Setear env prod igual que staging (paso E6c.2). Deploy/restart runtime.
+4. Smoke test inmediato: login, una lectura por tenant, una escritura.
+5. Monitorear 5–15 min.
+6. **ROLLBACK**: revertir `DB_USERNAME` (y `DB_SYSTEM_USERNAME`) a `postgres` + restart → RLS vuelve inerte (bypass), app como antes.
+
+### 2.1 (detalle original) Hacer que RLS realmente aplique
 - **Depende de 0.1**:
   - **CONFIRMADO (0.1)**: el rol de runtime es `postgres` con **`BYPASSRLS = true`** (no superuser, pero bypassa igual). Por lo tanto: **crear un rol de aplicación dedicado, sin `BYPASSRLS` y NO owner de las tablas**, con `GRANT` mínimos (SELECT/INSERT/UPDATE/DELETE en las tablas tenant + USAGE en el schema), y apuntar el `DB_USERNAME` de runtime del backend a ese rol. Las migraciones siguen corriendo con `postgres`.
   - `FORCE ROW LEVEL SECURITY` queda como defensa extra opcional, pero NO es la solución acá (un rol BYPASSRLS lo atraviesa; un rol no-owner ya queda sujeto a RLS sin FORCE).
@@ -159,7 +180,15 @@ Cada sub-paso es un commit independiente, con su verificación:
   - **E4b** binding: monkey-patch `installTenantQueryRouting(ds)` en `tenant-context.ts` (muta `ds.query`: dentro de contexto ALS rutea al QueryRunner; fuera, original; respeta QueryRunner explícito como 3er arg). Aplicado en `main.ts` (bootstrap, tras crear app). Elegido sobre override de DI (predecible + testeable). Test: `test/rls-query-routing.e2e-spec.ts` (4 tests, RED→GREEN: sin patch el ds.query directo NO rutea).
   - **E4a** `TenantInterceptor` (`common/interceptors/tenant.interceptor.ts`): por request HTTP con `req.user.client_id`, envuelve el handler en `runWithTenant`. Registrado como APP_INTERCEPTOR MÁS EXTERNO (antes de AuditInterceptor, para que la tx cubra la escritura de audit_logs). Rutas sin tenant (login/webhooks/health) corren sin contexto.
   - **NO testeable en el harness** (AppModule no levanta por ConfigModule/Joi) → interceptor + wiring verificados por revisión; se validan en el ensayo general de E6.
-- **PENDIENTE E4c**: envolver jobs/cron/processors/webhooks (cron.service 5 crons, persist/classify/mind-proactive processors, webhooks) con `runWithTenant` (varios iteran multi-tenant → un runWithTenant por client_id). + 2 QueryRunner manuales (movimientos-pop, project-inbox) deben reusar el contexto o envolverse.
+- **E4c** ✅ HECHO (aplicación a jobs/repos):
+  - Processors (classify, persist, mind-proactive): `runWithTenant` por job; `setStatus` de error en tx separada; mind-proactive loop por cliente + `expirarAntiguas` en `runAsSystem`.
+  - Crons (5, cron.service): query maestra en `runAsSystem`, proceso por fila en `runWithTenant`. `cerrarRendicionesSemana` (rendiciones.service) con el mismo patrón.
+  - Webhooks (reescrito): lookup canal + `sin_contexto` en `runAsSystem`; persistencia en `runWithTenant`; repos → `ds.query`.
+  - QueryRunners manuales (movimientos-pop, project-inbox): `set_config('app.current_tenant',...)` en el runner manual tras `startTransaction`.
+  - Gap 1 repos: `TenantRepository` ruteado al contexto (`activeRepo`, cubre invoices y cía., TESTEADO); helper `tenantManager(ds)` para los `getRepository` directos (eventos-crudos, audit, onboarding-canal). `audit.log()` usa contexto si existe, si no `runAsSystem`. `workspace` no requiere cambios.
+  - Tests testeables verde: rls-run-as-system (4), rls-tenant-repository (3). Resto (jobs/webhooks/interceptor/wiring) verificado por revisión → ENSAYO E6.
+
+**E4 (cableado del binding) COMPLETO.** Falta E6 (switch del rol) y E7 (verificación).
 - **Verificación**: e2e — request con token de A no puede leer filas de B aun forzando IDs; jobs siguen funcionando.
 - **Rollback**: desactivar el interceptor (RLS quedaría bloqueando → por eso va junto con 2.1).
 
@@ -169,17 +198,18 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación**: ✅ `test/rls-run-as-system.e2e-spec.ts` (4 tests): runAsSystem ve todos los tenants, runWithTenant sigue aislando, sin contexto 0 filas, lanza sin pool configurado.
 - **PENDIENTE**: aplicar `runAsSystem` a los puntos cross-tenant reales (E4c-aplicación).
 
-### 2.6 Defensa en profundidad — conservar filtros app-level
+### 2.6 Defensa en profundidad — conservar filtros app-level  ✅ VERIFICADO (E7)
 - **Qué**: los `client_id` de la Capa 1 se MANTIENEN. RLS es backstop, no excusa para sacarlos.
+- **Verificado (E7)**: `git diff main...HEAD` → cero líneas con `client_id`/`clientId` eliminadas. Ningún servicio quitó su filtro app-level. 8 suites tenant-isolation (Capa 1) verdes.
 
 ---
 
-## FASE 3 — Verificación y cierre
+## FASE 3 / E7 — Verificación y cierre  🚧 EN PROGRESO
 
-- **3.1 Matriz de pruebas cross-tenant**: por cada endpoint tenant, token A vs recurso B → 403/404/empty. Tabla marcada.
-- **3.2 Tests de regresión** persistentes para cada fuga arreglada (los de 0.3 ampliados).
-- **3.3 Re-auditoría**: re-correr el barrido de aislamiento sobre el código final; cero UNSAFE.
-- **3.4 Doc**: actualizar `SECURITY-AUDIT.md` marcando cada hallazgo como RESUELTO + fecha.
+- **3.1 Matriz cross-tenant** 🔲: por endpoint, token A vs recurso B → 403/404/empty. Parcial: cubierto por las suites e2e + ensayo integral; la matriz endpoint-por-endpoint completa requiere staging (E6c).
+- **3.2 Tests de regresión** ✅: 8 suites tenant-isolation (Capa 1) + 7 suites RLS (Capa 2), persistentes en `backend/test/`.
+- **3.3 Re-auditoría** ✅: barrido de aislamiento sobre el código final (2026-06-19) → **9/9 hallazgos de aislamiento RESUELTOS, cero fugas residuales request-reachable, defensa en profundidad intacta**. Observación menor ✅ RESUELTA: `eventos-crudos.service.ts` `repo.update` ahora filtra por `{ id, client_id }`.
+- **3.4 Doc** ✅: `SECURITY-AUDIT.md` actualizado con el estado de remediación del eje aislamiento (2026-06-19). Los hallazgos NO-aislamiento (C2–C6, H5–H8, etc.) siguen abiertos — fuera del scope de este plan.
 
 ---
 

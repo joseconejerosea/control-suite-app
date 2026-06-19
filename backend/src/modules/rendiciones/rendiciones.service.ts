@@ -13,6 +13,7 @@ import {
   RendicionFiltersDto,
 } from './dto/rendicion.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 import PDFDocument from 'pdfkit';
 
 @Injectable()
@@ -81,20 +82,25 @@ export class RendicionesService {
   // ─────────────────────────────────────────────────────────────────────────
   async cerrarRendicionesSemana(): Promise<void> {
     const periodoActual = this.isoWeek(new Date());
-    // Cerrar rendiciones borrador de semanas PASADAS
-    const borradores = await this.ds.query(
-      `SELECT id, client_id, project_id, monto_total
-       FROM rendiciones
-       WHERE estado='borrador' AND periodo < $1`,
-      [periodoActual],
+    // Fase 2: la lista de borradores es cross-tenant (pool de sistema, solo lectura).
+    const borradores = await runAsSystem(() =>
+      this.ds.query(
+        `SELECT id, client_id, project_id, monto_total
+         FROM rendiciones
+         WHERE estado='borrador' AND periodo < $1`,
+        [periodoActual],
+      ),
     );
 
     for (const r of borradores) {
-      await this.ds.query(
-        `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
-        [r.id],
-      );
-      await this.decidirAprobacion(r.id, r.client_id, r.project_id, parseFloat(r.monto_total));
+      // Cada cierre corre en la tx del tenant dueño.
+      await runWithTenant(this.ds, r.client_id, async () => {
+        await this.ds.query(
+          `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
+          [r.id],
+        );
+        await this.decidirAprobacion(r.id, r.client_id, r.project_id, parseFloat(r.monto_total));
+      });
     }
     this.logger.log(`[F2] Cerradas ${borradores.length} rendiciones de semanas pasadas`);
   }

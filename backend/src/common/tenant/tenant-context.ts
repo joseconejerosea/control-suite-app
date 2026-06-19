@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'async_hooks';
-import { DataSource, QueryRunner } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 
 /**
  * Contexto de tenant para el backstop RLS (Fase 2).
@@ -35,6 +35,15 @@ export function setSystemDataSource(ds: DataSource): void {
 /** Contexto de tenant de la unidad de trabajo actual, si la hay. */
 export function getTenantStore(): TenantStore | undefined {
   return storage.getStore();
+}
+
+/**
+ * EntityManager ligado a la unidad de trabajo actual: el del QueryRunner con el
+ * GUC (dentro de runWithTenant/runAsSystem) o el del DataSource (fuera). Para
+ * `getRepository` directos que deben correr bajo RLS sin convertir a ds.query.
+ */
+export function tenantManager(ds: DataSource): EntityManager {
+  return storage.getStore()?.queryRunner.manager ?? ds.manager;
 }
 
 /**
