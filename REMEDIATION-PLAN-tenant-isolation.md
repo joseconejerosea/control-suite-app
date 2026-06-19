@@ -163,10 +163,11 @@ Cada sub-paso es un commit independiente, con su verificación:
 - **Verificación**: e2e — request con token de A no puede leer filas de B aun forzando IDs; jobs siguen funcionando.
 - **Rollback**: desactivar el interceptor (RLS quedaría bloqueando → por eso va junto con 2.1).
 
-### 2.5 Bypass controlado para `super_admin`
-- **Qué**: rutas cross-tenant legítimas (clients, monitoring, audit admin) necesitan ver todo. Opciones: rol con `BYPASSRLS` para esas operaciones, o setear un sentinel/condición en la policy para `super_admin`.
-- **Verificación**: super_admin ve todo; usuario normal nunca.
-- **Rollback**: por config.
+### 2.5 Bypass controlado — pool de sistema  ✅ MECANISMO HECHO (adelantado en E4c)
+- **Decisión**: pool de sistema con BYPASSRLS dedicado (Opción A), NO sentinel en policies (menos superficie de fuga).
+- **Hecho**: `runAsSystem(fn)` en `tenant-context.ts` — corre `fn` sobre un 2º DataSource (rol con BYPASSRLS), ruteando los `ds.query` (vía ALS + patch) a ese pool. `setSystemDataSource(ds)` registra el pool; creado en `main.ts` con `DB_SYSTEM_USERNAME`/`DB_SYSTEM_PASSWORD` (fallback a las normales hasta E6). Para descubrimiento de webhooks, barridas de cron, expiraciones.
+- **Verificación**: ✅ `test/rls-run-as-system.e2e-spec.ts` (4 tests): runAsSystem ve todos los tenants, runWithTenant sigue aislando, sin contexto 0 filas, lanza sin pool configurado.
+- **PENDIENTE**: aplicar `runAsSystem` a los puntos cross-tenant reales (E4c-aplicación).
 
 ### 2.6 Defensa en profundidad — conservar filtros app-level
 - **Qué**: los `client_id` de la Capa 1 se MANTIENEN. RLS es backstop, no excusa para sacarlos.

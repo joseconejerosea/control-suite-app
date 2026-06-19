@@ -17,9 +17,20 @@ import { DataSource, QueryRunner } from 'typeorm';
 export interface TenantStore {
   queryRunner: QueryRunner;
   clientId: string;
+  /** true cuando el contexto es de sistema (cross-tenant, pool con BYPASSRLS). */
+  system?: boolean;
 }
 
 const storage = new AsyncLocalStorage<TenantStore>();
+
+// DataSource de sistema (rol con BYPASSRLS) para operaciones cross-tenant
+// legítimas. Se setea en bootstrap (main.ts) vía setSystemDataSource.
+let systemDataSource: DataSource | null = null;
+
+/** Registra el DataSource de sistema (pool con BYPASSRLS) usado por runAsSystem. */
+export function setSystemDataSource(ds: DataSource): void {
+  systemDataSource = ds;
+}
 
 /** Contexto de tenant de la unidad de trabajo actual, si la hay. */
 export function getTenantStore(): TenantStore | undefined {
@@ -51,6 +62,29 @@ export async function runWithTenant<T>(
       await queryRunner.rollbackTransaction();
     }
     throw err;
+  } finally {
+    await queryRunner.release();
+  }
+}
+
+/**
+ * Ejecuta `fn` con acceso CROSS-TENANT, sobre el DataSource de sistema (rol con
+ * BYPASSRLS). Para operaciones legítimamente globales: descubrimiento en webhooks
+ * (resolver canal_entrada antes de conocer el tenant), barridas de crons,
+ * expiraciones. Los `ds.query` dentro de `fn` rutean (vía el patch + ALS) al pool
+ * de sistema. NO abre transacción ni setea tenant: el rol bypassa RLS.
+ *
+ * Usar con criterio: es el único camino que ve todos los tenants. Todo lo que
+ * sea por-tenant debe ir por runWithTenant.
+ */
+export async function runAsSystem<T>(fn: () => Promise<T>): Promise<T> {
+  if (!systemDataSource) {
+    throw new Error('runAsSystem: DataSource de sistema no inicializado (setSystemDataSource)');
+  }
+  const queryRunner = systemDataSource.createQueryRunner();
+  await queryRunner.connect();
+  try {
+    return await storage.run({ queryRunner, clientId: '__system__', system: true }, fn);
   } finally {
     await queryRunner.release();
   }

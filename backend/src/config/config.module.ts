@@ -12,6 +12,11 @@ import * as Joi from 'joi';
         DB_USERNAME: Joi.string().required(),
         DB_PASSWORD: Joi.string().required(),
         DB_NAME: Joi.string().required(),
+        // ── Pool de sistema (Fase 2 · RLS) — rol con BYPASSRLS para runAsSystem.
+        // Opcionales: si faltan, runAsSystem usa las credenciales normales
+        // (válido hasta E6, donde DB_USERNAME pasa a un rol sin BYPASSRLS).
+        DB_SYSTEM_USERNAME: Joi.string().optional(),
+        DB_SYSTEM_PASSWORD: Joi.string().allow('').optional(),
         JWT_SECRET: Joi.string().min(32).required(),
         JWT_EXPIRES_IN: Joi.string().default('8h'),
         JWT_REFRESH_SECRET: Joi.string().min(32).required(),
