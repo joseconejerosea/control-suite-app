@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { google } from 'googleapis';
 import * as cron from 'node-cron';
+import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { InvoicesService } from '../invoices/invoices.service';
+import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 
 @Injectable()
 export class GmailService {
@@ -33,56 +35,131 @@ export class GmailService {
     );
   }
 
-  getAuthUrl(): string {
+  getAuthUrl(clientId: string): string {
+    if (!clientId) {
+      throw new UnauthorizedException('No tenant context to start Gmail OAuth');
+    }
     const client = this.getOAuthClient();
     return client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
-      scope: ['https://www.googleapis.com/auth/gmail.readonly'],
+      // userinfo.email → para conocer la cuenta realmente conectada (no GMAIL_EMAIL).
+      scope: [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/userinfo.email',
+      ],
+      state: this.buildState(clientId),
     });
   }
 
-  async handleCallback(code: string, clientId?: string): Promise<string> {
+  // ── CSRF state (firmado, con expiración) ──────────────────────────────────
+  // El state liga el flujo OAuth a un client_id. Va firmado con HMAC para que el
+  // callback no confíe en input crudo (login-CSRF). TTL corto (10 min).
+  private stateSecret(): string {
+    return this.config.get<string>('JWT_SECRET') ?? '';
+  }
+
+  private buildState(clientId: string): string {
+    const secret = this.stateSecret();
+    if (!secret) throw new Error('JWT_SECRET no configurado: no se puede firmar el state OAuth');
+    const payload = { c: clientId, n: randomBytes(8).toString('hex'), e: Date.now() + 10 * 60 * 1000 };
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const sig = createHmac('sha256', secret).update(body).digest('base64url');
+    return `${body}.${sig}`;
+  }
+
+  private verifyState(state: string): string {
+    const secret = this.stateSecret();
+    if (!secret) throw new Error('JWT_SECRET no configurado: no se puede verificar el state OAuth');
+    const [body, sig] = (state ?? '').split('.');
+    if (!body || !sig) throw new UnauthorizedException('Invalid OAuth state');
+
+    const expected = createHmac('sha256', secret).update(body).digest('base64url');
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new UnauthorizedException('OAuth state signature mismatch');
+    }
+
+    let payload: { c?: string; e?: number };
+    try {
+      payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8'));
+    } catch {
+      throw new UnauthorizedException('Malformed OAuth state');
+    }
+    if (typeof payload.e !== 'number' || Date.now() > payload.e) {
+      throw new UnauthorizedException('OAuth state expired');
+    }
+    if (!payload.c) throw new UnauthorizedException('OAuth state missing tenant');
+    return payload.c;
+  }
+
+  async handleCallback(code: string, state: string): Promise<string> {
+    // CSRF: el client_id sale del state firmado, no de un parámetro crudo.
+    const clientId = this.verifyState(state);
+
     const oAuth2Client = this.getOAuthClient();
     const { tokens } = await oAuth2Client.getToken(code);
     oAuth2Client.setCredentials(tokens);
 
-    const email = this.config.get('GMAIL_EMAIL');
-    const resolvedClientId = clientId ?? this.config.get('GMAIL_DEFAULT_CLIENT_ID') ?? null;
+    // El email es el de la cuenta realmente conectada (Google userinfo), no el
+    // GMAIL_EMAIL global. Así cada tenant tiene SU buzón.
+    const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+    const me = await oauth2.userinfo.get();
+    const email = me.data.email;
+    if (!email) throw new Error('Google no devolvió el email de la cuenta conectada');
 
-    await this.dataSource.query(
-      `INSERT INTO gmail_tokens (email, tokens, client_id)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO UPDATE SET tokens = $2, client_id = $3, updated_at = now()`,
-      [email, JSON.stringify(tokens), resolvedClientId],
+    // Insert dentro del contexto del tenant (setea app.current_tenant → satisface
+    // el WITH CHECK de RLS; defensa en profundidad además del client_id explícito).
+    await runWithTenant(this.dataSource, clientId, () =>
+      this.dataSource.query(
+        `INSERT INTO gmail_tokens (email, tokens, client_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (client_id, email) DO UPDATE SET tokens = $2, updated_at = now()`,
+        [email, JSON.stringify(tokens), clientId],
+      ),
     );
 
-    this.logger.log(`[GmailService] OAuth tokens saved for email: ${email}, clientId: ${resolvedClientId}`);
-    return 'Gmail connected successfully!';
+    this.logger.log(`[GmailService] OAuth tokens saved — email: ${email}, clientId: ${clientId}`);
+    return email;
   }
 
+  // Barrida cross-tenant legítima (cron + /poll super_admin) → runAsSystem. No
+  // abre tx larga; los writes por tenant llevan client_id explícito.
   async pollAllClients(): Promise<void> {
-    const rows = await this.dataSource.query(
-      `SELECT email, tokens, client_id FROM gmail_tokens WHERE tokens IS NOT NULL`,
-    );
-
-    for (const row of rows) {
-      const clientId = row.client_id ?? this.config.get('GMAIL_DEFAULT_CLIENT_ID');
-      if (!clientId) {
-        this.logger.warn(`[GmailService] No client_id for email ${row.email} — skipping`);
-        continue;
-      }
-      await this.pollInbox(clientId, row.email, row.tokens).catch(e =>
-        this.logger.error(`[GmailService] Poll failed for ${row.email}: ${e}`)
+    await runAsSystem(async () => {
+      const rows = await this.dataSource.query(
+        `SELECT email, tokens, client_id FROM gmail_tokens WHERE tokens IS NOT NULL`,
       );
-    }
+
+      for (const row of rows) {
+        if (!row.client_id) {
+          this.logger.warn(`[GmailService] gmail_tokens sin client_id (email ${row.email}) — skipping`);
+          continue;
+        }
+        await this.pollInbox(row.client_id, row.email, row.tokens).catch(e =>
+          this.logger.error(`[GmailService] Poll failed for ${row.email}: ${e}`),
+        );
+      }
+    });
   }
 
-  async loadTokensForClient(email: string): Promise<any | null> {
+  // Status del tenant del request (corre dentro del TenantInterceptor → ya scopeado).
+  async statusForTenant(clientId: string): Promise<{ connected: boolean; accounts: string[] }> {
+    if (!clientId) return { connected: false, accounts: [] };
+    const rows = await this.dataSource.query(
+      `SELECT email FROM gmail_tokens WHERE client_id = $1 AND tokens IS NOT NULL ORDER BY updated_at DESC`,
+      [clientId],
+    ).catch(() => []);
+    const accounts = rows.map((r: any) => r.email);
+    return { connected: accounts.length > 0, accounts };
+  }
+
+  async loadTokensForClient(clientId: string, email: string): Promise<any | null> {
     try {
       const rows = await this.dataSource.query(
-        `SELECT tokens FROM gmail_tokens WHERE email = $1 LIMIT 1`,
-        [email],
+        `SELECT tokens FROM gmail_tokens WHERE client_id = $1 AND email = $2 LIMIT 1`,
+        [clientId, email],
       );
       if (!rows.length) return null;
       return typeof rows[0].tokens === 'string'
@@ -95,14 +172,12 @@ export class GmailService {
   }
 
   async pollInbox(clientId: string, email?: string, rawTokens?: any): Promise<{ checked: number; saved: number }> {
-    const tokenEmail = email ?? this.config.get('GMAIL_EMAIL');
-
     let tokens = rawTokens;
-    if (!tokens) {
-      tokens = await this.loadTokensForClient(tokenEmail);
+    if (!tokens && email) {
+      tokens = await this.loadTokensForClient(clientId, email);
     }
     if (!tokens) {
-      this.logger.warn(`[GmailService] No Gmail tokens found for ${tokenEmail}`);
+      this.logger.warn(`[GmailService] No Gmail tokens found for client ${clientId} / ${email ?? 'unknown'}`);
       return { checked: 0, saved: 0 };
     }
 

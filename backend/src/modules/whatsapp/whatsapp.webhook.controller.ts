@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body, Logger, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Logger, HttpCode, UseGuards } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -9,6 +9,7 @@ import { WhatsAppMediaService } from './whatsapp-media.service';
 import { ClarificationService } from '../project-resolver/clarification.service';
 import { ProjectResolverService } from '../project-resolver/project-resolver.service';
 import { Public } from '../../common/decorators/public.decorator';
+import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.guard';
 
 const QUEUE_OCR = 'ocr';
 
@@ -45,6 +46,7 @@ export class WhatsAppWebhookController {
   // ── Incoming messages ─────────────────────────────────────────────────────
 
   @Public()
+  @UseGuards(WebhookSignatureGuard)
   @Post()
   @HttpCode(200)
   async handleIncoming(@Body() body: any) {

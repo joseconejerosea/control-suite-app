@@ -33,6 +33,23 @@ Se ejecutó el `REMEDIATION-PLAN-tenant-isolation.md` (Capa 1 app-level + Capa 2
 
 ---
 
+## ✅ Estado de remediación — eje AUTH/ACCESO no-aislamiento (2026-06-21)
+
+Resueltos los CRÍTICOS de auth/webhooks/acceso (los que el plan de aislamiento NO cubría). C1 y C7 ya estaban cerrados por el eje aislamiento.
+
+| # | Estado | Resuelto en |
+|---|--------|-------------|
+| C1 (mind-chat AI-SQL) | ✅ (previo) | `QUERY_CATALOG` + `ds.query(entry.sql, [clientId])` — no corre SQL del modelo |
+| C2 (webhook WA sin firma) | ✅ | `whatsapp.webhook.controller.ts:49` — `@UseGuards(WebhookSignatureGuard)` en el POST (el GET de verificación queda `@Public`). Guard endurecido **fail-closed** si falta el secreto (`webhook-signature.guard.ts`) → cierra también **M11**. |
+| C3 (Gmail OAuth CSRF + multi-tenancy) | ✅ | `state` firmado HMAC+exp (`gmail.service.ts` `buildState`/`verifyState`); `connect` autenticado (client_id del JWT); `callback` verifica el state; tokens **per-tenant** (mig. `042`: `client_id` + `UNIQUE(client_id,email)` + FK + RLS; `ON CONFLICT (client_id,email)`); email real desde Google userinfo; `pollAllClients` en `runAsSystem`; `sheets.service` lee por `client_id`. Cierra también **H12** (`/poll` y `/status` cerrados a super_admin) y el XSS reflejado de gmail (escape en el HTML del callback). |
+| C4 (register público) | ✅ | `auth.controller.ts` — `register` cerrado a `super_admin` (`AuthGuard + RolesGuard + @Roles`). |
+| C5 (RolesGuard no-op) | ✅ | `onboarding.controller.ts:43` — `@UseGuards(AuthGuard, RolesGuard)` (antes faltaba `RolesGuard`). |
+| C6 (/metrics expuesto) | ✅ | `metrics.controller.ts` — cerrado a `super_admin`; quitado `@SkipThrottle`. (Ya no era "público total": el `AuthGuard` global lo cubría, pero lo veía cualquier tenant). |
+
+**Pendiente operativo:** la migración `042` corre sola en el próximo deploy (E6). El frontend debe adaptar el flujo `connect` (ahora devuelve `{ url }` y requiere bearer; ver nota abajo). Siguen ABIERTOS: H5–H8, H11, medios/bajos.
+
+---
+
 ## 0. Hallazgo de fondo (causa raíz) — ✅ RESUELTO (2026-06-19)
 
 > **Estado:** la recomendación arquitectónica de abajo fue IMPLEMENTADA. El aislamiento pasó de "por convención" a "por arquitectura":
