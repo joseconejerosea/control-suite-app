@@ -14,8 +14,7 @@ import {
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard'; // ── M4
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
+import { CurrentClientId } from '../../common/decorators/current-client.decorator';
 import { CanalEntradaService } from './canal-entrada.service';
 import {
   CreateCanalEntradaDto,
@@ -28,41 +27,41 @@ export class CanalEntradaController {
   constructor(private readonly canalEntradaService: CanalEntradaService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload) {
-    return this.canalEntradaService.findAll(user.clientId);
+  findAll(@CurrentClientId() clientId: string) {
+    return this.canalEntradaService.findAll(clientId);
   }
 
   @Get(':id')
   findOne(
-    @CurrentUser() user: JwtPayload,
+    @CurrentClientId() clientId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.canalEntradaService.findOne(user.clientId, id);
+    return this.canalEntradaService.findOne(clientId, id);
   }
 
   @Post()
   create(
-    @CurrentUser() user: JwtPayload,
+    @CurrentClientId() clientId: string,
     @Body() dto: CreateCanalEntradaDto,
   ) {
-    return this.canalEntradaService.create(user.clientId, dto);
+    return this.canalEntradaService.create(clientId, dto);
   }
 
   @Patch(':id')
   update(
-    @CurrentUser() user: JwtPayload,
+    @CurrentClientId() clientId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCanalEntradaDto,
   ) {
-    return this.canalEntradaService.update(user.clientId, id, dto);
+    return this.canalEntradaService.update(clientId, id, dto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
-    @CurrentUser() user: JwtPayload,
+    @CurrentClientId() clientId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.canalEntradaService.remove(user.clientId, id);
+    return this.canalEntradaService.remove(clientId, id);
   }
 }

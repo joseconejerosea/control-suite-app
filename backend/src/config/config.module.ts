@@ -12,6 +12,19 @@ import * as Joi from 'joi';
         DB_USERNAME: Joi.string().required(),
         DB_PASSWORD: Joi.string().required(),
         DB_NAME: Joi.string().required(),
+        // ── Pool de sistema (Fase 2 · RLS) — rol con BYPASSRLS para runAsSystem.
+        // Opcionales: si faltan, runAsSystem usa las credenciales normales
+        // (válido hasta E6, donde DB_USERNAME pasa a un rol sin BYPASSRLS).
+        DB_SYSTEM_USERNAME: Joi.string().optional(),
+        DB_SYSTEM_PASSWORD: Joi.string().allow('').optional(),
+        // Rol de aplicación dedicado (E6a): credenciales para crearlo (migración
+        // 041) y para apuntar DB_USERNAME runtime en el switch (E6d).
+        DB_APP_USERNAME: Joi.string().optional(),
+        DB_APP_PASSWORD: Joi.string().optional(),
+        // Credenciales del datasource de migraciones (E6b) — owner/postgres tras
+        // el switch. Fallback a DB_* si no se setean. Las usa src/data-source.ts.
+        DB_MIGRATION_USERNAME: Joi.string().optional(),
+        DB_MIGRATION_PASSWORD: Joi.string().optional(),
         JWT_SECRET: Joi.string().min(32).required(),
         JWT_EXPIRES_IN: Joi.string().default('8h'),
         JWT_REFRESH_SECRET: Joi.string().min(32).required(),

@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 import { AuditLogFiltersDto } from './dto/audit-log-filters.dto';
+import { getTenantStore, runAsSystem, tenantManager } from '../../common/tenant/tenant-context';
 
 export interface AuditLogInput {
   tenantId?: string;
@@ -19,13 +20,13 @@ export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
   constructor(
-    @InjectRepository(AuditLog)
-    private readonly repo: Repository<AuditLog>,
+    @InjectDataSource()
+    private readonly ds: DataSource,
   ) {}
 
   async log(input: AuditLogInput): Promise<void> {
-    try {
-      await this.repo.insert({
+    const write = () =>
+      tenantManager(this.ds).getRepository(AuditLog).insert({
         tenant_id: input.tenantId ?? null,
         user_id: input.userId,
         action: input.action,
@@ -34,6 +35,10 @@ export class AuditService {
         metadata: input.metadata ?? null,
         ip: input.ip ?? null,
       });
+    try {
+      // Si la request ya abrió contexto de tenant, escribe ahí; si no (login,
+      // acciones de sistema), por el pool de sistema para no chocar con RLS.
+      await (getTenantStore() ? write() : runAsSystem(write));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'unknown';
       this.logger.error(`Failed to write audit log: ${msg}`);
@@ -41,7 +46,7 @@ export class AuditService {
   }
 
   async findAll(filters: AuditLogFiltersDto, tenantId?: string) {
-    const qb = this.repo.createQueryBuilder('al')
+    const qb = tenantManager(this.ds).getRepository(AuditLog).createQueryBuilder('al')
       .orderBy('al.created_at', 'DESC');
 
     if (tenantId) {

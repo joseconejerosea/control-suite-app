@@ -17,6 +17,7 @@ import { VerifyChannelDto } from './dto/verify-channel.dto';
 import { CreateAdminUserDto } from './dto/create-admin-user.dto';
 import { ProvisionWhatsAppDto } from './dto/provision-whatsapp.dto';
 import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
+import { tenantManager } from '../../common/tenant/tenant-context';
 
 const STEP_ORDER = [
   'client_created',
@@ -46,6 +47,11 @@ export class OnboardingService {
     private readonly dataSource: DataSource,
   ) {}
 
+  // Fase 2 — canal_entrada tiene RLS: usar el repo ligado al contexto de tenant.
+  private get canalRepoCtx(): Repository<CanalEntrada> {
+    return tenantManager(this.dataSource).getRepository(CanalEntrada);
+  }
+
   private async loadActiveClient(clientId: string): Promise<Client> {
     const client = await this.clientRepo.findOneBy({ id: clientId });
     if (!client) throw new NotFoundException(`Client ${clientId} not found`);
@@ -71,11 +77,11 @@ export class OnboardingService {
       throw new BadRequestException('Onboarding is already completed.');
     }
 
-    const canal = this.canalRepo.create({
+    const canal = this.canalRepoCtx.create({
       nombre: dto.nombre, tipo: dto.tipo,
       config: dto.config ?? null, client_id: clientId, is_active: false,
     });
-    const savedCanal = await this.canalRepo.save(canal);
+    const savedCanal = await this.canalRepoCtx.save(canal);
 
     if (stepIndex(client.onboarding_step) < stepIndex('channel_configured')) {
       await this.clientRepo.update(clientId, { onboarding_step: 'channel_configured' });
@@ -96,7 +102,7 @@ export class OnboardingService {
     const client = await this.loadActiveClient(clientId);
     this.requireStep(client, 'channel_configured');
 
-    const canal = await this.canalRepo.findOneBy({ id: canalEntradaId });
+    const canal = await this.canalRepoCtx.findOneBy({ id: canalEntradaId });
     if (!canal) throw new NotFoundException(`Channel ${canalEntradaId} not found`);
     if (canal.client_id !== clientId) throw new BadRequestException('Channel does not belong to this client.');
     if (canal.tipo !== 'whatsapp') throw new BadRequestException(`Channel tipo must be 'whatsapp'.`);
@@ -104,7 +110,7 @@ export class OnboardingService {
     // Use existing registered test number from env
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? '1118041604727374';
 
-    await this.canalRepo.update({ id: canal.id }, {
+    await this.canalRepoCtx.update({ id: canal.id }, {
       config: {
         ...(canal.config ?? {}),
         phone_number_id:      phoneNumberId,
@@ -139,7 +145,7 @@ export class OnboardingService {
     const client = await this.loadActiveClient(clientId);
     this.requireStep(client, 'wa_number_requested');
 
-    const canal = await this.canalRepo.findOneBy({ id: canalEntradaId });
+    const canal = await this.canalRepoCtx.findOneBy({ id: canalEntradaId });
     if (!canal) throw new NotFoundException(`Channel ${canalEntradaId} not found`);
     if (canal.client_id !== clientId) throw new BadRequestException('Channel does not belong to this client.');
 
@@ -147,7 +153,7 @@ export class OnboardingService {
       ?? process.env.WHATSAPP_PHONE_NUMBER_ID ?? '1118041604727374';
     const displayNumber = (canal.config?.display_phone_number as string | undefined) ?? phoneNumberId;
 
-    await this.canalRepo.update({ id: canal.id }, { is_active: true });
+    await this.canalRepoCtx.update({ id: canal.id }, { is_active: true });
 
     if (stepIndex(client.onboarding_step) < stepIndex('wa_number_verified')) {
       await this.clientRepo.update(clientId, { onboarding_step: 'wa_number_verified' });
@@ -165,7 +171,7 @@ export class OnboardingService {
     dto: VerifyChannelDto,
   ): Promise<{ verified: boolean; channel: Partial<CanalEntrada> }> {
     const client = await this.loadActiveClient(clientId);
-    const canal  = await this.canalRepo.findOneBy({ id: canalEntradaId });
+    const canal  = await this.canalRepoCtx.findOneBy({ id: canalEntradaId });
     if (!canal) throw new NotFoundException(`Channel ${canalEntradaId} not found`);
 
     if (canal.tipo === 'whatsapp') {
@@ -189,7 +195,7 @@ export class OnboardingService {
       }
     }
 
-    await this.canalRepo.update({ id: canal.id }, { is_active: true });
+    await this.canalRepoCtx.update({ id: canal.id }, { is_active: true });
     if (stepIndex(client.onboarding_step) < stepIndex('channel_verified')) {
       await this.clientRepo.update(clientId, { onboarding_step: 'channel_verified' });
     }

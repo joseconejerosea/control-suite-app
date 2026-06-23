@@ -10,24 +10,136 @@ import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 //         (send WA, query data, draft email)"
 const CLAUDE_MODEL = 'claude-opus-4-5';
 
+// ── Catálogo de consultas fijas ───────────────────────────────────────────────
+// El modelo NO escribe SQL. Sólo elige una `query_key` de este catálogo cerrado.
+// Cada SQL trae `client_id = $1` HARDCODEADO server-side: el aislamiento de tenant
+// es estructural, no depende de que el modelo recuerde un WHERE. $1 es SIEMPRE el
+// clientId del request — nunca un valor provisto por el modelo.
+// INVARIANTE (verificada por test): toda entrada DEBE contener `client_id = $1`.
+export interface CatalogEntry {
+  descripcion: string;
+  sql: string;
+}
+
+export const QUERY_CATALOG: Record<string, CatalogEntry> = {
+  resumen_financiero: {
+    descripcion: 'Totales de rendiciones agrupadas por estado (cantidad y monto).',
+    sql: `SELECT estado, COUNT(*)::int AS cantidad, COALESCE(SUM(monto_total),0) AS monto_total
+          FROM rendiciones WHERE client_id = $1 GROUP BY estado ORDER BY monto_total DESC`,
+  },
+  rendiciones_pendientes: {
+    descripcion: 'Rendiciones enviadas pendientes de aprobación.',
+    sql: `SELECT id, persona_id, project_id, periodo, monto_total, requiere_admin, created_at
+          FROM rendiciones WHERE client_id = $1 AND estado = 'enviada'
+          ORDER BY created_at DESC LIMIT 50`,
+  },
+  gastos_por_proyecto: {
+    descripcion: 'Gasto total (rendiciones aprobadas/pagadas) agrupado por proyecto.',
+    sql: `SELECT p.id, p.name, COALESCE(SUM(r.monto_total),0) AS gasto_total
+          FROM projects p
+          LEFT JOIN rendiciones r ON r.project_id = p.id AND r.client_id = $1
+               AND r.estado IN ('aprobada','pagada')
+          WHERE p.client_id = $1
+          GROUP BY p.id, p.name ORDER BY gasto_total DESC LIMIT 50`,
+  },
+  proyectos_activos: {
+    descripcion: 'Proyectos con estado active (nombre, fechas, presupuesto).',
+    sql: `SELECT id, name, status, start_date, end_date, budget
+          FROM projects WHERE client_id = $1 AND status = 'active'
+          ORDER BY created_at DESC LIMIT 50`,
+  },
+  activaciones_por_estado: {
+    descripcion: 'Conteo de activaciones agrupadas por status.',
+    sql: `SELECT status, COUNT(*)::int AS cantidad
+          FROM activations WHERE client_id = $1 GROUP BY status ORDER BY cantidad DESC`,
+  },
+  activaciones_en_vivo: {
+    descripcion: 'Activaciones en curso (status in_progress).',
+    sql: `SELECT id, project_id, scheduled_at, executed_at, status
+          FROM activations WHERE client_id = $1 AND status = 'in_progress'
+          ORDER BY scheduled_at DESC NULLS LAST LIMIT 50`,
+  },
+  stock_por_bodega: {
+    descripcion: 'Cantidad total de inventario por bodega.',
+    sql: `SELECT b.id, b.nombre, b.tipo, COALESCE(SUM(i.cantidad),0)::int AS cantidad_total
+          FROM bodegas b
+          LEFT JOIN inventario i ON i.bodega_id = b.id AND i.client_id = $1
+          WHERE b.client_id = $1 AND b.active = true
+          GROUP BY b.id, b.nombre, b.tipo ORDER BY cantidad_total DESC LIMIT 50`,
+  },
+  stock_critico: {
+    descripcion: 'SKUs activos cuyo stock total está en o por debajo del mínimo.',
+    sql: `SELECT s.codigo, s.nombre, s.min_stock,
+                 COALESCE(SUM(i.cantidad),0)::int AS cantidad
+          FROM skus s
+          LEFT JOIN inventario i ON i.sku_id = s.id AND i.client_id = $1
+          WHERE s.client_id = $1 AND s.active = true
+          GROUP BY s.id, s.codigo, s.nombre, s.min_stock
+          HAVING COALESCE(SUM(i.cantidad),0) <= s.min_stock
+          ORDER BY cantidad ASC LIMIT 50`,
+  },
+  invoices_resumen: {
+    descripcion: 'Facturas agrupadas por status y categoría (cantidad y monto).',
+    sql: `SELECT status, category, COUNT(*)::int AS cantidad, COALESCE(SUM(amount),0) AS monto_total
+          FROM invoices WHERE client_id = $1 GROUP BY status, category ORDER BY monto_total DESC`,
+  },
+  invoices_pendientes: {
+    descripcion: 'Facturas en estado pending (vendor, monto, fecha).',
+    sql: `SELECT id, vendor_name, amount, currency, invoice_date, category, project_id
+          FROM invoices WHERE client_id = $1 AND status = 'pending'
+          ORDER BY invoice_date DESC NULLS LAST LIMIT 50`,
+  },
+  movimientos_recientes: {
+    descripcion: 'Últimos movimientos de POP (tipo, estado, cantidad, SKU).',
+    sql: `SELECT m.tipo, m.estado, m.cantidad, s.codigo AS sku_codigo, m.created_at
+          FROM movimientos_pop m
+          LEFT JOIN skus s ON s.id = m.sku_id AND s.client_id = $1
+          WHERE m.client_id = $1 ORDER BY m.created_at DESC LIMIT 50`,
+  },
+  pop_en_terreno: {
+    descripcion: 'POP entregado en terreno aún sin devolver (estado en_terreno).',
+    sql: `SELECT m.cantidad, s.codigo AS sku_codigo, m.proyecto_destino_id,
+                 m.fecha_retorno_esperada
+          FROM movimientos_pop m
+          LEFT JOIN skus s ON s.id = m.sku_id AND s.client_id = $1
+          WHERE m.client_id = $1 AND m.estado = 'en_terreno'
+          ORDER BY m.fecha_retorno_esperada ASC NULLS LAST LIMIT 50`,
+  },
+  incidencias_abiertas: {
+    descripcion: 'Incidencias abiertas (descripción, categoría, severidad).',
+    sql: `SELECT id, activacion_id, descripcion, categoria, severidad, created_at
+          FROM incidencias WHERE client_id = $1 AND estado = 'abierta'
+          ORDER BY created_at DESC LIMIT 50`,
+  },
+  propuestas_abiertas: {
+    descripcion: 'Propuestas de Mind abiertas (tipo, título, severidad).',
+    sql: `SELECT id, tipo, titulo, severidad, created_at
+          FROM mind_propuestas WHERE client_id = $1 AND estado = 'abierta'
+          ORDER BY created_at DESC LIMIT 50`,
+  },
+};
+
+const CATALOG_KEYS = Object.keys(QUERY_CATALOG);
+const CATALOG_DESCRIPTION =
+  'Consulta datos operacionales reales del cliente actual. Elegí UNA clave del catálogo; ' +
+  'cada una devuelve datos ya filtrados a este cliente. NUNCA inventes números. Claves:\n' +
+  CATALOG_KEYS.map(k => `- ${k}: ${QUERY_CATALOG[k].descripcion}`).join('\n');
+
 // ── Tool definitions (Anthropic tool_use format) ──────────────────────────────
 const MIND_TOOLS: Anthropic.Tool[] = [
   {
-    name: 'query_operaciones',
-    description: 'Ejecuta una consulta SQL de SOLO LECTURA sobre la base de datos operacional del cliente. Usar para responder preguntas con números reales (gastos, proyectos, rendiciones, stock, etc.). NUNCA inventar datos.',
+    name: 'consultar_datos',
+    description: 'Consulta datos operacionales reales del cliente eligiendo una clave del catálogo. NO recibe SQL: el aislamiento por cliente es server-side. Usar para responder con números reales (gastos, proyectos, rendiciones, stock, etc.).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        sql: {
+        query_key: {
           type: 'string',
-          description: 'SQL SELECT parametrizado. Usar $1 para client_id. SOLO SELECT. Sin DROP/UPDATE/DELETE/INSERT.',
-        },
-        descripcion: {
-          type: 'string',
-          description: 'Descripción breve de qué calcula esta query.',
+          enum: CATALOG_KEYS,
+          description: CATALOG_DESCRIPTION,
         },
       },
-      required: ['sql', 'descripcion'],
+      required: ['query_key'],
     },
   },
   {
@@ -55,13 +167,6 @@ const MIND_TOOLS: Anthropic.Tool[] = [
       required: ['destinatario', 'asunto', 'cuerpo'],
     },
   },
-];
-
-// SQL allowed only these tables (whitelist — no sensitive tables)
-const ALLOWED_TABLES = [
-  'projects', 'activations', 'rendiciones', 'rendicion_items',
-  'invoices', 'inventario', 'skus', 'bodegas', 'movimientos_pop',
-  'checkins', 'incidencias', 'reportes_avance', 'mind_propuestas',
 ];
 
 @Injectable()
@@ -149,11 +254,11 @@ CONTEXTO LIVE (actualizado ahora):
 - Monto pendiente aprobación: $${parseFloat(ctx?.monto_pendiente ?? '0').toLocaleString('es-CL')} CLP
 
 REGLAS CRÍTICAS:
-1. NUNCA inventes números. Si necesitas datos, usa la tool query_operaciones.
+1. NUNCA inventes números. Si necesitas datos, usa la tool consultar_datos.
 2. Toda cifra en tu respuesta DEBE venir de una tool call real.
 3. Si no tienes los datos, di "No tengo ese dato disponible" — nunca improvises.
 4. Responde en español de Chile, tono ejecutivo, conciso.
-5. Las queries SQL deben incluir WHERE client_id=$1 siempre.`;
+5. consultar_datos ya devuelve datos del cliente actual: no necesitas filtrar por cliente.`;
 
       // ── Agentic loop: run until no more tool calls ────────────────────────
       let loopMessages = [...messages];
@@ -202,9 +307,9 @@ REGLAS CRÍTICAS:
 
           let toolResult = '';
           try {
-            if (block.name === 'query_operaciones') {
-              const input = block.input as { sql: string; descripcion: string };
-              toolResult = await this.executeReadOnlyQuery(input.sql, clientId);
+            if (block.name === 'consultar_datos') {
+              const input = block.input as { query_key: string };
+              toolResult = await this.executeCatalogQuery(input.query_key, clientId);
 
             } else if (block.name === 'enviar_whatsapp') {
               const input = block.input as { telefono: string; mensaje: string };
@@ -258,23 +363,17 @@ REGLAS CRÍTICAS:
     return { reply, tools_used: toolsUsed };
   }
 
-  // ── Safe read-only query executor ────────────────────────────────────────
-  private async executeReadOnlyQuery(sql: string, clientId: string): Promise<string> {
-    const upper = sql.trim().toUpperCase();
-
-    // Block any write operations
-    if (/^\s*(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE)/i.test(sql)) {
-      throw new Error('Solo se permiten queries SELECT en Control Mind.');
+  // ── Catalog query executor (no free-form SQL) ────────────────────────────
+  // El modelo sólo elige una clave; el SQL es fijo y trae client_id = $1
+  // hardcodeado. $1 es SIEMPRE el clientId del request: aislamiento estructural.
+  private async executeCatalogQuery(queryKey: string, clientId: string): Promise<string> {
+    const entry = QUERY_CATALOG[queryKey];
+    if (!entry) {
+      throw new Error(
+        `query_key inválida: "${queryKey}". Opciones válidas: ${CATALOG_KEYS.join(', ')}`,
+      );
     }
-
-    // Verify query touches at least one allowed table
-    const touchesAllowed = ALLOWED_TABLES.some(t => upper.includes(t.toUpperCase()));
-    if (!touchesAllowed) {
-      throw new Error(`Query no permitida. Tablas disponibles: ${ALLOWED_TABLES.join(', ')}`);
-    }
-
-    // Inject client_id as $1 — ensures tenant isolation even if AI forgot
-    const rows = await this.ds.query(sql, [clientId]);
+    const rows = await this.ds.query(entry.sql, [clientId]);
     return JSON.stringify(rows.slice(0, 50)); // cap at 50 rows to keep context manageable
   }
 }

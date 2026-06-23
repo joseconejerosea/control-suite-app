@@ -31,6 +31,12 @@ jobs:
               DB_USERNAME="${{ secrets.PROD_DB_USERNAME }}"
               DB_PASSWORD="${{ secrets.PROD_DB_PASSWORD }}"
               DB_NAME="${{ secrets.PROD_DB_NAME }}"
+              DB_MIGRATION_USERNAME="${{ secrets.PROD_DB_MIGRATION_USERNAME }}"
+              DB_MIGRATION_PASSWORD="${{ secrets.PROD_DB_MIGRATION_PASSWORD }}"
+              DB_SYSTEM_USERNAME="${{ secrets.PROD_DB_SYSTEM_USERNAME }}"
+              DB_SYSTEM_PASSWORD="${{ secrets.PROD_DB_SYSTEM_PASSWORD }}"
+              DB_APP_USERNAME="${{ secrets.PROD_DB_APP_USERNAME }}"
+              DB_APP_PASSWORD="${{ secrets.PROD_DB_APP_PASSWORD }}"
               JWT_SECRET="${{ secrets.PROD_JWT_SECRET }}"
               JWT_REFRESH_SECRET="${{ secrets.PROD_JWT_REFRESH_SECRET }}"
               ALLOWED_ORIGIN="${{ secrets.PROD_ALLOWED_ORIGIN }}"
@@ -39,7 +45,7 @@ jobs:
               ANTHROPIC_API_KEY="${{ secrets.PROD_ANTHROPIC_API_KEY }}"
               ENV_LABEL="prod"
               FRONTEND_PORT=3100
-              NEXT_PUBLIC_API_URL="https://api.controlsuitte.com"
+              NEXT_PUBLIC_API_URL="${{ vars.PROD_NEXT_PUBLIC_API_URL }}"
             else
               DIR="$HOME/entornos/control-suite-dev"
               PORT=3001
@@ -48,6 +54,12 @@ jobs:
               DB_USERNAME="${{ secrets.DEV_DB_USERNAME }}"
               DB_PASSWORD="${{ secrets.DEV_DB_PASSWORD }}"
               DB_NAME="${{ secrets.DEV_DB_NAME }}"
+              DB_MIGRATION_USERNAME="${{ secrets.DEV_DB_MIGRATION_USERNAME }}"
+              DB_MIGRATION_PASSWORD="${{ secrets.DEV_DB_MIGRATION_PASSWORD }}"
+              DB_SYSTEM_USERNAME="${{ secrets.DEV_DB_SYSTEM_USERNAME }}"
+              DB_SYSTEM_PASSWORD="${{ secrets.DEV_DB_SYSTEM_PASSWORD }}"
+              DB_APP_USERNAME="${{ secrets.DEV_DB_APP_USERNAME }}"
+              DB_APP_PASSWORD="${{ secrets.DEV_DB_APP_PASSWORD }}"
               JWT_SECRET="${{ secrets.DEV_JWT_SECRET }}"
               JWT_REFRESH_SECRET="${{ secrets.DEV_JWT_REFRESH_SECRET }}"
               ALLOWED_ORIGIN="${{ secrets.DEV_ALLOWED_ORIGIN }}"
@@ -56,7 +68,7 @@ jobs:
               ANTHROPIC_API_KEY="${{ secrets.DEV_ANTHROPIC_API_KEY }}"
               ENV_LABEL="dev"
               FRONTEND_PORT=3000
-              NEXT_PUBLIC_API_URL="https://dev-api.controlsuitte.com"
+              NEXT_PUBLIC_API_URL="${{ vars.DEV_NEXT_PUBLIC_API_URL }}"
             fi
 
             cd "$DIR"
@@ -69,6 +81,12 @@ jobs:
             DB_PASSWORD=$DB_PASSWORD
             DB_NAME=$DB_NAME
             DB_SSL=true
+            DB_MIGRATION_USERNAME=$DB_MIGRATION_USERNAME
+            DB_MIGRATION_PASSWORD=$DB_MIGRATION_PASSWORD
+            DB_SYSTEM_USERNAME=$DB_SYSTEM_USERNAME
+            DB_SYSTEM_PASSWORD=$DB_SYSTEM_PASSWORD
+            DB_APP_USERNAME=$DB_APP_USERNAME
+            DB_APP_PASSWORD=$DB_APP_PASSWORD
             JWT_SECRET=$JWT_SECRET
             JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
             JWT_EXPIRES_IN=8h
@@ -98,5 +116,17 @@ jobs:
             UPLOAD_DIR=./uploads
             EOF
 
-            ENV=$ENV_LABEL PORT=$PORT FRONTEND_PORT=$FRONTEND_PORT NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL docker compose up --build -d
+            export ENV=$ENV_LABEL PORT=$PORT FRONTEND_PORT=$FRONTEND_PORT NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+            # Fase 2 · E6 — migraciones automáticas en el deploy.
+            # 1) build de la imagen backend
+            # 2) migración como one-off: conecta con DB_MIGRATION_* (owner/postgres)
+            #    y crea el rol controlsuite_app (migración 041). Usa el datasource
+            #    COMPILADO (sin ts-node, que no está en la imagen de prod).
+            # 3) si la migración falla, se corta acá (&&) y NO se reinicia la app:
+            #    la versión vieja sigue arriba. Si pasa, recién ahí se levanta todo.
+            docker compose build backend \
+              && docker compose run --rm backend npm run migration:run:prod \
+              && docker compose up --build -d
+
             docker image prune -f

@@ -8,6 +8,7 @@ import { Between, DataSource, FindManyOptions } from 'typeorm';
 import { EventProducer } from '../queue/producers/event.producer';
 import { EventoCrudo } from './evento-crudo.entity';
 import { QueryEventosCrudosDto } from './dto/evento-crudo.dto';
+import { tenantManager } from '../../common/tenant/tenant-context';
 
 @Injectable()
 export class EventosCrudosService {
@@ -21,7 +22,7 @@ export class EventosCrudosService {
     clientId: string,
     query: QueryEventosCrudosDto,
   ): Promise<EventoCrudo[]> {
-    const repo = this.dataSource.getRepository(EventoCrudo);
+    const repo = tenantManager(this.dataSource).getRepository(EventoCrudo);
 
     const where: FindManyOptions<EventoCrudo>['where'] = { client_id: clientId };
 
@@ -48,7 +49,7 @@ export class EventosCrudosService {
   }
 
   async findOne(clientId: string, id: string): Promise<EventoCrudo> {
-    const repo = this.dataSource.getRepository(EventoCrudo);
+    const repo = tenantManager(this.dataSource).getRepository(EventoCrudo);
     const event = await repo.findOne({
       where: { id, client_id: clientId },
     });
@@ -69,7 +70,7 @@ export class EventosCrudosService {
       );
     }
 
-    const repo = this.dataSource.getRepository(EventoCrudo);
+    const repo = tenantManager(this.dataSource).getRepository(EventoCrudo);
 
     
     // Old code published to queue first — if DB update failed after,
@@ -77,7 +78,7 @@ export class EventosCrudosService {
 
     // 1. Update DB status first
     await repo.update(
-      { id: event.id },
+      { id: event.id, client_id: clientId },
       {
         status: 'queued',
         queued_at: new Date(),
@@ -90,7 +91,7 @@ export class EventosCrudosService {
 
     // 3. Update job_id after publish
     await repo.update(
-      { id: event.id },
+      { id: event.id, client_id: clientId },
       { job_id: String(job.id) },
     );
 

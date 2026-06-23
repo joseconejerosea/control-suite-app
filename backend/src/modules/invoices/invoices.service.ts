@@ -222,8 +222,8 @@ export class InvoicesService {
     );
     await this.dataSource.query(
       `UPDATE eventos_crudos SET processing_status_new='reprocessing', status='reprocessing',
-       error_message=NULL, retries=0, reprocessed_at=NOW() WHERE id=$1`,
-      [eventoId],
+       error_message=NULL, retries=0, reprocessed_at=NOW() WHERE id=$1 AND client_id=$2`,
+      [eventoId, clientId],
     );
     await this.ocrQueue.add('ocr', { evento_crudo_id: eventoId, client_id: clientId, canal: 'manual' });
     return { success: true, message: 'Evento queued for reprocessing.' };

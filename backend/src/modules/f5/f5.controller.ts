@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  ParseUUIDPipe,
+  UseGuards,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -9,6 +19,13 @@ import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { ResendEmailService } from '../../common/email/resend.service';
+import {
+  CreateCheckinDto,
+  CreateIncidenciaDto,
+  CreateReporteAvanceDto,
+  EnviarReporteDto,
+  CerrarActivacionDto,
+} from './dto/f5.dto';
 
 @UseGuards(AuthGuard, ClientIsolationGuard, ClientActiveGuard)
 @Controller('v1/app/f5')
@@ -28,10 +45,11 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/checkins')
-  async createCheckin(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: any) {
+  async createCheckin(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: CreateCheckinDto) {
+    // persona_id = SIEMPRE el usuario autenticado (no se acepta del body — H5)
     const res = await this.ds.query(
       `INSERT INTO checkins (client_id, activacion_id, persona_id, observacion) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [user.client_id, id, body.persona_id ?? user.sub, body.observacion ?? null],
+      [user.client_id, id, user.sub, body.observacion ?? null],
     );
     return res[0];
   }
@@ -45,7 +63,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/incidencias')
-  async createIncidencia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: any) {
+  async createIncidencia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: CreateIncidenciaDto) {
     const res = await this.ds.query(
       `INSERT INTO incidencias (client_id, activacion_id, persona_id, descripcion, categoria, severidad)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
@@ -81,7 +99,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reportes-avance')
-  async createReporteAvance(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: any) {
+  async createReporteAvance(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: CreateReporteAvanceDto) {
     const res = await this.ds.query(
       `INSERT INTO reportes_avance (client_id, activacion_id, momento, observacion, persona_id)
        VALUES ($1,$2,$3,$4,$5)
@@ -115,7 +133,7 @@ export class F5Controller {
   async enviarReporte(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { destinatarios: string[]; htmlReporte: string },
+    @Body() body: EnviarReporteDto,
   ) {
     const acts = await this.ds.query(
       `SELECT a.*, c.nombre as cliente_nombre FROM activations a
@@ -142,12 +160,18 @@ export class F5Controller {
   }
 
   @Patch('activaciones/:id/cerrar')
-  async cerrarActivacion(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: any) {
+  async cerrarActivacion(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: CerrarActivacionDto) {
+    // H6: idempotencia + precondición de estado. Solo cierra si NO está ya
+    // cerrada ni cancelada. Si no matchea ninguna fila → o no existe, o ya
+    // estaba cerrada/cancelada: rechazamos con 409 en vez de re-cerrar.
     const res = await this.ds.query(
       `UPDATE activations SET estado_f5='cerrada', cerrada_at=NOW(), cierre_jsonb=$1, status='completed', updated_at=NOW()
-       WHERE id=$2 AND client_id=$3 RETURNING *`,
+       WHERE id=$2 AND client_id=$3 AND estado_f5 IS DISTINCT FROM 'cerrada' AND status <> 'cancelled' RETURNING *`,
       [JSON.stringify(body.cierre ?? {}), id, user.client_id],
     );
+    if (!res[0]) {
+      throw new ConflictException('La activación no existe, o ya está cerrada o cancelada.');
+    }
     return res[0];
   }
 }

@@ -13,6 +13,7 @@ import {
   RendicionFiltersDto,
 } from './dto/rendicion.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 import PDFDocument from 'pdfkit';
 
 @Injectable()
@@ -72,7 +73,7 @@ export class RendicionesService {
     );
 
     // Recalcular total
-    await this.recalcTotal(rendicionId);
+    await this.recalcTotal(rendicionId, clientId);
     this.logger.log(`[F2] Invoice ${invoiceId} asignada a rendición ${rendicionId}`);
   }
 
@@ -81,20 +82,25 @@ export class RendicionesService {
   // ─────────────────────────────────────────────────────────────────────────
   async cerrarRendicionesSemana(): Promise<void> {
     const periodoActual = this.isoWeek(new Date());
-    // Cerrar rendiciones borrador de semanas PASADAS
-    const borradores = await this.ds.query(
-      `SELECT id, client_id, project_id, monto_total
-       FROM rendiciones
-       WHERE estado='borrador' AND periodo < $1`,
-      [periodoActual],
+    // Fase 2: la lista de borradores es cross-tenant (pool de sistema, solo lectura).
+    const borradores = await runAsSystem(() =>
+      this.ds.query(
+        `SELECT id, client_id, project_id, monto_total
+         FROM rendiciones
+         WHERE estado='borrador' AND periodo < $1`,
+        [periodoActual],
+      ),
     );
 
     for (const r of borradores) {
-      await this.ds.query(
-        `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
-        [r.id],
-      );
-      await this.decidirAprobacion(r.id, r.client_id, r.project_id, parseFloat(r.monto_total));
+      // Cada cierre corre en la tx del tenant dueño.
+      await runWithTenant(this.ds, r.client_id, async () => {
+        await this.ds.query(
+          `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
+          [r.id],
+        );
+        await this.decidirAprobacion(r.id, r.client_id, r.project_id, parseFloat(r.monto_total));
+      });
     }
     this.logger.log(`[F2] Cerradas ${borradores.length} rendiciones de semanas pasadas`);
   }
@@ -165,7 +171,7 @@ export class RendicionesService {
   ): Promise<void> {
     try {
       const proj = await this.ds.query(
-        `SELECT name FROM projects WHERE id = $1`, [projectId],
+        `SELECT name FROM projects WHERE id = $1 AND client_id = $2`, [projectId, clientId],
       );
       const projectName = proj[0]?.name ?? 'Sin nombre';
 
@@ -246,8 +252,8 @@ export class RendicionesService {
       `SELECT ri.*, i.vendor_name, i.invoice_date, i.category
        FROM rendicion_items ri
        LEFT JOIN invoices i ON i.id = ri.invoice_id
-       WHERE ri.rendicion_id = $1`,
-      [id],
+       WHERE ri.rendicion_id = $1 AND ri.client_id = $2`,
+      [id, clientId],
     );
     return rendicion;
   }
@@ -256,8 +262,8 @@ export class RendicionesService {
     const r = await this.findOne(clientId, id);
     if (r.estado !== 'borrador') throw new BadRequestException('Solo borradores se pueden cerrar');
     await this.ds.query(
-      `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
-      [id],
+      `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1 AND client_id=$2`,
+      [id, clientId],
     );
     await this.decidirAprobacion(id, clientId, r.project_id, parseFloat(r.monto_total));
   }
@@ -268,8 +274,8 @@ export class RendicionesService {
     await this.ds.query(
       `UPDATE rendiciones
        SET estado='aprobada', aprobada_at=NOW(), aprobada_por_user_id=$2, aprobada_auto=false, updated_at=NOW()
-       WHERE id=$1`,
-      [id, userId],
+       WHERE id=$1 AND client_id=$3`,
+      [id, userId, clientId],
     );
   }
 
@@ -278,8 +284,8 @@ export class RendicionesService {
     await this.ds.query(
       `UPDATE rendiciones
        SET estado='rechazada', rechazada_at=NOW(), rechazada_motivo=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, dto.motivo],
+       WHERE id=$1 AND client_id=$3`,
+      [id, dto.motivo, clientId],
     );
   }
 
@@ -289,8 +295,8 @@ export class RendicionesService {
     await this.ds.query(
       `UPDATE rendiciones
        SET estado='pagada', pagada_at=NOW(), comprobante_pago_key=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, dto.comprobante_pago_key ?? null],
+       WHERE id=$1 AND client_id=$3`,
+      [id, dto.comprobante_pago_key ?? null, clientId],
     );
   }
 
@@ -322,12 +328,12 @@ export class RendicionesService {
     const clientName = clientRows[0]?.nombre ?? 'Cliente';
 
     const personaRows = await this.ds.query(
-      `SELECT full_name FROM users WHERE id = $1
-       UNION ALL SELECT CONCAT(nombre, ' ', apellido) FROM promoters WHERE id = $1
+      `SELECT full_name AS persona_name FROM users WHERE id = $1 AND client_id = $2
+       UNION ALL SELECT name AS persona_name FROM promoters WHERE id = $1 AND client_id = $2
        LIMIT 1`,
-      [rendicion.persona_id],
+      [rendicion.persona_id, clientId],
     ).catch(() => []);
-    const personaName = personaRows[0]?.full_name ?? personaRows[0]?.concat ?? rendicion.persona_id?.slice(0, 8) ?? '—';
+    const personaName = personaRows[0]?.persona_name ?? rendicion.persona_id?.slice(0, 8) ?? '—';
 
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -400,14 +406,14 @@ export class RendicionesService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  private async recalcTotal(rendicionId: string): Promise<void> {
+  private async recalcTotal(rendicionId: string, clientId: string): Promise<void> {
     await this.ds.query(
       `UPDATE rendiciones
        SET monto_total = (
-         SELECT COALESCE(SUM(monto),0) FROM rendicion_items WHERE rendicion_id=$1
+         SELECT COALESCE(SUM(monto),0) FROM rendicion_items WHERE rendicion_id=$1 AND client_id=$2
        ), updated_at=NOW()
-       WHERE id=$1`,
-      [rendicionId],
+       WHERE id=$1 AND client_id=$2`,
+      [rendicionId, clientId],
     );
   }
 

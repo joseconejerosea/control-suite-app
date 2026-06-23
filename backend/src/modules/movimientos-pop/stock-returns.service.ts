@@ -48,12 +48,12 @@ export class StockReturnsService {
     }
 
     const projRows = await this.ds.query(
-      `SELECT name FROM projects WHERE id = $1`, [projectId],
+      `SELECT name FROM projects WHERE id = $1 AND client_id = $2`, [projectId, clientId],
     );
     const projectName = projRows[0]?.name ?? '';
 
     for (const [personaId, items] of grouped) {
-      const phone = await this.resolvePhone(personaId);
+      const phone = await this.resolvePhone(personaId, clientId);
       if (!phone) continue;
 
       const lang = await this.getUserLanguage(clientId);
@@ -115,8 +115,8 @@ export class StockReturnsService {
     await this.ds.query(
       `UPDATE stock_return_requests
        SET photo_key = $2, photo_classification = $3, photo_received_at = NOW()
-       WHERE id = $1`,
-      [returnRequestId, photoKey, classification],
+       WHERE id = $1 AND client_id = $4`,
+      [returnRequestId, photoKey, classification, clientId],
     );
   }
 
@@ -162,8 +162,8 @@ export class StockReturnsService {
     }
 
     await this.ds.query(
-      `UPDATE stock_return_requests SET status = 'confirmed', confirmed_at = NOW(), confirmed_by = $2 WHERE id = $1`,
-      [id, userId],
+      `UPDATE stock_return_requests SET status = 'confirmed', confirmed_at = NOW(), confirmed_by = $2 WHERE id = $1 AND client_id = $3`,
+      [id, userId, clientId],
     );
 
     await this.audit.log({
@@ -172,7 +172,7 @@ export class StockReturnsService {
     });
 
     // Notify person
-    const phone = await this.resolvePhone(req.persona_id);
+    const phone = await this.resolvePhone(req.persona_id, clientId);
     if (phone) {
       const lang = await this.getUserLanguage(clientId);
       const msg = lang === 'en'
@@ -196,8 +196,8 @@ export class StockReturnsService {
     if (!rows.length) throw new NotFoundException('Return request not found');
 
     await this.ds.query(
-      `UPDATE stock_return_requests SET status = 'rejected', rejection_reason = $2 WHERE id = $1`,
-      [id, reason],
+      `UPDATE stock_return_requests SET status = 'rejected', rejection_reason = $2 WHERE id = $1 AND client_id = $3`,
+      [id, reason, clientId],
     );
 
     await this.audit.log({
@@ -205,7 +205,7 @@ export class StockReturnsService {
       entityId: id, metadata: { reason }, ip,
     });
 
-    const phone = await this.resolvePhone(rows[0].persona_id);
+    const phone = await this.resolvePhone(rows[0].persona_id, clientId);
     if (phone) {
       const lang = await this.getUserLanguage(clientId);
       const msg = lang === 'en'
@@ -246,13 +246,14 @@ export class StockReturnsService {
     return text.includes('correct') ? 'looks_correct' : 'does_not_match';
   }
 
-  private async resolvePhone(personaId: string): Promise<string | null> {
+  private async resolvePhone(personaId: string, clientId: string): Promise<string | null> {
+    // Phone lives on promoters/collaborators (the field personas). `users` has
+    // no phone column in the schema, so including it made the whole UNION fail.
     const rows = await this.ds.query(
-      `SELECT phone FROM promoters WHERE id = $1
-       UNION ALL SELECT phone FROM collaborators WHERE id = $1
-       UNION ALL SELECT phone FROM users WHERE id = $1
+      `SELECT phone FROM promoters WHERE id = $1 AND client_id = $2
+       UNION ALL SELECT phone FROM collaborators WHERE id = $1 AND client_id = $2
        LIMIT 1`,
-      [personaId],
+      [personaId, clientId],
     ).catch(() => []);
     return rows[0]?.phone ?? null;
   }

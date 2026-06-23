@@ -74,6 +74,8 @@ export class ProjectInboxService {
     const qr = this.ds.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
+    // Fase 2 — este QueryRunner manual no pasa por el patch del ds: setear el GUC acá.
+    await qr.query(`SELECT set_config('app.current_tenant', $1, true)`, [tenantId]);
 
     try {
       const projRes = await qr.query(

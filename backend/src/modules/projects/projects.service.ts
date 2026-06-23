@@ -354,8 +354,8 @@ export class ProjectsService {
     if (!conv) throw new NotFoundException('Convocatoria no encontrada');
 
     await this.dataSource.query(
-      `UPDATE convocatorias SET estado='reemplazada', updated_at=NOW() WHERE id=$1`,
-      [convId],
+      `UPDATE convocatorias SET estado='reemplazada', updated_at=NOW() WHERE id=$1 AND client_id=$2`,
+      [convId, clientId],
     );
 
     await this.dataSource.query(
@@ -379,7 +379,7 @@ export class ProjectsService {
 
     if (promotor?.phone) {
       const [proyecto] = await this.dataSource.query(
-        `SELECT name FROM projects WHERE id=$1`, [projectId],
+        `SELECT name FROM projects WHERE id=$1 AND client_id=$2`, [projectId, clientId],
       );
       await this.wa.enviarConvocatoria({
         telefono:       promotor.phone,

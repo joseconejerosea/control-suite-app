@@ -9,6 +9,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CurrentClientId } from '../../common/decorators/current-client.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { IsString, IsNotEmpty, IsArray, IsOptional, IsIn } from 'class-validator';
 
@@ -38,11 +39,14 @@ export class SupportController {
   }
 
   @Get('kpis')
-  kpis() { return this.svc.kpis(); }
+  kpis(@CurrentClientId() clientId: string) { return this.svc.kpis(clientId); }
 
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.svc.findOne(id);
+  findOne(
+    @CurrentClientId() clientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.svc.findOne(id, clientId);
   }
 
   @Post()

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import Anthropic from '@anthropic-ai/sdk';
@@ -102,11 +102,21 @@ export class MindAnalistaService {
   }
 
   private async recopilarDatosProyecto(clientId: string, projectId: string): Promise<Record<string, unknown>> {
-    const [proyecto, facturas, rendiciones, movimientos] = await Promise.all([
-      this.ds.query(`SELECT * FROM projects WHERE id=$1 AND client_id=$2`, [projectId, clientId]),
-      this.ds.query(`SELECT SUM(amount::numeric) as total, COUNT(*) as n FROM invoices WHERE project_id=$1`, [projectId]),
-      this.ds.query(`SELECT estado, COUNT(*), SUM(monto_total::numeric) as total FROM rendiciones WHERE project_id=$1 GROUP BY estado`, [projectId]),
-      this.ds.query(`SELECT tipo, SUM(cantidad) as total FROM movimientos_pop WHERE proyecto_destino_id=$1 GROUP BY tipo`, [projectId]),
+    // Verify ownership FIRST and short-circuit — otherwise a foreign projectId
+    // would still aggregate another tenant's invoices/rendiciones/movimientos.
+    const proyecto = await this.ds.query(
+      `SELECT * FROM projects WHERE id=$1 AND client_id=$2`,
+      [projectId, clientId],
+    );
+    if (!proyecto.length) {
+      throw new NotFoundException(`Proyecto ${projectId} no encontrado`);
+    }
+
+    // Every aggregate is also scoped by client_id (defence in depth).
+    const [facturas, rendiciones, movimientos] = await Promise.all([
+      this.ds.query(`SELECT SUM(amount::numeric) as total, COUNT(*) as n FROM invoices WHERE project_id=$1 AND client_id=$2`, [projectId, clientId]),
+      this.ds.query(`SELECT estado, COUNT(*), SUM(monto_total::numeric) as total FROM rendiciones WHERE project_id=$1 AND client_id=$2 GROUP BY estado`, [projectId, clientId]),
+      this.ds.query(`SELECT tipo, SUM(cantidad) as total FROM movimientos_pop WHERE proyecto_destino_id=$1 AND client_id=$2 GROUP BY tipo`, [projectId, clientId]),
     ]);
     return { proyecto: proyecto[0], facturas: facturas[0], rendiciones, movimientos };
   }
