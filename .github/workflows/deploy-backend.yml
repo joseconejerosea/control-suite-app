@@ -45,7 +45,7 @@ jobs:
               ANTHROPIC_API_KEY="${{ secrets.PROD_ANTHROPIC_API_KEY }}"
               ENV_LABEL="prod"
               FRONTEND_PORT=3100
-              NEXT_PUBLIC_API_URL="https://api.controlsuitte.com"
+              NEXT_PUBLIC_API_URL="${{ vars.PROD_NEXT_PUBLIC_API_URL }}"
             else
               DIR="$HOME/entornos/control-suite-dev"
               PORT=3001
@@ -68,7 +68,7 @@ jobs:
               ANTHROPIC_API_KEY="${{ secrets.DEV_ANTHROPIC_API_KEY }}"
               ENV_LABEL="dev"
               FRONTEND_PORT=3000
-              NEXT_PUBLIC_API_URL="https://dev-api.controlsuitte.com"
+              NEXT_PUBLIC_API_URL="${{ vars.DEV_NEXT_PUBLIC_API_URL }}"
             fi
 
             cd "$DIR"
