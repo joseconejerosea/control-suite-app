@@ -23,6 +23,11 @@ jobs:
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
+            # set -e: aborta el script ante el primer comando que falle (sin
+            # esto, un build roto quedaba enmascarado por el `docker image prune`
+            # final y la CI reportaba éxito). pipefail: falla si falla cualquier
+            # comando de un pipe, no solo el último.
+            set -eo pipefail
             if [ "${{ github.base_ref }}" = "main" ]; then
               DIR="$HOME/entornos/control-suite-prod"
               PORT=3002
@@ -123,10 +128,12 @@ jobs:
             # 2) migración como one-off: conecta con DB_MIGRATION_* (owner/postgres)
             #    y crea el rol controlsuite_app (migración 041). Usa el datasource
             #    COMPILADO (sin ts-node, que no está en la imagen de prod).
-            # 3) si la migración falla, se corta acá (&&) y NO se reinicia la app:
-            #    la versión vieja sigue arriba. Si pasa, recién ahí se levanta todo.
-            docker compose build backend \
-              && docker compose run --rm backend npm run migration:run:prod \
-              && docker compose up --build -d
+            # 3) si el build o la migración fallan, `set -e` aborta el script ACÁ
+            #    y NO se reinicia la app: la versión vieja sigue arriba. Comandos
+            #    separados (no `&&`) para que `set -e` evalúe cada uno: dentro de
+            #    una cadena `&&` el comando que falla queda eximido de `set -e`.
+            docker compose build backend
+            docker compose run --rm backend npm run migration:run:prod
+            docker compose up --build -d
 
             docker image prune -f
