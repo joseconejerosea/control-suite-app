@@ -50,9 +50,14 @@ async function bootstrap() {
   });
   await systemDataSource.initialize();
   setSystemDataSource(systemDataSource);
-  app.beforeApplicationShutdown(async () => {
+  // El systemDataSource es standalone (no es un provider de Nest), así que lo
+  // cerramos a mano en las señales de cierre. `enableShutdownHooks()` (arriba)
+  // ya cierra grácilmente la app de Nest; esto solo libera este pool extra.
+  const closeSystemDataSource = async () => {
     if (systemDataSource.isInitialized) await systemDataSource.destroy();
-  });
+  };
+  process.once('SIGTERM', closeSystemDataSource);
+  process.once('SIGINT', closeSystemDataSource);
 
   const fastifyInstance = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
   
