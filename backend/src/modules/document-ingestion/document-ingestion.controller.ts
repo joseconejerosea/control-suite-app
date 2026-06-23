@@ -5,14 +5,41 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  PayloadTooLargeException,
   Post,
   Query,
   Req,
+  UnsupportedMediaTypeException,
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
+import { TargetTable } from './document-upload.entity';
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — debe coincidir con el límite del plugin multipart (main.ts)
+
+// Allow-list de MIME aceptados en el upload de documentos estructurados
+// (decisión 2026-06-23: PDF, imágenes, Excel/CSV, Word). Excluye PPT/video
+// a propósito; si se requieren, agregar acá Y en el parse() del service.
+const ALLOWED_MIME = new Set<string>([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-excel', // .xls
+  'text/csv',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword', // .doc
+]);
+
+const ALLOWED_TARGET_TABLES: ReadonlySet<TargetTable> = new Set<TargetTable>([
+  'promoters',
+  'locations',
+  'campaigns',
+  'activations',
+  'collaborators',
+]);
 
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -44,11 +71,40 @@ export class DocumentIngestionController {
       throw new BadRequestException('No file uploaded.');
     }
 
+    // 1) MIME allow-list (disponible antes de consumir el stream)
+    if (!ALLOWED_MIME.has(data.mimetype)) {
+      throw new UnsupportedMediaTypeException(
+        `Tipo de archivo no permitido: ${data.mimetype}. Permitidos: PDF, imagen (JPG/PNG), Excel/CSV, Word.`,
+      );
+    }
+
+    // 2) Leer el stream con tope de tamaño. El plugin multipart trunca en
+    //    silencio al pasar el límite; rechazamos explícitamente en vez de
+    //    almacenar un archivo cortado.
     const chunks: Buffer[] = [];
-    for await (const chunk of data.file) {
-      chunks.push(chunk);
+    try {
+      for await (const chunk of data.file) {
+        chunks.push(chunk);
+      }
+    } catch {
+      throw new PayloadTooLargeException(
+        `El archivo supera el límite de ${MAX_FILE_BYTES / (1024 * 1024)} MB.`,
+      );
+    }
+    if (data.file.truncated) {
+      throw new PayloadTooLargeException(
+        `El archivo supera el límite de ${MAX_FILE_BYTES / (1024 * 1024)} MB.`,
+      );
     }
     const fileBuffer = Buffer.concat(chunks);
+
+    // 3) target_table validado contra el enum (viene del multipart sin tipar)
+    const target_table = data.fields?.target_table?.value ?? 'promoters';
+    if (!ALLOWED_TARGET_TABLES.has(target_table as TargetTable)) {
+      throw new BadRequestException(
+        `target_table inválido: ${target_table}. Permitidos: ${[...ALLOWED_TARGET_TABLES].join(', ')}.`,
+      );
+    }
 
     const ext = path.extname(data.filename).toLowerCase();
     const fileName = `${randomUUID()}${ext}`;
@@ -64,7 +120,6 @@ export class DocumentIngestionController {
       data.mimetype,
     );
 
-    const target_table = data.fields?.target_table?.value ?? 'promoters';
     const project_id = data.fields?.project_id?.value ?? null;
 
     return this.service.registerUpload(clientId, {

@@ -15,6 +15,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.guard';
 import { WebhooksService } from './webhooks.service';
 import { Public } from '../../common/decorators/public.decorator';
+import { constantTimeEqual } from '../../common/utils/constant-time';
 
 interface FastifyRequestWithRawBody extends FastifyRequest {
   rawBody: Buffer;
@@ -34,8 +35,13 @@ export class WebhooksController {
     @Query('hub.challenge') challenge: string,
     @Res() reply: FastifyReply,
   ) {
-    const VERIFY_TOKEN = process.env.WEBHOOK_SECRET ?? 'change_me';
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    const verifyToken = process.env.WEBHOOK_SECRET;
+    if (!verifyToken) {
+      // fail-closed: sin secreto configurado no validamos contra un literal
+      reply.status(403).send('Forbidden');
+      return;
+    }
+    if (mode === 'subscribe' && constantTimeEqual(token, verifyToken)) {
       reply.status(200).send(challenge);
     } else {
       reply.status(403).send('Forbidden');

@@ -10,6 +10,8 @@ import { ClarificationService } from '../project-resolver/clarification.service'
 import { ProjectResolverService } from '../project-resolver/project-resolver.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.guard';
+import { constantTimeEqual } from '../../common/utils/constant-time';
+import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 
 const QUEUE_OCR = 'ocr';
 
@@ -25,6 +27,7 @@ export class WhatsAppWebhookController {
     private readonly projectResolver: ProjectResolverService,
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
+    private readonly shield: PromptShieldService,
   ) {}
 
   // ── Webhook verification (Meta challenge) ─────────────────────────────────
@@ -36,7 +39,13 @@ export class WhatsAppWebhookController {
     @Query('hub.verify_token') token:     string,
     @Query('hub.challenge')    challenge: string,
   ) {
-    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+    if (!verifyToken) {
+      // fail-closed: sin verify token configurado no verificamos el webhook
+      this.logger.error('[WhatsApp] WHATSAPP_VERIFY_TOKEN no configurado — rechazando verificación');
+      return 'Forbidden';
+    }
+    if (mode === 'subscribe' && constantTimeEqual(token, verifyToken)) {
       this.logger.log('[WhatsApp] Webhook verified');
       return parseInt(challenge);
     }
@@ -436,6 +445,15 @@ export class WhatsAppWebhookController {
     messageId: string,
   ) {
     const text = (msg.text?.body as string | undefined)?.trim() ?? '';
+
+    // ── PromptShield (H7) — entrypoint de usuario: tratar el texto como dato
+    //    no confiable antes de pasarlo a flujos que lo alimentan a IA.
+    const shield = this.shield.checkLocal(text);
+    if (!shield.safe) {
+      this.logger.warn(`[WhatsApp] Mensaje bloqueado por shield (${shield.category}) from=${from}`);
+      await this.wa.sendText(from, 'No puedo procesar ese mensaje.');
+      return;
+    }
 
     // Clarification flow — intercept before other handlers
     const handled = await this.clarification.handleClarificationResponse(from, text, messageId, canalId);
