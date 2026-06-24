@@ -33,18 +33,29 @@ export class SanitizeInputPipe implements PipeTransform {
     }
   }
 
-  private sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
+  private sanitizeValue(val: unknown): unknown {
+    if (typeof val === 'string') {
+      this.checkForInjection(val);
+      return val.trim();
+    }
+    if (typeof val === 'object' && val !== null) {
+      return this.sanitizeObject(val as Record<string, unknown>);
+    }
+    return val;
+  }
+
+  private sanitizeObject(
+    obj: Record<string, unknown>,
+  ): Record<string, unknown> | unknown[] {
+    // Preservar arrays: si reconstruimos con un objeto literal, un array
+    // termina como {"0":..,"1":..} y rompe todo consumidor que espere `[...]`
+    // (incl. el body de webhooks tipo WhatsApp y cualquier DTO con string[]).
+    if (Array.isArray(obj)) {
+      return obj.map((item) => this.sanitizeValue(item));
+    }
     const sanitized: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
-      const val = obj[key];
-      if (typeof val === 'string') {
-        this.checkForInjection(val);
-        sanitized[key] = val.trim();
-      } else if (typeof val === 'object' && val !== null) {
-        sanitized[key] = this.sanitizeObject(val as Record<string, unknown>);
-      } else {
-        sanitized[key] = val;
-      }
+      sanitized[key] = this.sanitizeValue(obj[key]);
     }
     return sanitized;
   }
