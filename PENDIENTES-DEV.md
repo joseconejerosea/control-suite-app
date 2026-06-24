@@ -101,13 +101,20 @@ Y agregar `REDIS_TLS=true` al bloque del `.env` en `.github/workflows/deploy-bac
 
 ## 6. Código pendiente — DEPLOYAR
 
-- [ ] **Fix OCR storage_path** (en working tree, falta mergear/deployar):
-      `backend/src/modules/queue/processors/ocr.processor.ts` — ahora baja el archivo
-      del Supabase Storage con `storage_path` cuando no hay `file_base64` (era el
-      `"No file data in payload"`). Type-check OK. **Sin esto, el comprobante sigue en `failed_ocr`.**
+- [x] ~~Fix OCR storage_path~~ → DEPLOYADO y funcionando (OCR leyó el comprobante, 1069 chars).
+- [ ] **Fix persist source** (en working tree, falta deployar):
+      `backend/src/modules/queue/processors/persist.processor.ts` — `invoices.source`
+      es NOT NULL pero el persist leía `eventos_crudos.canal` (null en WhatsApp, que llena
+      `source`). Fix: `const channel = canal ?? source ?? 'unknown'` y usarlo en el INSERT,
+      `resolvePersonaId` y el export a sheets. Type-check OK. **Era el `failed_classification:
+      null value in column "source"`.** Sin esto, el comprobante no se guarda como invoice.
 - [ ] Sacar la línea de debug `[WhatsApp] RAW payload:` en
       `whatsapp.webhook.controller.ts` (loguea PII).
 - [ ] Rotar credenciales expuestas en el chat (DB pass, Supabase service role, tokens).
+
+> Nota: el cliente "Control Suite Demo" NO tiene proyectos activos → el doc queda con
+> `project_id=null` y el ProjectResolver no puede asignar proyecto. Para el flujo F1
+> completo conviene crear un proyecto activo para el cliente. No bloquea el OCR/invoice.
 
 > Orden mañana: (1) deployar el fix del OCR + sacar debug log, (2) aplicar las
 > variables (sección 4, con `REDIS_TLS` y `ANTHROPIC_API_KEY`), (3) mandar un
