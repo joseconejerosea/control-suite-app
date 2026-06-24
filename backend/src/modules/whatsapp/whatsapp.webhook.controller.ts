@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Query, Body, Logger, HttpCode, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Logger, HttpCode, UseGuards, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -38,18 +39,24 @@ export class WhatsAppWebhookController {
     @Query('hub.mode')         mode:      string,
     @Query('hub.verify_token') token:     string,
     @Query('hub.challenge')    challenge: string,
+    @Res()                     reply:     FastifyReply,
   ) {
+    // Usamos @Res para devolver el challenge CRUDO. Sin esto, el
+    // ResponseInterceptor global lo envuelve en { data, timestamp, path } y
+    // Meta no valida (espera el challenge pelado en el body).
     const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
     if (!verifyToken) {
       // fail-closed: sin verify token configurado no verificamos el webhook
       this.logger.error('[WhatsApp] WHATSAPP_VERIFY_TOKEN no configurado — rechazando verificación');
-      return 'Forbidden';
+      reply.status(403).send('Forbidden');
+      return;
     }
     if (mode === 'subscribe' && constantTimeEqual(token, verifyToken)) {
       this.logger.log('[WhatsApp] Webhook verified');
-      return parseInt(challenge);
+      reply.status(200).send(challenge);
+      return;
     }
-    return 'Forbidden';
+    reply.status(403).send('Forbidden');
   }
 
   // ── Incoming messages ─────────────────────────────────────────────────────
