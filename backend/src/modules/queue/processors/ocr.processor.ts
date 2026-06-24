@@ -6,6 +6,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../metrics/metrics.service';
+import { StorageService } from '../../../common/storage/storage.service';
 
 const QUEUE_F1_CLASSIFY = 'classify';
 const F1_OCR_MAX_CHARS  = 50000;
@@ -19,6 +20,7 @@ export class OcrProcessor extends WorkerHost {
     @InjectQueue(QUEUE_F1_CLASSIFY) private readonly classifyQueue: Queue,
     private readonly config: ConfigService,
     private readonly metrics: MetricsService,
+    private readonly storage: StorageService,
   ) {
     super();
   }
@@ -40,8 +42,24 @@ export class OcrProcessor extends WorkerHost {
       if (!rows.length) throw new Error('Evento not found');
 
       const payload  = rows[0].payload;
-      const mimeType = rows[0].doc_mime_type;
-      const base64   = payload.file_base64;
+      // doc_mime_type (columna) puede venir null en eventos de WhatsApp; el mime
+      // real viaja en el payload.
+      const mimeType = rows[0].doc_mime_type ?? payload.mime_type;
+
+      // El archivo puede venir como base64 inline (rama de desambiguación) o,
+      // lo normal, como storage_path (handleImage/handleDocument lo suben a
+      // Supabase Storage). Si no hay base64, lo bajamos del storage.
+      let base64 = payload.file_base64;
+      if (!base64 && payload.storage_path) {
+        try {
+          const buffer = await this.storage.download(payload.storage_path);
+          base64 = buffer.toString('base64');
+        } catch (err: any) {
+          await this.setStatus(evento_crudo_id, 'failed_ocr', `Storage download failed: ${err.message}`);
+          this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_ocr' });
+          return;
+        }
+      }
 
       if (!base64) {
         await this.setStatus(evento_crudo_id, 'failed_ocr', 'No file data in payload');
