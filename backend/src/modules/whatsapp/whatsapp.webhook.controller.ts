@@ -67,6 +67,8 @@ export class WhatsAppWebhookController {
   @HttpCode(200)
   async handleIncoming(@Body() body: any) {
     try {
+      // TEMP DEBUG: ver el payload crudo que manda Meta (quitar después)
+      this.logger.log(`[WhatsApp] RAW payload: ${JSON.stringify(body)?.slice(0, 1500)}`);
       const entry   = body?.entry?.[0];
       const changes = entry?.changes?.[0];
       const value   = changes?.value;
