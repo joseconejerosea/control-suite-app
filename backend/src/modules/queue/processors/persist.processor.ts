@@ -49,10 +49,13 @@ export class PersistProcessor extends WorkerHost {
     const confidence = classification.confidence_score ?? 0;
 
     const eventoRows = await this.dataSource.query(
-      `SELECT payload, canal, email_from FROM eventos_crudos WHERE id=$1`, [evento_crudo_id],
+      `SELECT payload, canal, source, email_from FROM eventos_crudos WHERE id=$1`, [evento_crudo_id],
     );
     if (!eventoRows.length) throw new Error('Evento not found');
-    const { canal, payload, email_from } = eventoRows[0];
+    const { canal, source: eventoSource, payload, email_from } = eventoRows[0];
+    // WhatsApp guarda el canal en la columna `source` (no `canal`). `invoices.source`
+    // es NOT NULL → fallback para no romper el INSERT con un canal null.
+    const channel = canal ?? eventoSource ?? 'unknown';
 
     const category    = destino === 'gastos' ? 'expense' : destino === 'ventas' ? 'sale' : 'cost';
     const amount      = datos.monto_total ?? 0;
@@ -84,7 +87,7 @@ export class PersistProcessor extends WorkerHost {
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING id`,
       [
-        client_id, canal, vendorName, amount, datos.moneda ?? 'CLP',
+        client_id, channel, vendorName, amount, datos.moneda ?? 'CLP',
         invoiceDate, category, description, 'pending',
         JSON.stringify(classification), JSON.stringify(classification),
       ],
@@ -105,7 +108,7 @@ export class PersistProcessor extends WorkerHost {
         const projectId = classification.proyecto_id_sugerido
           ?? (typeof payload === 'object' ? payload?.project_id : null)
           ?? null;
-        const personaId = await this.resolvePersonaId(client_id, payload, canal);
+        const personaId = await this.resolvePersonaId(client_id, payload, channel);
         if (personaId) {
           await this.rendicionesService.asignarFacturaARendicion(
             client_id, invoiceId, personaId, projectId, amount, invoiceDate,
@@ -125,7 +128,7 @@ export class PersistProcessor extends WorkerHost {
       invoice_date: invoiceDate,
       category,
       description,
-      source: canal,
+      source: channel,
       confidence_score: confidence,
       ai_classification: classification,
     });
