@@ -15,6 +15,7 @@ export default function AdminUsuariosPage() {
   const [selectedClient, setSelectedClient] = useState<string>("");
   const [users, setUsers]           = useState<any[]>([]);
   const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser]     = useState<any>(null);
   const [form, setForm]             = useState({ email: "", password: "", full_name: "", role: "user" });
@@ -28,11 +29,15 @@ export default function AdminUsuariosPage() {
 
   const fetchUsers = async (clientId: string) => {
     if (!clientId) return;
+    setError(null);
     setLoading(true);
     try {
-      const r = await api.get<any>(`/admin/users?client_id=${clientId}`);
+      const r = await api.get<any>(`/v1/app/admin/users?client_id=${clientId}`);
       setUsers(Array.isArray(r) ? r : (r?.data ?? []));
-    } catch { setUsers([]); }
+    } catch {
+      setError("Error al cargar usuarios");
+      setUsers([]);
+    }
     setLoading(false);
   };
 
@@ -42,7 +47,13 @@ export default function AdminUsuariosPage() {
 
   const createUser = async () => {
     if (!selectedClient || !form.email || !form.password) return;
-    await api.post("/admin/users", { ...form, client_id: selectedClient }).catch(console.error);
+    setError(null);
+    try {
+      await api.post("/v1/app/admin/users", { ...form, client_id: selectedClient });
+    } catch {
+      setError("Error al crear usuario");
+      return;
+    }
     setShowCreate(false);
     setForm({ email: "", password: "", full_name: "", role: "user" });
     fetchUsers(selectedClient);
@@ -50,17 +61,29 @@ export default function AdminUsuariosPage() {
 
   const updateUser = async () => {
     if (!editUser) return;
+    setError(null);
     const body: any = {};
     if (editUser.role) body.role = editUser.role;
     if (editUser.full_name !== undefined) body.full_name = editUser.full_name;
     if (editUser.is_active !== undefined) body.is_active = editUser.is_active;
-    await api.patch(`/admin/users/${editUser.id}`, body).catch(console.error);
+    try {
+      await api.patch(`/v1/app/admin/users/${editUser.id}`, body);
+    } catch {
+      setError("Error al actualizar usuario");
+      return;
+    }
     setEditUser(null);
     fetchUsers(selectedClient);
   };
 
   const toggleActive = async (u: any) => {
-    await api.patch(`/admin/users/${u.id}`, { is_active: !u.is_active }).catch(console.error);
+    setError(null);
+    try {
+      await api.patch(`/v1/app/admin/users/${u.id}`, { is_active: !u.is_active });
+    } catch {
+      setError("Error al cambiar estado del usuario");
+      return;
+    }
     fetchUsers(selectedClient);
   };
 
@@ -111,6 +134,18 @@ export default function AdminUsuariosPage() {
 
         {selectedClient && (
           <>
+            {/* Error banner */}
+            {error && (
+              <div className="flex items-center justify-between rounded-xl px-4 py-3 mb-4"
+                style={{ background: "rgba(200,32,44,0.10)", border: "1px solid rgba(200,32,44,0.35)", color: "#e8353f" }}>
+                <span className="text-sm">{error}</span>
+                <button onClick={() => setError(null)}
+                  style={{ background: "none", border: "none", color: "#e8353f", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 0 0 12px" }}>
+                  ×
+                </button>
+              </div>
+            )}
+
             {/* KPIs */}
             <div className="grid grid-cols-4 gap-3 mb-4">
               {[

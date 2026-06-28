@@ -1,0 +1,39 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Producto: SaaS multi-tenant de operaciones de marketing de terreno (trade
+  marketing / activaciones) con captura por WhatsApp/email e IA (OCR + ruteo).
+  Backend: NestJS 10 (Fastify) · TypeORM + PostgreSQL (Supabase, RLS activo) ·
+  BullMQ/Redis · Anthropic + OpenAI SDK · JWT/Passport.
+  Frontend: Next.js 16 / React 19 · shadcn + Tailwind 4.
+  Multi-tenancy: ClientIsolationGuard + TenantInterceptor (abre tx con
+  app.current_tenant) + RLS de Postgres. Auditoría via AuditInterceptor.
+  Dominio por fases: F0 onboarding, F1 review, F5 terreno (checkins/incidencias),
+  rendiciones (reembolsos), inventario POP (bodegas/skus/movimientos), mind (IA).
+  Testing: Jest (unit + e2e). Migraciones: TypeORM CLI.
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes (DB migrations, RLS policies)
+    - Identify affected modules and whether tenant isolation/RLS is touched
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for cross-module flows (ingestion, project-resolver)
+    - Document architecture decisions with rationale
+  tasks:
+    - Group tasks by phase (migration, implementation, testing)
+    - Use hierarchical numbering (1.1, 1.2, etc.)
+    - Keep tasks small enough to complete in one session
+  apply:
+    - Follow existing NestJS module/DTO/guard conventions
+    - Never disable tenant isolation or RLS to make a feature work
+    - Load supabase-postgres-best-practices skill for any query/schema work
+  verify:
+    - Run jest if test infrastructure exists
+    - Compare implementation against every spec scenario
+    - Confirm tenant isolation is preserved
+  archive:
+    - Warn before merging destructive deltas (large removals, RLS changes)
