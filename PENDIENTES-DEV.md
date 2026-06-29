@@ -108,9 +108,29 @@ Y agregar `REDIS_TLS=true` al bloque del `.env` en `.github/workflows/deploy-bac
       `source`). Fix: `const channel = canal ?? source ?? 'unknown'` y usarlo en el INSERT,
       `resolvePersonaId` y el export a sheets. Type-check OK. **Era el `failed_classification:
       null value in column "source"`.** Sin esto, el comprobante no se guarda como invoice.
+- [ ] **Cost logging OCR F1** (en working tree, falta deployar):
+      `ocr.processor.ts` ahora captura el `usage` de Claude e inserta en `ai_costs_log`
+      (antes se descartaba → la Auditoría AI no mostraba el gasto del flujo F1).
+      Pendiente: hacer lo mismo en `classify.processor.ts` (también usa IA y no loguea costo).
+- [ ] **Bug monitoring**: `monitoring.controller.ts:24` usa `SUM(costo_usd)` pero la
+      columna real es `cost_usd` → esa query falla/devuelve 0 siempre. Corregir a `cost_usd`.
+- [x] ~~**Bug SheetsService (CRÍTICO — revertía la factura)**~~: `getSheetId` usaba
+      `clients.config_f1` y `canal_entrada.activo` (ambas inexistentes). Al fallar DENTRO
+      de la transacción del persist, la abortaban → COMMIT hacía rollback → **la factura
+      se borraba**. FIX (working tree, falta deployar): `config_f1`→`config`, `activo`→`is_active`.
+      Type-check OK.
+- [ ] **Mejora arquitectónica**: mover los side-effects del persist (sheets export, notify,
+      rendiciones) FUERA de la transacción del invoice. Hoy, cualquier query que falle ahí
+      adentro tira abajo la factura entera. El invoice + UPDATE evento deberían ser la tx;
+      el resto, post-commit.
 - [ ] Sacar la línea de debug `[WhatsApp] RAW payload:` en
       `whatsapp.webhook.controller.ts` (loguea PII).
 - [ ] Rotar credenciales expuestas en el chat (DB pass, Supabase service role, tokens).
+
+## ✅ FLUJO F1 VERIFICADO E2E (2026-06-24)
+Comprobante (boleta combustible) por WhatsApp → OCR Claude (1036 chars) → clasificación
+(boleta/gastos/$70.995/0.95 conf) → **invoice creada** (`source=whatsapp`). Funciona.
+Bloqueos resueltos: SanitizeInputPipe arrays, REDIS_TLS, OCR storage_path, persist source.
 
 > Nota: el cliente "Control Suite Demo" NO tiene proyectos activos → el doc queda con
 > `project_id=null` y el ProjectResolver no puede asignar proyecto. Para el flujo F1

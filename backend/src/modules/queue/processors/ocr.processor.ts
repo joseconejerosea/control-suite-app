@@ -68,7 +68,8 @@ export class OcrProcessor extends WorkerHost {
       }
 
       const startTime = Date.now();
-      const ocrText   = await this.extractTextWithClaude(base64, mimeType);
+      const ocrResult = await this.extractTextWithClaude(base64, mimeType);
+      const ocrText   = ocrResult.text;
       const duration  = Date.now() - startTime;
       const durationSec = duration / 1000;
 
@@ -94,6 +95,20 @@ export class OcrProcessor extends WorkerHost {
       this.logger.log(`[F1OCR] Done for ${evento_crudo_id} (${duration}ms, ${truncated.length} chars)`);
       this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'ocr_done' });
 
+      // Registrar el costo de IA del OCR. Antes se descartaba el `usage` de
+      // Claude → la Auditoría AI no reflejaba el gasto del flujo F1.
+      if (ocrResult.usage) {
+        const inTok  = ocrResult.usage.input_tokens ?? 0;
+        const outTok = ocrResult.usage.output_tokens ?? 0;
+        // Claude Haiku 4.5 (aprox): ~$1/M input, ~$5/M output.
+        const costUsd = inTok * 0.000001 + outTok * 0.000005;
+        await this.dataSource.query(
+          `INSERT INTO ai_costs_log (client_id, flow, model, input_tokens, output_tokens, cost_usd, description)
+           VALUES ($1, 'F1', 'claude-haiku-4-5', $2, $3, $4, $5)`,
+          [client_id, inTok, outTok, costUsd, `OCR F1 evento=${evento_crudo_id}`],
+        ).catch((e: any) => this.logger.warn(`[F1OCR] No se pudo registrar costo IA: ${e.message}`));
+      }
+
       await this.classifyQueue.add('classify', { evento_crudo_id, client_id, canal }, {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
@@ -107,7 +122,10 @@ export class OcrProcessor extends WorkerHost {
     }
   }
 
-  private async extractTextWithClaude(base64: string, mimeType: string): Promise<string> {
+  private async extractTextWithClaude(
+    base64: string,
+    mimeType: string,
+  ): Promise<{ text: string; usage: { input_tokens: number; output_tokens: number } | null }> {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -129,7 +147,10 @@ export class OcrProcessor extends WorkerHost {
     });
     if (!response.ok) throw new Error(`Claude OCR API error: ${response.status}`);
     const data = await response.json() as any;
-    return data?.content?.[0]?.text ?? '';
+    return {
+      text: data?.content?.[0]?.text ?? '',
+      usage: data?.usage ?? null,
+    };
   }
 
   private async setStatus(id: string, status: string, error: string): Promise<void> {
