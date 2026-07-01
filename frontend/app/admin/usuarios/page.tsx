@@ -18,7 +18,7 @@ export default function AdminUsuariosPage() {
   const [error, setError]           = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser]     = useState<any>(null);
-  const [form, setForm]             = useState({ email: "", password: "", full_name: "", role: "user" });
+  const [form, setForm]             = useState({ email: "", password: "", full_name: "", phone: "", role: "user" });
   const [search, setSearch]         = useState("");
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export default function AdminUsuariosPage() {
       return;
     }
     setShowCreate(false);
-    setForm({ email: "", password: "", full_name: "", role: "user" });
+    setForm({ email: "", password: "", full_name: "", phone: "", role: "user" });
     fetchUsers(selectedClient);
   };
 
@@ -65,6 +65,7 @@ export default function AdminUsuariosPage() {
     const body: any = {};
     if (editUser.role) body.role = editUser.role;
     if (editUser.full_name !== undefined) body.full_name = editUser.full_name;
+    if (editUser.phone !== undefined) body.phone = editUser.phone;
     if (editUser.is_active !== undefined) body.is_active = editUser.is_active;
     try {
       await api.patch(`/v1/app/admin/users/${editUser.id}`, body);
@@ -117,7 +118,7 @@ export default function AdminUsuariosPage() {
             ))}
           </select>
           {selectedClient && (
-            <button onClick={() => { setShowCreate(true); setForm({ email: "", password: "", full_name: "", role: "user" }); }}
+            <button onClick={() => { setShowCreate(true); setForm({ email: "", password: "", full_name: "", phone: "", role: "user" }); }}
               className="px-4 py-2 rounded-lg text-sm font-medium"
               style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
               + Crear usuario
@@ -174,7 +175,7 @@ export default function AdminUsuariosPage() {
               <table className="w-full border-collapse">
                 <thead style={{ background: "var(--secondary)" }}>
                   <tr>
-                    {["Email", "Nombre", "Rol", "Estado", "Creado", "Acciones"].map((h) => (
+                    {["Email", "Nombre", "Teléfono", "Rol", "Estado", "Creado", "Acciones"].map((h) => (
                       <th key={h} className="px-4 py-3 text-left"
                         style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
                         {h}
@@ -184,9 +185,9 @@ export default function AdminUsuariosPage() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Cargando...</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Cargando...</td></tr>
                   ) : filtered.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Sin usuarios</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Sin usuarios</td></tr>
                   ) : filtered.map((u: any) => {
                     const roleStyle = ROLE_STYLE[u.role] ?? ROLE_STYLE.user;
                     return (
@@ -195,6 +196,7 @@ export default function AdminUsuariosPage() {
                         onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
                         <td className="px-4 py-3 text-sm font-mono">{u.email}</td>
                         <td className="px-4 py-3 text-sm">{u.full_name ?? "—"}</td>
+                        <td className="px-4 py-3 text-sm font-mono">{u.phone ?? "—"}</td>
                         <td className="px-4 py-3">
                           <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={roleStyle}>{roleStyle.label}</span>
                         </td>
@@ -244,6 +246,9 @@ export default function AdminUsuariosPage() {
                 <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
                   placeholder="Nombre completo" className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                   style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="Teléfono (con código de país, ej: +56912345678)" className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
+                  style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
                 <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
                   placeholder="Email" type="email" className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                   style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
@@ -281,6 +286,9 @@ export default function AdminUsuariosPage() {
               <div className="space-y-3">
                 <input value={editUser.full_name ?? ""} onChange={(e) => setEditUser({ ...editUser, full_name: e.target.value })}
                   placeholder="Nombre completo" className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
+                  style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
+                <input value={editUser.phone ?? ""} onChange={(e) => setEditUser({ ...editUser, phone: e.target.value })}
+                  placeholder="Teléfono (con código de país, ej: +56912345678)" className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                   style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }} />
                 <select value={editUser.role} onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
                   className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"

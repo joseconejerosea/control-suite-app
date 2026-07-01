@@ -50,6 +50,10 @@ class AdminCreateUserDto {
   @IsOptional()
   @IsString()
   full_name?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
 }
 
 class AdminUpdateUserDto {
@@ -61,6 +65,10 @@ class AdminUpdateUserDto {
   @IsOptional()
   @IsString()
   full_name?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -91,6 +99,7 @@ export class AdminUsersController {
         'email',
         'role',
         'full_name',
+        'phone',
         'is_active',
         'language',
         'created_at',
@@ -117,6 +126,7 @@ export class AdminUsersController {
       password: hashedPassword,
       role: dto.role,
       full_name: dto.full_name ?? null,
+      phone: dto.phone ?? null,
     });
 
     const saved = await this.userRepo.save(user);
@@ -135,6 +145,7 @@ export class AdminUsersController {
 
     if (dto.role !== undefined) user.role = dto.role;
     if (dto.full_name !== undefined) user.full_name = dto.full_name;
+    if (dto.phone !== undefined) user.phone = dto.phone;
     if (dto.is_active !== undefined) user.is_active = dto.is_active;
     if (dto.email !== undefined) user.email = dto.email;
 
