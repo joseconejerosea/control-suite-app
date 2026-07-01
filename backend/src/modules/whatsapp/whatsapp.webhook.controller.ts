@@ -12,6 +12,7 @@ import { ProjectResolverService } from '../project-resolver/project-resolver.ser
 import { Public } from '../../common/decorators/public.decorator';
 import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.guard';
 import { constantTimeEqual } from '../../common/utils/constant-time';
+import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 
 const QUEUE_OCR = 'ocr';
@@ -67,8 +68,6 @@ export class WhatsAppWebhookController {
   @HttpCode(200)
   async handleIncoming(@Body() body: any) {
     try {
-      // TEMP DEBUG: ver el payload crudo que manda Meta (quitar después)
-      this.logger.log(`[WhatsApp] RAW payload: ${JSON.stringify(body)?.slice(0, 1500)}`);
       const entry   = body?.entry?.[0];
       const changes = entry?.changes?.[0];
       const value   = changes?.value;
@@ -80,6 +79,11 @@ export class WhatsAppWebhookController {
       const messages = value?.messages;
       if (!messages?.length) return 'ok';
 
+      // Per-invocation cache: avoid querying the same sender twice and sending
+      // multiple "not registered" replies for batch payloads from the same from.
+      const senderAuthCache = new Map<string, boolean>();
+      const notifiedSenders = new Set<string>();
+
       for (const msg of messages) {
         const messageId = msg.id as string;
         const from      = msg.from as string;
@@ -89,6 +93,27 @@ export class WhatsAppWebhookController {
           this.logger.log(`[WhatsApp] Duplicate message ${messageId} — skipping`);
           continue;
         }
+
+        // ── Sender gate (Req 7 — togglable via env) ──────────────────────────
+        if (process.env.WHATSAPP_SENDER_GATE !== 'off') {
+          let authorized: boolean;
+          if (senderAuthCache.has(from)) {
+            authorized = senderAuthCache.get(from)!;
+          } else {
+            authorized = await this.isAuthorizedSender(from, clientId);
+            senderAuthCache.set(from, authorized);
+          }
+
+          if (!authorized) {
+            this.logger.warn(`[WhatsApp] Unauthorized sender from=${from} clientId=${clientId}`);
+            if (!notifiedSenders.has(from)) {
+              notifiedSenders.add(from);
+              await this.wa.sendText(from, 'No estás registrado, contactá a tu coordinador.');
+            }
+            continue;
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${messageId}`);
 
@@ -152,6 +177,33 @@ export class WhatsAppWebhookController {
       [messageId],
     ).catch(() => []);
     return existing.length > 0;
+  }
+
+  // ── Sender authorization gate ─────────────────────────────────────────────
+
+  private async isAuthorizedSender(from: string, clientId: string): Promise<boolean> {
+    const digits = normalizePhone(from);
+    try {
+      const rows = await this.ds.query(
+        `SELECT 1
+         FROM promoters
+         WHERE client_id = $1
+           AND status = 'active'
+           AND regexp_replace(phone, '\\D', '', 'g') = $2
+         UNION
+         SELECT 1
+         FROM collaborators
+         WHERE client_id = $1
+           AND is_active = true
+           AND regexp_replace(phone, '\\D', '', 'g') = $2
+         LIMIT 1`,
+        [clientId, digits],
+      );
+      return rows.length > 0;
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] isAuthorizedSender error from=${from} clientId=${clientId}: ${err.message}`);
+      return false; // fail-closed
+    }
   }
 
   // ── Persist to eventos_crudos ─────────────────────────────────────────────

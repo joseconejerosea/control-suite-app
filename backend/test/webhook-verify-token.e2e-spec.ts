@@ -69,7 +69,7 @@ describe('H10 — verify-token constant-time + fail-closed', () => {
 
   describe('WhatsAppWebhookController.verify (Meta challenge)', () => {
     // Solo verify() — usa this.logger + env + constantTimeEqual; el resto de
-    // las deps no se tocan en este método.
+    // las deps no se tocan en este método. Responde vía @Res reply (Fastify).
     const ctrl = new (WhatsAppWebhookController as any)(
       null, null, null, null, null, null, null, null,
     ) as WhatsAppWebhookController;
@@ -79,19 +79,35 @@ describe('H10 — verify-token constant-time + fail-closed', () => {
       else process.env.WHATSAPP_VERIFY_TOKEN = ORIGINAL;
     });
 
-    it('sin WHATSAPP_VERIFY_TOKEN → Forbidden (fail-closed)', () => {
+    function mockReply() {
+      const r: any = {};
+      r.status = jest.fn(() => r);
+      r.send = jest.fn(() => r);
+      return r;
+    }
+
+    it('sin WHATSAPP_VERIFY_TOKEN → 403 Forbidden (fail-closed)', () => {
       delete process.env.WHATSAPP_VERIFY_TOKEN;
-      expect(ctrl.verify('subscribe', 'whatever', '42')).toBe('Forbidden');
+      const reply = mockReply();
+      ctrl.verify('subscribe', 'whatever', '42', reply);
+      expect(reply.status).toHaveBeenCalledWith(403);
+      expect(reply.send).toHaveBeenCalledWith('Forbidden');
     });
 
-    it('token correcto → devuelve el challenge', () => {
+    it('token correcto → 200 + challenge', () => {
       process.env.WHATSAPP_VERIFY_TOKEN = 'wa-token';
-      expect(ctrl.verify('subscribe', 'wa-token', '42')).toBe(42);
+      const reply = mockReply();
+      ctrl.verify('subscribe', 'wa-token', '42', reply);
+      expect(reply.status).toHaveBeenCalledWith(200);
+      expect(reply.send).toHaveBeenCalledWith('42');
     });
 
-    it('token incorrecto → Forbidden', () => {
+    it('token incorrecto → 403 Forbidden', () => {
       process.env.WHATSAPP_VERIFY_TOKEN = 'wa-token';
-      expect(ctrl.verify('subscribe', 'wrong', '42')).toBe('Forbidden');
+      const reply = mockReply();
+      ctrl.verify('subscribe', 'wrong', '42', reply);
+      expect(reply.status).toHaveBeenCalledWith(403);
+      expect(reply.send).toHaveBeenCalledWith('Forbidden');
     });
   });
 });

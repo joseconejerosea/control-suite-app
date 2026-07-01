@@ -124,7 +124,14 @@ export class MindPropuestasService {
         return { tipo: 'reasignar_presupuesto', status: 'simulado_sin_integracion_financiera' };
 
       case 'enviar_recordatorio':
-        // Aquí se integraría con el WhatsApp service
+        // BLOQUEADO — no implementable tal cual. El action se crea con
+        // `target: 'admins'` (queue/processors/mind-proactive.processor.ts:110),
+        // pero un admin es `users.role='admin_cliente'` y la tabla `users` NO tiene
+        // columna `phone` (ver user.entity.ts y el comentario en
+        // movimientos-pop/stock-returns.service.ts: el UNION con users falla).
+        // Único teléfono real disponible: `collaborators`/`promoters`.
+        // Falta decisión de producto sobre el destinatario antes de cablear el envío.
+        // Ver PENDIENTES-DEV.md §6 ("Mind → WhatsApp").
         return { tipo: 'enviar_recordatorio', personas: accion.persona_ids, status: 'pendiente_whatsapp' };
 
       case 'redactar_correo':
