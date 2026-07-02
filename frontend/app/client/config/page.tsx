@@ -289,13 +289,6 @@ export default function ConfigPage() {
         </div>
       </>)}
 
-      {card(<>
-        {sectionTitle("Reglas de aprobación F2")}
-        <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
-          Configura topes, categorías y flujos de aprobación desde{" "}
-          <a href="/client/rendiciones-config" style={{ color: "var(--red, #C8202C)", textDecoration: "none", fontWeight: 500 }}>Reglas de Aprobación →</a>
-        </div>
-      </>)}
     </div>
   );
 

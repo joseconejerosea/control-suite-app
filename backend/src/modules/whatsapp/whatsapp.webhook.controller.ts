@@ -527,10 +527,20 @@ export class WhatsAppWebhookController {
     }
 
     if (/^s[ií]$/i.test(text)) {
+      // Persistir el evento entrante ANTES de procesar la respuesta (invariante eventos_crudos)
+      await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'text', flow: 'F4',
+        payload: { text, convocatoria_reply: 'si' },
+      });
       await this.handleConvocatoriaReply(from, 'si', clientId);
       return;
     }
     if (/^no$/i.test(text)) {
+      // Persistir el evento entrante ANTES de procesar la respuesta (invariante eventos_crudos)
+      await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'text', flow: 'F4',
+        payload: { text, convocatoria_reply: 'no' },
+      });
       await this.handleConvocatoriaReply(from, 'no', clientId);
       return;
     }
@@ -584,15 +594,35 @@ export class WhatsAppWebhookController {
       ? 'Perfecto! Tu participacion ha sido confirmada.'
       : 'Entendido. Buscaremos otro promotor. Gracias!';
 
-    await this.ds.query(
-      `UPDATE convocatorias
-       SET estado=$1, respuesta_texto=$2, respuesta_at=NOW(), updated_at=NOW()
-       WHERE client_id=$4 AND persona_id IN (
-         SELECT id FROM promoters WHERE phone=$3 AND client_id=$4 LIMIT 1
-       ) AND estado='pendiente'`,
-      [estado, texto, from, clientId],
-    ).catch(() => {});
+    // ── Fix F4: aceptar 'enviada' Y 'pendiente' en el WHERE.
+    // enviarConvocatoria() setea estado='enviada' al enviar el WA; la query
+    // original solo buscaba 'pendiente' → nunca matcheaba → actualización silenciosa nula.
+    let rowsAffected = 0;
+    try {
+      const result = await this.ds.query(
+        `UPDATE convocatorias
+         SET estado=$1, respuesta_texto=$2, respuesta_at=NOW(), updated_at=NOW()
+         WHERE client_id=$4 AND persona_id IN (
+           SELECT id FROM promoters WHERE phone=$3 AND client_id=$4 LIMIT 1
+         ) AND estado IN ('enviada', 'pendiente')`,
+        [estado, texto, from, clientId],
+      );
+      // TypeORM raw query devuelve [rows, rowCount] para UPDATE con RETURNING,
+      // o el result object con rowCount directamente.
+      rowsAffected = result?.[1] ?? result?.rowCount ?? 0;
+    } catch (err: any) {
+      this.logger.error(`[F4] Error actualizando convocatoria reply from=${from}: ${err.message}`);
+      await this.wa.sendText(from, 'Hubo un error procesando tu respuesta. Contacta a tu coordinador.');
+      return;
+    }
 
+    if (rowsAffected === 0) {
+      this.logger.warn(`[F4] Reply de ${from} no matcheó ninguna convocatoria enviada`);
+      await this.wa.sendText(from, 'No encontramos una convocatoria pendiente para vos. Contacta a tu coordinador.');
+      return;
+    }
+
+    // Solo confirmamos al promotor si la actualización fue exitosa
     await this.wa.sendText(from, replyMsg);
   }
 }

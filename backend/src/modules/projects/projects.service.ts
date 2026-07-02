@@ -232,10 +232,21 @@ export class ProjectsService {
     modo:      'ai' | 'manual',
   ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
     const [proyecto] = await this.dataSource.query(
-      `SELECT name FROM projects WHERE id=$1 AND client_id=$2`,
+      `SELECT name, aprobado_por_user_id, aprobado_at FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
     );
     if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    // ── Gate humano F4: el envío masivo JAMÁS se dispara sin aprobación explícita.
+    // El proyecto debe tener aprobado_por_user_id y aprobado_at seteados por
+    // aprobarProyecto() antes de que cualquier WhatsApp salga. Sin esto, nada se envía.
+    if (!proyecto.aprobado_por_user_id || !proyecto.aprobado_at) {
+      this.logger.warn(`[F4] Intento de envío sin aprobación humana proyecto=${projectId}`);
+      throw new BadRequestException({
+        message: 'La convocatoria no fue aprobada. Requiere aprobación humana antes del envío.',
+        code:    'CONVOCATORIA_NO_APROBADA',
+      });
+    }
 
     let enviados = 0;
     let errores  = 0;
@@ -310,88 +321,4 @@ export class ProjectsService {
     return { ok: true };
   }
 
-  async getReemplazos(
-    clientId:  string,
-    projectId: string,
-    convId:    string,
-  ): Promise<{ sugeridos: unknown[] }> {
-    const [conv] = await this.dataSource.query(
-      `SELECT persona_id, dia FROM convocatorias WHERE id=$1 AND client_id=$2 AND proyecto_id=$3`,
-      [convId, clientId, projectId],
-    );
-    if (!conv) throw new NotFoundException('Convocatoria no encontrada');
-
-    const sugeridos = await this.dataSource.query(
-      `SELECT p.id, p.name, p.phone, p.skills
-       FROM promoters p
-       WHERE p.client_id = $1
-         AND p.active = true
-         AND p.id != $2
-         AND p.id NOT IN (
-           SELECT c.persona_id FROM convocatorias c
-           WHERE c.client_id = $1 AND c.dia = $3
-             AND c.estado NOT IN ('rechazada', 'no_show')
-         )
-       ORDER BY p.name
-       LIMIT 10`,
-      [clientId, conv.persona_id, conv.dia],
-    );
-
-    return { sugeridos };
-  }
-
-  async asignarReemplazo(
-    clientId:   string,
-    projectId:  string,
-    convId:     string,
-    newPersonaId: string,
-  ): Promise<{ ok: boolean }> {
-    const [conv] = await this.dataSource.query(
-      `SELECT dia, local_nombre, local_direccion FROM convocatorias
-       WHERE id=$1 AND client_id=$2 AND proyecto_id=$3`,
-      [convId, clientId, projectId],
-    );
-    if (!conv) throw new NotFoundException('Convocatoria no encontrada');
-
-    await this.dataSource.query(
-      `UPDATE convocatorias SET estado='reemplazada', updated_at=NOW() WHERE id=$1 AND client_id=$2`,
-      [convId, clientId],
-    );
-
-    await this.dataSource.query(
-      `INSERT INTO proyecto_equipo (client_id, proyecto_id, persona_id, rol)
-       VALUES ($1,$2,$3,'Promotor')
-       ON CONFLICT (client_id, proyecto_id, persona_id) DO NOTHING`,
-      [clientId, projectId, newPersonaId],
-    );
-
-    await this.dataSource.query(
-      `INSERT INTO convocatorias
-         (client_id, proyecto_id, persona_id, dia, local_nombre, local_direccion, estado)
-       VALUES ($1,$2,$3,$4,$5,$6,'pendiente')`,
-      [clientId, projectId, newPersonaId, conv.dia, conv.local_nombre, conv.local_direccion],
-    );
-
-    const [promotor] = await this.dataSource.query(
-      `SELECT name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
-      [newPersonaId, clientId],
-    ).catch(() => []);
-
-    if (promotor?.phone) {
-      const [proyecto] = await this.dataSource.query(
-        `SELECT name FROM projects WHERE id=$1 AND client_id=$2`, [projectId, clientId],
-      );
-      await this.wa.enviarConvocatoria({
-        telefono:       promotor.phone,
-        nombrePromotor: promotor.name,
-        proyecto:       proyecto?.name ?? '',
-        fecha:          conv.dia,
-        local:          conv.local_nombre ?? 'Por confirmar',
-        direccion:      conv.local_direccion ?? 'Por confirmar',
-      });
-    }
-
-    this.logger.log(`[F4] Reemplazo asignado conv=${convId} → persona=${newPersonaId}`);
-    return { ok: true };
-  }
 }

@@ -37,7 +37,7 @@ export default function ProjectsPage() {
   const [aiFile, setAiFile]       = useState<File | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult]   = useState<any>(null);
-  const [aiApproved, setAiApproved] = useState(false);
+  const [aiInboxId, setAiInboxId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchProjects = () => {
@@ -81,49 +81,41 @@ export default function ProjectsPage() {
     if (!aiFile) return;
     setAiLoading(true);
     setAiResult(null);
+    setAiInboxId(null);
     try {
-      const fd = new FormData();
-      fd.append("file", aiFile);
-      const r = await api.post<any>("/documents/upload", fd);
-      const docId = r?.data?.id ?? r?.id;
-      if (docId) {
-        await new Promise(res => setTimeout(res, 2000));
-        const parsed = await api.post<any>(`/documents/${docId}/parse`, {});
-        const d = parsed?.data ?? parsed;
-        setAiResult({
-          name: d?.nombre_proyecto ?? d?.project_name ?? aiFile.name.replace(/\.[^/.]+$/, ""),
-          description: d?.descripcion ?? d?.description ?? "Proyecto extraido por AI desde documento",
-          start_date: d?.fecha_inicio ?? d?.start_date ?? "",
-          end_date: d?.fecha_fin ?? d?.end_date ?? "",
-          budget: d?.presupuesto ?? d?.budget ?? "",
-          raw: d,
-        });
-      }
-    } catch (e) {
-      setAiResult({
-        name: aiFile.name.replace(/\.[^/.]+$/, ""),
-        description: "Proyecto creado desde documento — completa los campos manualmente.",
-        start_date: "", end_date: "", budget: "", raw: null,
+      const inbox = await api.post<any>("/v1/app/project-inbox/upload", {
+        source: "UPLOAD",
+        raw_content: { filename: aiFile.name, size: aiFile.size },
       });
+      const inboxId = inbox?.id ?? inbox?.data?.id;
+      setAiInboxId(inboxId ?? null);
+      setAiResult({
+        nombre_proyecto: aiFile.name.replace(/\.[^/.]+$/, ""),
+        brief: "",
+        fecha_inicio: "",
+        fecha_fin: "",
+        presupuesto_otorgado: "",
+      });
+    } catch (e) {
+      console.error(e);
     } finally { setAiLoading(false); }
   };
 
   const approveAI = async () => {
-    if (!aiResult) return;
+    if (!aiResult || !aiInboxId) return;
     setSaving(true);
     try {
-      await api.post("/projects", {
-        name: aiResult.name,
-        description: aiResult.description,
-        status: "active",
-        start_date: aiResult.start_date || undefined,
-        end_date: aiResult.end_date || undefined,
-        budget: aiResult.budget ? parseFloat(String(aiResult.budget)) : undefined,
+      await api.put(`/v1/app/project-inbox/${aiInboxId}/approve`, {
+        nombre_proyecto: aiResult.nombre_proyecto || undefined,
+        brief: aiResult.brief || undefined,
+        fecha_inicio: aiResult.fecha_inicio || undefined,
+        fecha_fin: aiResult.fecha_fin || undefined,
+        presupuesto_otorgado: aiResult.presupuesto_otorgado ? parseFloat(String(aiResult.presupuesto_otorgado)) : undefined,
       });
       setShowAI(false);
       setAiFile(null);
       setAiResult(null);
-      setAiApproved(false);
+      setAiInboxId(null);
       fetchProjects();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
@@ -160,7 +152,7 @@ export default function ProjectsPage() {
           <div className="flex gap-2">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects..."
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", width: 200 }} />
-            <button onClick={() => { setShowAI(true); setAiResult(null); setAiFile(null); }}
+            <button onClick={() => { setShowAI(true); setAiResult(null); setAiFile(null); setAiInboxId(null); }}
               style={{ padding: "9px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
               AI desde doc
             </button>
@@ -277,11 +269,11 @@ export default function ProjectsPage() {
 
                   <div className="space-y-3 mb-4">
                     {[
-                      { label: "Nombre del proyecto", key: "name" },
-                      { label: "Descripcion", key: "description" },
-                      { label: "Fecha inicio", key: "start_date" },
-                      { label: "Fecha fin", key: "end_date" },
-                      { label: "Presupuesto", key: "budget" },
+                      { label: "Nombre del proyecto", key: "nombre_proyecto" },
+                      { label: "Descripcion / Brief", key: "brief" },
+                      { label: "Fecha inicio", key: "fecha_inicio" },
+                      { label: "Fecha fin", key: "fecha_fin" },
+                      { label: "Presupuesto (CLP)", key: "presupuesto_otorgado" },
                     ].map(({ label, key }) => (
                       <div key={key}>
                         <label className="text-xs font-medium block mb-1" style={{ color: "var(--muted-foreground)" }}>{label}</label>
@@ -295,7 +287,7 @@ export default function ProjectsPage() {
                   </div>
 
                   <div className="flex gap-2">
-                    <button onClick={() => { setAiResult(null); setAiFile(null); }}
+                    <button onClick={() => { setAiResult(null); setAiFile(null); setAiInboxId(null); }}
                       style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>
                       Reintentar
                     </button>

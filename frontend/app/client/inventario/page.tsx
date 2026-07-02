@@ -24,18 +24,20 @@ const labelStyle = { fontSize: 11, fontWeight: 600, color: "var(--muted-foregrou
 
 // ─── BODEGA MODAL ───────────────────────────────────────────────────────
 function BodegaModal({ onClose, onDone, bodegas }: { onClose: () => void; onDone: () => void; bodegas: any[] }) {
-  const [form, setForm] = useState({ nombre: "", ubicacion: "", capacidad: "" });
+  const [form, setForm] = useState({ nombre: "", direccion: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const save = async () => {
-    if (!form.nombre.trim()) return;
+    if (!form.nombre.trim() || !form.direccion.trim()) return;
     setSaving(true); setError("");
     try {
-      await api.post("/bodegas", { nombre: form.nombre, ubicacion: form.ubicacion || undefined, capacidad: form.capacidad ? parseInt(form.capacidad) : undefined });
+      await api.post("/v1/app/bodegas", { nombre: form.nombre, direccion: form.direccion });
       onDone(); onClose();
     } catch (e: any) { setError(e.message ?? "Error"); } finally { setSaving(false); }
   };
+
+  const canSave = form.nombre.trim() && form.direccion.trim();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
@@ -46,13 +48,12 @@ function BodegaModal({ onClose, onDone, bodegas }: { onClose: () => void; onDone
         </div>
         <div className="p-5 space-y-3">
           <div><label style={labelStyle}>Nombre *</label><input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Bodega Central" style={fieldStyle} /></div>
-          <div><label style={labelStyle}>Ubicacion</label><input value={form.ubicacion} onChange={e => setForm(f => ({ ...f, ubicacion: e.target.value }))} placeholder="Santiago, Chile" style={fieldStyle} /></div>
-          <div><label style={labelStyle}>Capacidad (unidades)</label><input type="number" value={form.capacidad} onChange={e => setForm(f => ({ ...f, capacidad: e.target.value }))} placeholder="1000" style={fieldStyle} /></div>
+          <div><label style={labelStyle}>Dirección *</label><input value={form.direccion} onChange={e => setForm(f => ({ ...f, direccion: e.target.value }))} placeholder="Av. Ejemplo 123, Santiago" style={fieldStyle} /></div>
           {error && <div style={{ color: "#e8353f", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
           <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !form.nombre.trim()} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: form.nombre.trim() ? "var(--red)" : "var(--secondary)", color: form.nombre.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--red)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
             {saving ? "Guardando..." : "Crear bodega"}
           </button>
         </div>
@@ -63,7 +64,7 @@ function BodegaModal({ onClose, onDone, bodegas }: { onClose: () => void; onDone
 
 // ─── SKU MODAL ──────────────────────────────────────────────────────────
 function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [form, setForm] = useState({ nombre: "", codigo: "", descripcion: "", unidad_medida: "unidad", stock_minimo: "5" });
+  const [form, setForm] = useState({ nombre: "", codigo: "", min_stock: "5" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -71,7 +72,7 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
     if (!form.nombre.trim()) return;
     setSaving(true); setError("");
     try {
-      await api.post("/skus", { nombre: form.nombre, codigo: form.codigo || undefined, descripcion: form.descripcion || undefined, unidad_medida: form.unidad_medida, stock_minimo: parseInt(form.stock_minimo) || 5 });
+      await api.post("/v1/app/skus", { nombre: form.nombre, codigo: form.codigo || undefined, min_stock: parseInt(form.min_stock) || 5 });
       onDone(); onClose();
     } catch (e: any) { setError(e.message ?? "Error"); } finally { setSaving(false); }
   };
@@ -86,19 +87,7 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
         <div className="p-5 space-y-3">
           <div><label style={labelStyle}>Nombre *</label><input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Afiche A3" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Codigo SKU</label><input value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} placeholder="MAT-001" style={fieldStyle} /></div>
-          <div><label style={labelStyle}>Descripcion</label><input value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} placeholder="Afiches para punto de venta" style={fieldStyle} /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label style={labelStyle}>Unidad medida</label>
-              <select value={form.unidad_medida} onChange={e => setForm(f => ({ ...f, unidad_medida: e.target.value }))} style={fieldStyle}>
-                <option value="unidad">Unidad</option>
-                <option value="caja">Caja</option>
-                <option value="kg">Kg</option>
-                <option value="metro">Metro</option>
-              </select>
-            </div>
-            <div><label style={labelStyle}>Stock minimo</label><input type="number" value={form.stock_minimo} onChange={e => setForm(f => ({ ...f, stock_minimo: e.target.value }))} style={fieldStyle} /></div>
-          </div>
+          <div><label style={labelStyle}>Stock minimo</label><input type="number" value={form.min_stock} onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))} style={fieldStyle} /></div>
           {error && <div style={{ color: "#e8353f", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
@@ -112,17 +101,31 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
   );
 }
 
+// tipos que requieren proyecto_destino_id
+const TIPOS_CON_PROYECTO = new Set(["salida", "consumo", "transfer"]);
+
 // ─── MOVIMIENTO MODAL ────────────────────────────────────────────────────
-function MovimientoModal({ onClose, onDone, bodegas, skus }: { onClose: () => void; onDone: () => void; bodegas: any[]; skus: any[] }) {
-  const [form, setForm] = useState({ sku_id: "", bodega_origen_id: "", bodega_destino_id: "", tipo_movimiento: "entrada", cantidad: "", observacion: "" });
+function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose: () => void; onDone: () => void; bodegas: any[]; skus: any[]; projects: any[] }) {
+  const [form, setForm] = useState({ sku_id: "", bodega_origen_id: "", bodega_destino_id: "", tipo: "entrada", cantidad: "", observacion: "", proyecto_destino_id: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const requiereProyecto = TIPOS_CON_PROYECTO.has(form.tipo);
+  const canSave = !!form.sku_id && !!form.cantidad && (!requiereProyecto || !!form.proyecto_destino_id);
+
   const save = async () => {
-    if (!form.sku_id || !form.cantidad) return;
+    if (!canSave) return;
     setSaving(true); setError("");
     try {
-      await api.post("/movimientos-pop/manual", { sku_id: form.sku_id, bodega_origen_id: form.bodega_origen_id || undefined, bodega_destino_id: form.bodega_destino_id || undefined, tipo_movimiento: form.tipo_movimiento, cantidad: parseInt(form.cantidad), observacion: form.observacion || undefined });
+      await api.post("/v1/app/movimientos/manual", {
+        sku_id: form.sku_id,
+        bodega_origen_id: form.bodega_origen_id || undefined,
+        bodega_destino_id: form.bodega_destino_id || undefined,
+        tipo: form.tipo,
+        cantidad: parseInt(form.cantidad),
+        observacion: form.observacion || undefined,
+        proyecto_destino_id: form.proyecto_destino_id || undefined,
+      });
       onDone(); onClose();
     } catch (e: any) { setError(e.message ?? "Error"); } finally { setSaving(false); }
   };
@@ -144,11 +147,21 @@ function MovimientoModal({ onClose, onDone, bodegas, skus }: { onClose: () => vo
           </div>
           <div>
             <label style={labelStyle}>Tipo de movimiento</label>
-            <select value={form.tipo_movimiento} onChange={e => setForm(f => ({ ...f, tipo_movimiento: e.target.value }))} style={fieldStyle}>
+            <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value, proyecto_destino_id: "" }))} style={fieldStyle}>
               <option value="entrada">Entrada</option>
               <option value="salida">Salida</option>
-              <option value="traslado">Traslado</option>
-              <option value="ajuste">Ajuste</option>
+              <option value="devolucion">Devolución</option>
+              <option value="consumo">Consumo</option>
+              <option value="merma">Merma</option>
+              <option value="transfer">Traslado</option>
+              <option value="adjustment">Ajuste</option>
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Proyecto destino {requiereProyecto ? "*" : ""}</label>
+            <select value={form.proyecto_destino_id} onChange={e => setForm(f => ({ ...f, proyecto_destino_id: e.target.value }))} style={fieldStyle}>
+              <option value="">Ninguno</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -173,7 +186,7 @@ function MovimientoModal({ onClose, onDone, bodegas, skus }: { onClose: () => vo
         </div>
         <div className="flex gap-2 px-5 pb-5">
           <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !form.sku_id || !form.cantidad} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: (form.sku_id && form.cantidad) ? "var(--red)" : "var(--secondary)", color: (form.sku_id && form.cantidad) ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--red)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
             {saving ? "Guardando..." : "Registrar movimiento"}
           </button>
         </div>
@@ -189,6 +202,7 @@ export default function InventarioPage() {
   const [movimientos, setMovimientos] = useState<any[]>([]);
   const [bodegas, setBodegas] = useState<any[]>([]);
   const [skus, setSkus] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showBodegaModal, setShowBodegaModal] = useState(false);
@@ -205,17 +219,19 @@ export default function InventarioPage() {
     Promise.all([
       api.get<any>("/v1/app/inventario").catch(() => []),
       api.get<any>("/v1/app/movimientos").catch(() => []),
-      api.get<any>("/bodegas").catch(() => []),
-      api.get<any>("/skus").catch(() => []),
-      api.get<any>("/skus/alertas-stock").catch(() => []),
+      api.get<any>("/v1/app/bodegas").catch(() => []),
+      api.get<any>("/v1/app/skus").catch(() => []),
+      api.get<any>("/v1/app/skus/alertas-stock").catch(() => []),
       api.get<any>("/v1/app/stock/returns/pending").catch(() => []),
-    ]).then(([inv, mov, bod, sk, al, dev]) => {
+      api.get<any>("/projects").catch(() => []),
+    ]).then(([inv, mov, bod, sk, al, dev, proj]) => {
       setInventario(Array.isArray(inv) ? inv : (inv?.data ?? []));
       setMovimientos(Array.isArray(mov) ? mov : (mov?.data ?? []));
       setBodegas(Array.isArray(bod) ? bod : (bod?.data ?? []));
       setSkus(Array.isArray(sk) ? sk : (sk?.data ?? []));
       setAlertas(Array.isArray(al) ? al : (al?.data ?? []));
       setDevoluciones(Array.isArray(dev) ? dev : (dev?.data ?? []));
+      setProjects(Array.isArray(proj) ? proj : (proj?.data ?? []));
     }).catch(console.error).finally(() => setLoading(false));
   };
 
@@ -223,7 +239,7 @@ export default function InventarioPage() {
 
   const q = search.toLowerCase();
   const filteredInv = inventario.filter(item => !q || item.sku_nombre?.toLowerCase().includes(q) || item.sku_codigo?.toLowerCase().includes(q) || item.bodega_nombre?.toLowerCase().includes(q));
-  const filteredMov = movimientos.filter(m => !q || m.sku_nombre?.toLowerCase().includes(q) || m.tipo_movimiento?.toLowerCase().includes(q));
+  const filteredMov = movimientos.filter(m => !q || m.sku_nombre?.toLowerCase().includes(q) || m.tipo?.toLowerCase().includes(q));
   const filteredSkus = skus.filter(s => !q || s.nombre?.toLowerCase().includes(q) || s.codigo?.toLowerCase().includes(q));
 
   const TH = ({ c }: { c: string }) => <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", background: "var(--secondary)", borderBottom: "1px solid var(--border)" }}>{c}</th>;
@@ -232,7 +248,7 @@ export default function InventarioPage() {
     <AppShell>
       {showBodegaModal && <BodegaModal onClose={() => setShowBodegaModal(false)} onDone={fetchAll} bodegas={bodegas} />}
       {showSkuModal && <SkuModal onClose={() => setShowSkuModal(false)} onDone={fetchAll} />}
-      {showMovModal && <MovimientoModal onClose={() => setShowMovModal(false)} onDone={fetchAll} bodegas={bodegas} skus={skus} />}
+      {showMovModal && <MovimientoModal onClose={() => setShowMovModal(false)} onDone={fetchAll} bodegas={bodegas} skus={skus} projects={projects} />}
 
       <div className="animate-fade-up">
         {/* Header */}
@@ -322,7 +338,7 @@ export default function InventarioPage() {
             ) : (
               <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
                 <table className="w-full border-collapse">
-                  <thead><tr><TH c="Codigo" /><TH c="Nombre" /><TH c="Unidad" /><TH c="Stock min" /><TH c="Estado" /></tr></thead>
+                  <thead><tr><TH c="Codigo" /><TH c="Nombre" /><TH c="Stock min" /><TH c="Estado" /></tr></thead>
                   <tbody>
                     {filteredSkus.map((s: any) => (
                       <tr key={s.id} style={{ borderBottom: "1px solid var(--border)" }}
@@ -330,11 +346,10 @@ export default function InventarioPage() {
                         onMouseLeave={e => (e.currentTarget.style.background = "")}>
                         <td style={{ padding: "10px 16px", fontSize: 12, fontFamily: "monospace", color: "var(--muted-foreground)" }}>{s.codigo ?? "—"}</td>
                         <td style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500 }}>{s.nombre}</td>
-                        <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)", textTransform: "capitalize" }}>{s.unidad_medida ?? "unidad"}</td>
-                        <td style={{ padding: "10px 16px", fontSize: 13 }}>{s.stock_minimo ?? 5}</td>
+                        <td style={{ padding: "10px 16px", fontSize: 13 }}>{s.min_stock ?? 5}</td>
                         <td style={{ padding: "10px 16px" }}>
-                          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: s.activo !== false ? "rgba(42,157,92,0.12)" : "rgba(100,116,139,0.12)", color: s.activo !== false ? "#34b96e" : "#94a3b8" }}>
-                            {s.activo !== false ? "Activo" : "Inactivo"}
+                          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: s.active !== false ? "rgba(42,157,92,0.12)" : "rgba(100,116,139,0.12)", color: s.active !== false ? "#34b96e" : "#94a3b8" }}>
+                            {s.active !== false ? "Activo" : "Inactivo"}
                           </span>
                         </td>
                       </tr>
@@ -362,7 +377,7 @@ export default function InventarioPage() {
                       onMouseEnter={e => (e.currentTarget.style.background = "var(--secondary)")}
                       onMouseLeave={e => (e.currentTarget.style.background = "")}>
                       <td style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500 }}>{m.sku_nombre ?? "—"}</td>
-                      <td style={{ padding: "10px 16px", fontSize: 13, textTransform: "capitalize", color: "var(--muted-foreground)" }}>{m.tipo_movimiento ?? "—"}</td>
+                      <td style={{ padding: "10px 16px", fontSize: 13, textTransform: "capitalize", color: "var(--muted-foreground)" }}>{m.tipo ?? "—"}</td>
                       <td style={{ padding: "10px 16px", fontSize: 14, fontWeight: 700 }}>{m.cantidad ?? 0}</td>
                       <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{m.bodega_origen ?? "—"}</td>
                       <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{m.bodega_destino ?? "—"}</td>

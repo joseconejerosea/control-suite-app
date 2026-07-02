@@ -135,28 +135,33 @@ export class StockReturnsService {
 
     const items = typeof req.items === 'string' ? JSON.parse(req.items) : req.items;
 
-    // Create return movements for each item
+    // Create return movements for each item.
+    // La bodega_origen_id del movimiento debe coincidir con la bodega que recibe el stock
+    // para mantener trazabilidad consistente (antes bodega_origen_id quedaba NULL).
+    const bodega = await this.ds.query(
+      `SELECT id FROM bodegas WHERE client_id = $1 AND active = true AND tipo = 'principal' LIMIT 1`,
+      [clientId],
+    );
+    const bodegaId: string | null = bodega[0]?.id ?? null;
+
     for (const item of items) {
       await this.ds.query(
         `INSERT INTO movimientos_pop
-           (client_id, sku_id, persona_id, proyecto_destino_id, tipo, cantidad, estado, foto_key, observacion, fecha_retorno_real)
-         VALUES ($1,$2,$3,$4,'devolucion',$5,'devuelto_completo',$6,'Devolución confirmada por operador',NOW())`,
-        [clientId, item.sku_id, req.persona_id, req.project_id,
+           (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
+            tipo, cantidad, estado, foto_key, observacion, fecha_retorno_real)
+         VALUES ($1,$2,$3,$4,$5,'devolucion',$6,'devuelto_completo',$7,'Devolución confirmada por operador',NOW())`,
+        [clientId, item.sku_id, req.persona_id, bodegaId, req.project_id,
          parseInt(item.pendiente), req.photo_key ?? null],
       );
 
-      // Update inventory: add back to first bodega
-      const bodega = await this.ds.query(
-        `SELECT id FROM bodegas WHERE client_id = $1 AND active = true AND tipo = 'principal' LIMIT 1`,
-        [clientId],
-      );
-      if (bodega.length) {
+      // Actualiza inventario en la misma bodega referenciada en el movimiento
+      if (bodegaId) {
         await this.ds.query(
           `INSERT INTO inventario (client_id, sku_id, bodega_id, cantidad, ultimo_movimiento_at)
            VALUES ($1,$2,$3,$4,NOW())
            ON CONFLICT (client_id, sku_id, bodega_id)
            DO UPDATE SET cantidad = inventario.cantidad + $4, ultimo_movimiento_at = NOW()`,
-          [clientId, item.sku_id, bodega[0].id, parseInt(item.pendiente)],
+          [clientId, item.sku_id, bodegaId, parseInt(item.pendiente)],
         );
       }
     }

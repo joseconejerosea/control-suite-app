@@ -18,11 +18,6 @@ export class MovimientosPopController {
     return this.svc.findAll(user.client_id, filters);
   }
 
-  @Get('inventario')
-  inventario(@CurrentUser() user: JwtPayload) {
-    return this.svc.inventarioActual(user.client_id);
-  }
-
   @Get('analisis-merma')
   merma(@CurrentUser() user: JwtPayload) {
     return this.svc.analisisMerma30Dias(user.client_id);
