@@ -8,11 +8,36 @@ import { WhatsAppSessionService, WhatsAppSession } from '../whatsapp/whatsapp-se
 
 const MAX_ATTEMPTS = 2;
 
+// Campos críticos que F1 puede pedir por WhatsApp cuando el OCR no los leyó.
+// El orden acá define el orden en que se preguntan.
+const DATA_FIELD_LABELS: Record<string, { es: string; en: string }> = {
+  monto_total: {
+    es: 'el MONTO TOTAL del documento (solo números, ej: 45000)',
+    en: 'the TOTAL AMOUNT of the document (numbers only, e.g. 45000)',
+  },
+  fecha_emision: {
+    es: 'la FECHA de emisión (formato DD/MM/AAAA)',
+    en: 'the ISSUE DATE (format DD/MM/YYYY)',
+  },
+  razon_social_emisor: {
+    es: 'el NOMBRE del proveedor (razón social del emisor)',
+    en: 'the SUPPLIER name (issuer business name)',
+  },
+};
+
 interface ClarificationRequest {
   eventoCrudoId: string;
   clientId: string;
   phoneNumber: string;
   projects: { id: string; name: string }[];
+  language: string;
+}
+
+interface DataClarificationRequest {
+  eventoCrudoId: string;
+  clientId: string;
+  phoneNumber: string;
+  pendingFields: string[];
   language: string;
 }
 
@@ -23,6 +48,7 @@ export class ClarificationService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue('ocr') private readonly ocrQueue: Queue,
+    @InjectQueue('persist') private readonly persistQueue: Queue,
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
   ) {}
@@ -77,6 +103,10 @@ export class ClarificationService {
 
     if (clarification.type === 'project') {
       return this.handleProjectResponse(phoneNumber, text, session, messageId, canalId);
+    }
+
+    if (clarification.type === 'data') {
+      return this.handleDataResponse(phoneNumber, text, session);
     }
 
     return false;
@@ -148,6 +178,170 @@ export class ClarificationService {
 
     this.logger.log(`[Clarification] Resolved: evento ${eventoCrudoId} → project ${selected.id}`);
     return true;
+  }
+
+  // ── Aclaración de datos (campos del OCR mal leídos) ────────────────────────
+  async requestDataClarification(req: DataClarificationRequest): Promise<void> {
+    const { eventoCrudoId, clientId, phoneNumber, pendingFields, language } = req;
+
+    const fields = pendingFields.filter((f) => DATA_FIELD_LABELS[f]);
+    if (!fields.length) {
+      this.logger.warn(`[Clarification] No valid data fields to clarify for evento ${eventoCrudoId}`);
+      return;
+    }
+
+    const session = (await this.sessions.get(phoneNumber)) ?? this.emptySession(clientId);
+    session.state = 'awaiting_clarification';
+    session.clientId = clientId;
+    session.clarification = {
+      eventoCrudoId,
+      type: 'data',
+      attempts: 0,
+      pendingFields: fields,
+      collected: {},
+    };
+    await this.sessions.set(phoneNumber, session);
+
+    await this.ds.query(
+      `UPDATE eventos_crudos SET status = 'awaiting_clarification', parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+      [JSON.stringify({ clarification_requested_at: new Date().toISOString(), clarification_type: 'data' }), eventoCrudoId],
+    );
+
+    const intro = language === 'en'
+      ? "I read the document but couldn't extract some data with confidence."
+      : 'Leí el documento pero no pude sacar algunos datos con seguridad.';
+    await this.wa.sendText(phoneNumber, `${intro}\n\n${this.buildFieldQuestion(fields[0], language)}`);
+    this.logger.log(`[Clarification] Data clarification started for evento ${eventoCrudoId} (${fields.join(',')})`);
+  }
+
+  private async handleDataResponse(
+    phoneNumber: string,
+    text: string,
+    session: any,
+  ): Promise<boolean> {
+    const { clarification } = session;
+    const pending: string[] = clarification.pendingFields ?? [];
+    if (!pending.length) return false;
+
+    const currentField = pending[0];
+    const language = await this.getUserLanguage(phoneNumber, session.clientId);
+    const normalized = this.normalizeFieldValue(currentField, text);
+
+    // Respuesta ilegible → reintento, y a los MAX_ATTEMPTS se escala al operador.
+    if (normalized === null) {
+      clarification.attempts++;
+
+      if (clarification.attempts >= MAX_ATTEMPTS) {
+        await this.escalateToOperator(clarification.eventoCrudoId, phoneNumber, session.clientId);
+        await this.sessions.delete(phoneNumber);
+        return true;
+      }
+
+      await this.sessions.set(phoneNumber, session);
+      const retryMsg = language === 'en'
+        ? `I couldn't read that. ${this.buildFieldQuestion(currentField, language)} Last attempt.`
+        : `No pude leer ese dato. ${this.buildFieldQuestion(currentField, language)} Último intento.`;
+      await this.wa.sendText(phoneNumber, retryMsg);
+      return true;
+    }
+
+    // Dato válido → guardar y avanzar la cola.
+    clarification.collected = { ...(clarification.collected ?? {}), [currentField]: normalized };
+    clarification.pendingFields = pending.slice(1);
+    clarification.attempts = 0;
+
+    if (clarification.pendingFields.length) {
+      await this.sessions.set(phoneNumber, session);
+      await this.wa.sendText(phoneNumber, this.buildFieldQuestion(clarification.pendingFields[0], language));
+      return true;
+    }
+
+    // Todos los campos completos → mergear en la clasificación y encolar persist.
+    await this.finalizeDataClarification(clarification.eventoCrudoId, session.clientId, clarification.collected);
+    await this.sessions.delete(phoneNumber);
+
+    const doneMsg = language === 'en'
+      ? 'Got it, saved. Processing the document...'
+      : 'Listo, guardado. Procesando el documento...';
+    await this.wa.sendText(phoneNumber, doneMsg);
+
+    this.logger.log(`[Clarification] Data resolved: evento ${clarification.eventoCrudoId}`);
+    return true;
+  }
+
+  private buildFieldQuestion(field: string, language: string): string {
+    const label = DATA_FIELD_LABELS[field];
+    const which = language === 'en' ? label.en : label.es;
+    return language === 'en' ? `What is ${which}?` : `¿Cuál es ${which}?`;
+  }
+
+  private normalizeFieldValue(field: string, raw: string): string | null {
+    const value = (raw ?? '').trim();
+    if (!value) return null;
+
+    if (field === 'monto_total') {
+      const digits = value.replace(/[^\d]/g, '');
+      return digits.length ? digits : null;
+    }
+
+    if (field === 'fecha_emision') {
+      const m = value.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+      if (!m) return null;
+      const [, d, mo, y] = m;
+      const year = y.length === 2 ? `20${y}` : y;
+      const dd = d.padStart(2, '0');
+      const mm = mo.padStart(2, '0');
+      if (+mm < 1 || +mm > 12 || +dd < 1 || +dd > 31) return null;
+      return `${year}-${mm}-${dd}`;
+    }
+
+    if (field === 'razon_social_emisor') {
+      return value.length >= 2 ? value.slice(0, 200) : null;
+    }
+
+    return value;
+  }
+
+  private async finalizeDataClarification(
+    eventoCrudoId: string,
+    clientId: string,
+    collected: Record<string, string>,
+  ): Promise<void> {
+    const rows = await this.ds
+      .query(`SELECT ai_classification FROM eventos_crudos WHERE id = $1`, [eventoCrudoId])
+      .catch(() => []);
+    const classification = rows[0]?.ai_classification ?? {};
+
+    // monto_total tiene que ser número para el INSERT de invoices (persist.processor).
+    const corrected: Record<string, any> = { ...collected };
+    if (corrected.monto_total != null) corrected.monto_total = Number(corrected.monto_total);
+
+    classification.datos_extraidos = { ...(classification.datos_extraidos ?? {}), ...corrected };
+    classification.datos_corregidos_por = 'clarification_bidireccional';
+
+    await this.ds.query(
+      `UPDATE eventos_crudos SET
+        ai_classification = $1::jsonb,
+        parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $2::jsonb,
+        status = 'queued'
+      WHERE id = $3`,
+      [
+        JSON.stringify(classification),
+        JSON.stringify({ clarification_resolved_at: new Date().toISOString(), clarification_type: 'data' }),
+        eventoCrudoId,
+      ],
+    );
+
+    await this.persistQueue.add(
+      'persist',
+      {
+        evento_crudo_id: eventoCrudoId,
+        client_id: clientId,
+        classification,
+        processing_status: 'processed',
+      },
+      { attempts: 3, backoff: { type: 'exponential', delay: 1000 } },
+    );
   }
 
   private async escalateToOperator(eventoCrudoId: string, phoneNumber: string, clientId: string): Promise<void> {

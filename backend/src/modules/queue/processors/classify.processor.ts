@@ -163,26 +163,44 @@ export class ClassifyProcessor extends WorkerHost {
     // Record final event status metric
     this.metrics.f1EventsTotal.inc({ client_id, canal, status: processingStatus });
 
-    // Trigger bidirectional clarification when confidence is low and no project resolved
-    if (processingStatus === 'low_confidence' && !classification.proyecto_id_sugerido) {
+    // Baja confianza → diálogo bidireccional por WhatsApp.
+    //  - Sin proyecto resuelto → se pregunta a qué proyecto pertenece.
+    //  - Con proyecto pero campos críticos faltantes → se piden esos datos.
+    if (processingStatus === 'low_confidence') {
       const phoneNumber = payload?.from as string;
       if (phoneNumber && canal === 'whatsapp') {
         try {
-          const activeProjects = await this.dataSource.query(
-            `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
-            [client_id],
-          );
-          if (activeProjects.length > 1) {
-            const userLang = await this.getUserLanguage(phoneNumber, client_id);
-            await this.clarificationService.requestProjectClarification({
-              eventoCrudoId: evento_crudo_id,
-              clientId: client_id,
-              phoneNumber,
-              projects: activeProjects,
-              language: userLang,
-            });
-            this.logger.log(`[F1Classify] Clarification requested for ${evento_crudo_id}`);
-            return;
+          if (!classification.proyecto_id_sugerido) {
+            const activeProjects = await this.dataSource.query(
+              `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
+              [client_id],
+            );
+            if (activeProjects.length > 1) {
+              const userLang = await this.getUserLanguage(phoneNumber, client_id);
+              await this.clarificationService.requestProjectClarification({
+                eventoCrudoId: evento_crudo_id,
+                clientId: client_id,
+                phoneNumber,
+                projects: activeProjects,
+                language: userLang,
+              });
+              this.logger.log(`[F1Classify] Project clarification requested for ${evento_crudo_id}`);
+              return;
+            }
+          } else {
+            const missing = this.missingCriticalFields(classification.datos_extraidos);
+            if (missing.length) {
+              const userLang = await this.getUserLanguage(phoneNumber, client_id);
+              await this.clarificationService.requestDataClarification({
+                eventoCrudoId: evento_crudo_id,
+                clientId: client_id,
+                phoneNumber,
+                pendingFields: missing,
+                language: userLang,
+              });
+              this.logger.log(`[F1Classify] Data clarification requested for ${evento_crudo_id} (${missing.join(',')})`);
+              return;
+            }
           }
         } catch (err: any) {
           this.logger.warn(`[F1Classify] Clarification trigger error: ${err.message}`);
@@ -195,6 +213,19 @@ export class ClassifyProcessor extends WorkerHost {
         evento_crudo_id, client_id, classification, processing_status: processingStatus,
       }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 } });
     }
+  }
+
+  // Campos críticos para crear la factura (persist.processor): monto, fecha y proveedor.
+  // Devuelve los que el OCR no logró leer (null o placeholders del prompt).
+  private missingCriticalFields(datos: any): string[] {
+    const d = datos ?? {};
+    const missing: string[] = [];
+    if (d.monto_total == null || Number(d.monto_total) === 0) missing.push('monto_total');
+    if (!d.fecha_emision || d.fecha_emision === 'YYYY-MM-DD') missing.push('fecha_emision');
+    if (!d.razon_social_emisor || String(d.razon_social_emisor).trim() === '') {
+      missing.push('razon_social_emisor');
+    }
+    return missing;
   }
 
   private sanitize(text: string): string {

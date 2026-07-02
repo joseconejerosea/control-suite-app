@@ -18,6 +18,7 @@ export interface WhatsAppSession {
     type: 'project' | 'data';
     attempts: number;
     pendingFields?: string[];
+    collected?: Record<string, string>;
     options?: { id: string; label: string }[];
   } | null;
 }

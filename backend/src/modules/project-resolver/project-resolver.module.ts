@@ -8,7 +8,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 @Module({
   imports: [
     WhatsAppModule,
-    BullModule.registerQueue({ name: 'ocr' }),
+    BullModule.registerQueue({ name: 'ocr' }, { name: 'persist' }),
   ],
   providers: [ProjectResolverService, ClarificationService],
   exports: [ProjectResolverService, ClarificationService],
