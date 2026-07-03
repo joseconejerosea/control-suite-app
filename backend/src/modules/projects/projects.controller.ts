@@ -40,7 +40,8 @@ class EnviarConvocatoriaDto {
 }
 
 class ResponderConvocatoriaDto {
-  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada']) estado: string;
+  // 'no_show' — el operador marca (día de activación) que un promotor confirmado no se presentó.
+  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada', 'no_show']) estado: string;
 }
 
 class AprobarProyectoDto {

@@ -6,6 +6,7 @@ import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
 import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
 
 export interface ProjectSummary {
@@ -34,6 +35,7 @@ export class ProjectsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly waOutput: WhatsappOutputService,
     private readonly stockReturns: StockReturnsService,
   ) {
     this.repo = new TenantRepository<Project>(dataSource, Project);
@@ -87,7 +89,58 @@ export class ProjectsService {
       );
     }
 
+    // F4 Fase 4: editar un proyecto cuya convocatoria YA se envió invalida la
+    // aprobación → hay que re-aprobar antes de re-enviar (el gate vuelve a cerrar).
+    await this.invalidarAprobacionSiEditadoPostEnvio(clientId, id, dto);
+
     return updated;
+  }
+
+  /**
+   * Si el proyecto ya tenía convocatoria ENVIADA y se editó un campo relevante
+   * (nombre/fechas/presupuesto/config/descripción), resetea la aprobación y avisa
+   * al operador. Sin esto, un cambio post-envío podría re-disparar WhatsApp masivo
+   * sin pasar de nuevo por el gate humano — el mismo invariante que arreglamos en Tier 1.
+   */
+  private async invalidarAprobacionSiEditadoPostEnvio(
+    clientId: string, projectId: string, dto: UpdateProjectDto,
+  ): Promise<void> {
+    const sustantivo =
+      dto.name !== undefined || dto.description !== undefined ||
+      dto.start_date !== undefined || dto.end_date !== undefined ||
+      dto.budget !== undefined || dto.config !== undefined;
+    if (!sustantivo) return;
+
+    const rows = await this.dataSource.query(
+      `UPDATE projects p
+          SET aprobado_por_user_id  = NULL,
+              aprobado_at           = NULL,
+              convocatoria_cerrada_at = NULL,
+              config = jsonb_set(COALESCE(config,'{}'), '{ia_status}', '"pending_human_approval"'),
+              updated_at = NOW()
+        WHERE p.id = $1 AND p.client_id = $2
+          AND p.aprobado_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+               AND c.mensaje_enviado_at IS NOT NULL
+          )
+        RETURNING p.name`,
+      [projectId, clientId],
+    ).catch((err: any) => {
+      this.logger.warn(`[F4] invalidarAprobacion error proyecto=${projectId}: ${err.message}`);
+      return [];
+    });
+
+    if (!rows.length) return; // no estaba aprobado, o no había convocatoria enviada
+
+    this.logger.warn(`[F4] Aprobación invalidada por edición post-envío proyecto=${projectId}`);
+    const msg = `⚠️ El proyecto "${rows[0].name}" fue editado después de enviar la convocatoria. `
+      + `Requiere RE-APROBACIÓN antes de volver a enviar.`;
+    const admins = await this.getAdminPhones(clientId);
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
   }
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
@@ -208,15 +261,17 @@ export class ProjectsService {
       [clientId, projectId, body.persona_id],
     );
 
-    // Crear convocatorias pendientes por cada día (sin enviar WA todavía)
+    // Crear convocatorias pendientes por cada día (sin enviar WA todavía).
+    // ON CONFLICT apunta al índice único uq_convocatorias_turno (migración 047):
+    // re-asignar el mismo turno es idempotente en vez de duplicar la fila.
     for (const dia of body.dias) {
       await this.dataSource.query(
         `INSERT INTO convocatorias
            (client_id, proyecto_id, persona_id, dia, local_nombre, local_direccion, estado)
          VALUES ($1,$2,$3,$4,$5,$6,'pendiente')
-         ON CONFLICT DO NOTHING`,
+         ON CONFLICT (client_id, proyecto_id, persona_id, dia) DO NOTHING`,
         [clientId, projectId, body.persona_id, dia, body.local_nombre ?? null, body.local_direccion ?? null],
-      ).catch(() => {});
+      );
     }
 
     this.logger.log(`[F4] Turnos asignados persona=${body.persona_id} proyecto=${projectId} dias=${body.dias.length}`);
@@ -262,6 +317,14 @@ export class ProjectsService {
       if (!promotor?.phone) {
         errores++;
         detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: 'Sin teléfono registrado' });
+        continue;
+      }
+
+      // Lock de idempotencia (Fase 4): no re-enviar el mismo turno dentro de 5 min
+      // (doble click / reintento / doble job). Clave por proyecto+persona+día.
+      const dedupKey = `conv:${clientId}:${projectId}:${item.persona_id}:${item.dia}`;
+      if (!(await this.waOutput.guard(dedupKey))) {
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: 'Duplicado suprimido (lock)' });
         continue;
       }
 
@@ -318,7 +381,72 @@ export class ProjectsService {
        WHERE id=$2 AND client_id=$3 AND proyecto_id=$4`,
       [estado, convId, clientId, projectId],
     );
+    // Resolver manualmente una convocatoria puede completar la ronda → CLOSED.
+    await this.cerrarConvocatoriaSiCompleta(clientId, projectId);
     return { ok: true };
+  }
+
+  // ── F4 Fase 3: CLOSED lifecycle ───────────────────────────────────────────
+
+  /**
+   * Cierra la ronda de convocatoria del proyecto si TODAS las convocatorias
+   * quedaron resueltas (ninguna en 'enviada'/'pendiente'), y notifica al operador
+   * UNA sola vez. El UPDATE es atómico e idempotente: el guard
+   * convocatoria_cerrada_at IS NULL + el chequeo de pendientes evitan doble aviso
+   * aunque dos respuestas lleguen casi simultáneas.
+   */
+  async cerrarConvocatoriaSiCompleta(clientId: string, projectId: string): Promise<void> {
+    const cerradas = await this.dataSource.query(
+      `UPDATE projects p
+          SET convocatoria_cerrada_at = NOW(), updated_at = NOW()
+        WHERE p.id = $1 AND p.client_id = $2
+          AND p.convocatoria_cerrada_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+               AND c.estado IN ('enviada','pendiente')
+          )
+        RETURNING p.name`,
+      [projectId, clientId],
+    ).catch((err: any) => {
+      this.logger.warn(`[F4] cerrarConvocatoria error proyecto=${projectId}: ${err.message}`);
+      return [];
+    });
+
+    if (!cerradas.length) return; // nada que cerrar (o ya estaba cerrada)
+
+    const nombre = cerradas[0].name;
+    // Resumen de la ronda para el operador.
+    const [resumen] = await this.dataSource.query(
+      `SELECT
+          COUNT(*)                                        AS total,
+          COUNT(*) FILTER (WHERE estado='confirmada')     AS confirmadas,
+          COUNT(*) FILTER (WHERE estado='rechazada')      AS rechazadas
+         FROM convocatorias
+        WHERE proyecto_id=$1 AND client_id=$2`,
+      [projectId, clientId],
+    ).catch(() => [{ total: '?', confirmadas: '?', rechazadas: '?' }]);
+
+    const msg = `✅ Convocatoria "${nombre}" cerrada: todos respondieron. `
+      + `${resumen.confirmadas}/${resumen.total} confirmaron, ${resumen.rechazadas} rechazaron.`;
+    const admins = await this.getAdminPhones(clientId);
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
+    this.logger.log(`[F4] Convocatoria cerrada proyecto=${projectId} (${admins.length} operadores notificados)`);
+  }
+
+  /** Teléfonos de los admin_cliente del tenant con phone registrado. */
+  private async getAdminPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.dataSource.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='admin_cliente' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
   }
 
 }

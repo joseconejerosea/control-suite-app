@@ -53,16 +53,23 @@ export class CreateReporteAvanceDto {
   observacion?: string;
 }
 
+/**
+ * F5 Fase 2 (GATE): aprobar liga la validación humana al contenido EXACTO que se
+ * revisó. Ese htmlReporte queda guardado y es lo único que /enviar puede mandar
+ * — el envío ya no acepta contenido del request.
+ */
+export class AprobarReporteDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500_000)
+  htmlReporte!: string;
+}
+
 export class EnviarReporteDto {
   @IsArray()
   @ArrayNotEmpty()
   @IsEmail({}, { each: true })
   destinatarios!: string[];
-
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500_000)
-  htmlReporte!: string;
 }
 
 export class CerrarActivacionDto {

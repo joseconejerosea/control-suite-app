@@ -16,6 +16,12 @@ import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 
 const QUEUE_OCR = 'ocr';
+const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
+
+// F4 Fase 3 (alta urgente): dedup de la notificación al operador por número
+// desconocido. Module-level (vida del proceso) para no re-avisar en cada mensaje
+// del mismo número; clave `${clientId}:${from}`.
+const altaUrgenteNotified = new Set<string>();
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppWebhookController {
@@ -29,6 +35,7 @@ export class WhatsAppWebhookController {
     private readonly projectResolver: ProjectResolverService,
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
+    @InjectQueue(QUEUE_CONVOCATORIA_CLASSIFY) private readonly convocatoriaQueue: Queue,
     private readonly shield: PromptShieldService,
   ) {}
 
@@ -110,6 +117,9 @@ export class WhatsAppWebhookController {
               notifiedSenders.add(from);
               await this.wa.sendText(from, 'No estás registrado, contactá a tu coordinador.');
             }
+            // F4 Fase 3 (alta urgente): en vez de sólo descartar, avisar al operador
+            // que un número desconocido intenta contactar, para darlo de alta.
+            await this.notificarAltaUrgente(from, clientId);
             continue;
           }
         }
@@ -526,22 +536,21 @@ export class WhatsAppWebhookController {
       return;
     }
 
-    if (/^s[ií]$/i.test(text)) {
+    // ── F4 Fase 2: si el sender tiene una convocatoria abierta, cualquier texto
+    //    es una respuesta a la convocatoria. NO se parsea si/no acá: se persiste
+    //    el evento y se delega la clasificación (confirma/rechaza/ambiguo) al
+    //    processor 'convocatoria-classify' (IA con Claude, igual que F1).
+    if (await this.tieneConvocatoriaAbierta(from, clientId)) {
       // Persistir el evento entrante ANTES de procesar la respuesta (invariante eventos_crudos)
-      await this.persistEvent({
+      const eventId = await this.persistEvent({
         clientId, canalId, messageId, from, type: 'text', flow: 'F4',
-        payload: { text, convocatoria_reply: 'si' },
+        payload: { text, convocatoria_reply: 'pending_classification' },
       });
-      await this.handleConvocatoriaReply(from, 'si', clientId);
-      return;
-    }
-    if (/^no$/i.test(text)) {
-      // Persistir el evento entrante ANTES de procesar la respuesta (invariante eventos_crudos)
-      await this.persistEvent({
-        clientId, canalId, messageId, from, type: 'text', flow: 'F4',
-        payload: { text, convocatoria_reply: 'no' },
-      });
-      await this.handleConvocatoriaReply(from, 'no', clientId);
+      await this.convocatoriaQueue.add(
+        'convocatoria-classify',
+        { evento_crudo_id: eventId, client_id: clientId, from, text, wa_message_id: messageId },
+        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+      );
       return;
     }
 
@@ -587,42 +596,45 @@ export class WhatsAppWebhookController {
 
   // ── Convocation reply (F4) ────────────────────────────────────────────────
 
-  private async handleConvocatoriaReply(from: string, reply: 'si' | 'no', clientId: string) {
-    const estado   = reply === 'si' ? 'confirmada' : 'rechazada';
-    const texto    = reply === 'si' ? 'SI - Confirmado' : 'NO - Rechazado';
-    const replyMsg = reply === 'si'
-      ? 'Perfecto! Tu participacion ha sido confirmada.'
-      : 'Entendido. Buscaremos otro promotor. Gracias!';
+  /**
+   * ¿El teléfono tiene una convocatoria sin resolver? Decide si un texto libre
+   * debe rutearse al clasificador F4 (Fase 2) en vez del handler genérico.
+   */
+  private async tieneConvocatoriaAbierta(from: string, clientId: string): Promise<boolean> {
+    const rows = await this.ds.query(
+      `SELECT 1 FROM convocatorias c
+        WHERE c.client_id=$1
+          AND c.estado IN ('enviada','pendiente')
+          AND c.persona_id IN (
+            SELECT id FROM promoters WHERE phone=$2 AND client_id=$1 LIMIT 1
+          )
+        LIMIT 1`,
+      [clientId, from],
+    ).catch(() => []);
+    return rows.length > 0;
+  }
 
-    // ── Fix F4: aceptar 'enviada' Y 'pendiente' en el WHERE.
-    // enviarConvocatoria() setea estado='enviada' al enviar el WA; la query
-    // original solo buscaba 'pendiente' → nunca matcheaba → actualización silenciosa nula.
-    let rowsAffected = 0;
-    try {
-      const result = await this.ds.query(
-        `UPDATE convocatorias
-         SET estado=$1, respuesta_texto=$2, respuesta_at=NOW(), updated_at=NOW()
-         WHERE client_id=$4 AND persona_id IN (
-           SELECT id FROM promoters WHERE phone=$3 AND client_id=$4 LIMIT 1
-         ) AND estado IN ('enviada', 'pendiente')`,
-        [estado, texto, from, clientId],
-      );
-      // TypeORM raw query devuelve [rows, rowCount] para UPDATE con RETURNING,
-      // o el result object con rowCount directamente.
-      rowsAffected = result?.[1] ?? result?.rowCount ?? 0;
-    } catch (err: any) {
-      this.logger.error(`[F4] Error actualizando convocatoria reply from=${from}: ${err.message}`);
-      await this.wa.sendText(from, 'Hubo un error procesando tu respuesta. Contacta a tu coordinador.');
-      return;
+  /**
+   * F4 Fase 3 (alta urgente): notifica UNA vez a los operadores del tenant que un
+   * número no registrado intentó escribir, para que decidan darlo de alta. El
+   * evento entrante NO se persiste (el gate lo descarta) — es sólo un aviso.
+   */
+  private async notificarAltaUrgente(from: string, clientId: string): Promise<void> {
+    const key = `${clientId}:${from}`;
+    if (altaUrgenteNotified.has(key)) return;
+    altaUrgenteNotified.add(key);
+
+    const admins = await this.ds.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='admin_cliente' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+
+    const msg = `📲 Alta urgente: el número ${from} (no registrado) intentó escribir. `
+      + `Si es un promotor, dalo de alta para que pueda operar.`;
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
     }
-
-    if (rowsAffected === 0) {
-      this.logger.warn(`[F4] Reply de ${from} no matcheó ninguna convocatoria enviada`);
-      await this.wa.sendText(from, 'No encontramos una convocatoria pendiente para vos. Contacta a tu coordinador.');
-      return;
-    }
-
-    // Solo confirmamos al promotor si la actualización fue exitosa
-    await this.wa.sendText(from, replyMsg);
+    this.logger.log(`[F4] Alta urgente notificada: ${from} → ${admins.length} operadores`);
   }
 }

@@ -5,6 +5,8 @@ import { DataSource } from 'typeorm';
 import { Job } from 'bullmq';
 import Anthropic from '@anthropic-ai/sdk';
 import * as PDFDocument from 'pdfkit';
+import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { OperatorNotifierService } from '../../whatsapp/operator-notifier.service';
 
 const REPORT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -14,7 +16,10 @@ export class ReportProcessor extends WorkerHost {
   private readonly logger = new Logger(ReportProcessor.name);
   private readonly anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly notifier: OperatorNotifierService,
+  ) {
     super();
   }
 
@@ -23,9 +28,22 @@ export class ReportProcessor extends WorkerHost {
     activation_id: string;
     user_id: string;
   }>): Promise<void> {
-    const { client_id, activation_id, user_id } = job.data;
+    const { client_id, activation_id } = job.data;
     this.logger.log(`[Report] Generating report for activation ${activation_id}`);
+    // RLS: correr bajo app.current_tenant. Sin esto, con RLS activo (039/041) las
+    // lecturas volvían vacías y el INSERT fallaba en silencio (.catch tragado).
+    await runWithTenant(this.ds, client_id, () => this.generarBorrador(job.data));
+  }
 
+  /**
+   * F5 Fase 2: genera el reporte con IA y lo guarda como BORRADOR (estado='borrador',
+   * SIN aprobado_at). La IA propone; el humano dispone vía /aprobar. El INSERT ya no
+   * traga errores: si falla, el job reintenta.
+   */
+  private async generarBorrador(
+    data: { client_id: string; activation_id: string; user_id: string },
+  ): Promise<void> {
+    const { client_id, activation_id } = data;
     try {
       const [activation] = await this.ds.query(
         `SELECT a.*, p.name as project_name, c.nombre as client_name
@@ -91,20 +109,23 @@ Responde en JSON con esta estructura:
 
       const pdfBuffer = await this.generatePdf(activation, reportData, checkins, incidencias);
 
-      await this.ds.query(
+      const [reporte] = await this.ds.query(
         `INSERT INTO reportes_cliente
-           (client_id, activacion_id, version_interna_jsonb, version_cliente_jsonb,
-            aprobado_por_user_id, aprobado_at)
-         VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, NOW())`,
+           (client_id, activacion_id, version_interna_jsonb, version_cliente_jsonb, estado)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, 'borrador')
+         RETURNING id`,
         [
           client_id, activation_id,
           JSON.stringify(reportData),
           JSON.stringify({ ...reportData, pdf_generated: true }),
-          user_id,
         ],
-      ).catch(() => {});
+      );
 
-      this.logger.log(`[Report] Report generated for activation ${activation_id} (${pdfBuffer.length} bytes PDF)`);
+      this.logger.log(`[Report] Borrador generado para activación ${activation_id} (${pdfBuffer.length} bytes PDF)`);
+
+      // F5 Fase 3: process map — "avisa cuando el borrador está listo".
+      const msg = `📝 Borrador de reporte listo para revisar (activación ${activation_id}). Aprobalo antes de enviar al cliente.`;
+      await this.notifier.notificar(client_id, msg, `f5-borrador:${reporte?.id}`).catch(() => {});
 
     } catch (err: any) {
       this.logger.error(`[Report] Error: ${err.message}`);

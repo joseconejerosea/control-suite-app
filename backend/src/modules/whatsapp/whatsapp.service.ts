@@ -94,23 +94,6 @@ Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);
   }
 
-  // F5 — Notificación incidencia crítica
-  async notificarIncidencia(opts: {
-    telefono: string;
-    activacion: string;
-    descripcion: string;
-    severidad: string;
-  }): Promise<boolean> {
-    const emoji = opts.severidad === 'critica' ? '🔴' : opts.severidad === 'alta' ? '🟠' : '🟡';
-    const msg = `${emoji} *Incidencia ${opts.severidad.toUpperCase()}*
-
-Activación: ${opts.activacion}
-Descripción: ${opts.descripcion}
-
-Revisa Control Suite para más detalles.`;
-    return this.sendText(opts.telefono, msg);
-  }
-
   // F1 — Confirmación de documento recibido
   async confirmarDocumento(opts: {
     telefono: string;
