@@ -18,6 +18,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { InvoicesService } from './invoices.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
@@ -34,13 +35,13 @@ export class InvoicesController {
   // ─── Existing endpoints ───────────────────────────────────────────────────
 
   @Post()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   create(@Req() req: AuthedRequest, @Body() dto: CreateInvoiceDto) {
     return this.service.create(req.user.client_id, dto);
   }
 
   @Post('extract-image')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   extractImage(
     @Req() req: AuthedRequest,
     @Body() body: { image_base64: string; mime_type: string },
@@ -53,7 +54,7 @@ export class InvoicesController {
   }
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(
     @Req() req: AuthedRequest,
     @Query('category') category?: string,
@@ -66,7 +67,7 @@ export class InvoicesController {
   }
 
   @Get('report')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getReport(
     @Req() req: AuthedRequest,
     @Query('from')       from?: string,
@@ -77,13 +78,13 @@ export class InvoicesController {
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Patch(':id')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   update(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -93,7 +94,7 @@ export class InvoicesController {
   }
 
   @Delete(':id')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.remove(req.user.client_id, id);
@@ -101,7 +102,7 @@ export class InvoicesController {
 
   // ─── Upload — base64 JSON (Fastify compatible) ────────────────────────────
   @Post('upload')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   @HttpCode(HttpStatus.ACCEPTED)
   async upload(
     @Req() req: AuthedRequest,
@@ -131,7 +132,7 @@ export class InvoicesController {
   // ─── Eventos endpoints ────────────────────────────────────────────────────
 
   @Get('eventos/status/:eventoId')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   async eventoStatus(
     @Req() req: AuthedRequest,
     @Param('eventoId', ParseUUIDPipe) eventoId: string,
@@ -140,13 +141,13 @@ export class InvoicesController {
   }
 
   @Get('eventos/list')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   async eventosList(@Req() req: AuthedRequest) {
     return this.service.f1ListEventos(req.user.client_id);
   }
 
   @Post('eventos/:eventoId/reprocess')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @HttpCode(HttpStatus.OK)
   async eventosReprocess(
     @Req() req: AuthedRequest,

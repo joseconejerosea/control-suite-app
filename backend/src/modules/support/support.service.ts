@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 interface BroadcastDto {
   mensaje:     string;
@@ -129,7 +130,7 @@ export class SupportService {
         if (canal === 'whatsapp') {
           // Find admin phone number for this client
           const [adminUser] = await this.ds.query(
-            `SELECT u.phone FROM users u WHERE u.client_id = $1 AND u.role = 'admin_cliente' AND u.phone IS NOT NULL LIMIT 1`,
+            `SELECT u.phone FROM users u WHERE u.client_id = $1 AND u.role = '${UserRole.MANAGER}' AND u.phone IS NOT NULL LIMIT 1`,
             [client.id],
           ).catch(() => []);
 

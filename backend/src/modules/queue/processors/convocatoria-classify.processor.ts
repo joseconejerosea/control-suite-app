@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Job } from 'bullmq';
+import { UserRole } from '../../../common/enums/user-role.enum';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
@@ -171,7 +172,7 @@ export class ConvocatoriaClassifyProcessor extends WorkerHost {
     ).catch(() => []);
     const admins: { phone: string }[] = await this.ds.query(
       `SELECT phone FROM users
-        WHERE client_id=$1 AND role='admin_cliente' AND phone IS NOT NULL`,
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
       [clientId],
     ).catch(() => []);
 

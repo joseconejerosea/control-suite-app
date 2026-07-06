@@ -14,6 +14,7 @@ import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.gua
 import { constantTimeEqual } from '../../common/utils/constant-time';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
@@ -626,7 +627,7 @@ export class WhatsAppWebhookController {
 
     const admins = await this.ds.query(
       `SELECT phone FROM users
-        WHERE client_id=$1 AND role='admin_cliente' AND phone IS NOT NULL`,
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
       [clientId],
     ).catch(() => []);
 

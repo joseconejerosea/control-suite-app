@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsappOutputService } from './whatsapp-output.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 /**
  * Broadcast de notificaciones a los operadores (admin_cliente) de un tenant.
@@ -40,7 +41,7 @@ export class OperatorNotifierService {
   private async getAdminPhones(clientId: string): Promise<{ phone: string }[]> {
     return this.ds.query(
       `SELECT phone FROM users
-        WHERE client_id=$1 AND role='admin_cliente' AND phone IS NOT NULL`,
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
       [clientId],
     ).catch(() => []);
   }

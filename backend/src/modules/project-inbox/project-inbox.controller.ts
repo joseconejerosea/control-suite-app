@@ -8,6 +8,7 @@ import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
@@ -19,13 +20,13 @@ export class ProjectInboxController {
   constructor(private readonly svc: ProjectInboxService) {}
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@CurrentUser() user: JwtPayload) {
     return this.svc.findAll(user.client_id);
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -34,7 +35,7 @@ export class ProjectInboxController {
   }
 
   @Post('upload')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'UPLOAD_BRIEF', entity: 'project_inbox' })
   upload(
     @CurrentUser() user: JwtPayload,
@@ -48,7 +49,7 @@ export class ProjectInboxController {
   }
 
   @Put(':id/approve')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'APPROVE_INBOX', entity: 'project_inbox' })
   approve(
     @CurrentUser() user: JwtPayload,
@@ -60,7 +61,7 @@ export class ProjectInboxController {
   }
 
   @Put(':id/reject')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'REJECT_INBOX', entity: 'project_inbox' })
   reject(
     @CurrentUser() user: JwtPayload,

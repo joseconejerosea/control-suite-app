@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { Client } from '../clients/client.entity';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Entity('users')
 @Index('IDX_USERS_CLIENT_EMAIL', ['client_id', 'email'], { unique: true })
@@ -27,8 +28,8 @@ export class User {
   @Column()
   password!: string;
 
-  @Column({ default: 'user' })
-  role!: string;
+  @Column({ default: UserRole.OPERATOR })
+  role!: UserRole;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   full_name!: string | null;

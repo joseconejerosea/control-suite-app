@@ -7,6 +7,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Controller('auth')
 export class AuthController {
@@ -15,7 +16,7 @@ export class AuthController {
   // C4 — alta de usuarios reservada a super_admin. Antes era @Public() y
   // aceptaba client_id del body → cualquiera creaba cuentas en cualquier tenant.
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('super_admin')
+  @Roles(UserRole.SUPERADMIN)
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);

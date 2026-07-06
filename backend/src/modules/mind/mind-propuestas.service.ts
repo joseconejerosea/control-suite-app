@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Injectable()
 export class MindPropuestasService {
@@ -135,7 +136,7 @@ export class MindPropuestasService {
         const admins = await this.ds
           .query(
             `SELECT u.phone, u.language FROM users u
-             WHERE u.client_id = $1 AND u.role = 'admin_cliente' AND u.phone IS NOT NULL`,
+             WHERE u.client_id = $1 AND u.role = '${UserRole.MANAGER}' AND u.phone IS NOT NULL`,
             [clientId],
           )
           .catch(() => []);

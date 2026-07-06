@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { AuditService } from './audit.service';
 import { AuditLogFiltersDto } from './dto/audit-log-filters.dto';
 
@@ -17,7 +18,7 @@ export class AuditController {
 
   // ── Global audit log (superadmin) ─────────────────────────────────────────
   @Get('admin/audit-log')
-  @Roles('super_admin')
+  @Roles(UserRole.SUPERADMIN)
   async getAdminAuditLog(@Query() filters: AuditLogFiltersDto) {
     return this.auditService.findAll(filters);
   }
@@ -31,7 +32,7 @@ export class AuditController {
 
   // ── AI cost tracking (existing) ───────────────────────────────────────────
   @Get('admin/audit/ai-costs')
-  @Roles('super_admin')
+  @Roles(UserRole.SUPERADMIN)
   async getAiCosts(
     @Query('days')      daysRaw    = '30',
     @Query('client_id') clientId?: string,
@@ -96,7 +97,7 @@ export class AuditController {
   }
 
   @Get('admin/audit/actions')
-  @Roles('super_admin')
+  @Roles(UserRole.SUPERADMIN)
   async getActionLog() {
     return this.ds.query(
       `SELECT e.id, e.canal, e.processing_status, e.created_at,
@@ -109,7 +110,7 @@ export class AuditController {
   }
 
   @Get('admin/audit/margin-per-client')
-  @Roles('super_admin')
+  @Roles(UserRole.SUPERADMIN)
   async getMarginPerClient(@Query('days') daysRaw = '30') {
     const d = Math.min(Math.max(parseInt(daysRaw) || 30, 1), 365);
 

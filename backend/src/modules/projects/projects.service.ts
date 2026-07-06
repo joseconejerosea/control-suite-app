@@ -8,6 +8,7 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
 import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 export interface ProjectSummary {
   project_id:       string;
@@ -444,7 +445,7 @@ export class ProjectsService {
   private async getAdminPhones(clientId: string): Promise<{ phone: string }[]> {
     return this.dataSource.query(
       `SELECT phone FROM users
-        WHERE client_id=$1 AND role='admin_cliente' AND phone IS NOT NULL`,
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
       [clientId],
     ).catch(() => []);
   }

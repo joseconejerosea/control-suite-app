@@ -18,6 +18,7 @@ import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { ResendEmailService } from '../../common/email/resend.service';
@@ -83,8 +84,30 @@ export class F5Controller {
     if ((body.severidad ?? 'media') === 'alta') {
       const msg = `🔴 Incidencia ALTA en activación ${id}: ${body.descripcion}`;
       await this.notifier.notificar(user.client_id, msg, `f5-incidencia:${incidencia.id}`).catch(() => {});
+
+      // Además, alerta por email al cliente. Hoy resuelve al admin_cliente del tenant
+      // (no hay email de marca persistido en `clients`); migrar cuando exista ese campo.
+      const emails = await this.getAdminEmails(user.client_id);
+      if (emails.length) {
+        await this.emailService.sendAlertaIncidencia({
+          destinatarios: emails,
+          descripcion:   body.descripcion,
+          severidad:     body.severidad ?? 'alta',
+          activacionId:  id,
+        }).catch(() => {});
+      }
     }
     return incidencia;
+  }
+
+  /** Emails de los admin_cliente del tenant con correo registrado. */
+  private async getAdminEmails(clientId: string): Promise<string[]> {
+    const rows = await this.ds.query(
+      `SELECT email FROM users
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND email IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+    return rows.map((r: { email: string }) => r.email);
   }
 
   @Patch('incidencias/:id/resolver')
@@ -126,7 +149,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reporte-cliente/generar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   async generarReporte(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     // Lock de edición post-aprobación: si ya hay un reporte APROBADO pendiente de
     // envío, no se regenera (evita que un borrador nuevo compita con lo aprobado).
@@ -174,7 +197,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reporte-cliente/aprobar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   async aprobarReporte(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -203,7 +226,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reporte-cliente/enviar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   async enviarReporte(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

@@ -76,4 +76,30 @@ export class ResendEmailService {
       `,
     });
   }
+
+  async sendAlertaIncidencia(opts: {
+    destinatarios: string[];
+    descripcion:   string;
+    severidad:     string;
+    activacionId:  string;
+  }): Promise<boolean> {
+    return this.send({
+      to: opts.destinatarios,
+      subject: `⚠ Incidencia ${opts.severidad.toUpperCase()} — Control Suite`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #C8202C; padding: 24px; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 20px;">Control Suite BTL</h1>
+            <p style="color: rgba(255,255,255,0.8); margin: 4px 0 0;">Alerta de Incidencia</p>
+          </div>
+          <div style="background: #f9f9f9; padding: 24px; border-radius: 0 0 12px 12px;">
+            <p style="color: #666; margin: 0 0 8px;">Severidad: <strong style="color: #C8202C;">${opts.severidad.toUpperCase()}</strong></p>
+            <p style="color: #1a1a1a; font-size: 16px;">${opts.descripcion}</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 16px 0;">
+            <p style="color: #999; font-size: 12px;">Activación ${opts.activacionId} — Control Suite BTL</p>
+          </div>
+        </div>
+      `,
+    });
+  }
 }

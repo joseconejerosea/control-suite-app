@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { Client } from '../../modules/clients/client.entity';
+import { UserRole } from '../enums/user-role.enum';
 
 @Injectable()
 export class ClientActiveGuard implements CanActivate {
@@ -20,7 +21,7 @@ export class ClientActiveGuard implements CanActivate {
     }
 
     // Super admins bypass the check
-    if (user.role === 'super_admin') {
+    if (user.role === UserRole.SUPERADMIN) {
       return true;
     }
 

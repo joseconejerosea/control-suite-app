@@ -19,6 +19,7 @@ import { User } from './user.entity';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
@@ -44,8 +45,8 @@ class AdminCreateUserDto {
   password!: string;
 
   @IsString()
-  @IsIn(['user', 'admin_cliente'])
-  role!: string;
+  @IsIn([UserRole.OPERATOR, UserRole.MANAGER])
+  role!: UserRole;
 
   @IsOptional()
   @IsString()
@@ -59,8 +60,8 @@ class AdminCreateUserDto {
 class AdminUpdateUserDto {
   @IsOptional()
   @IsString()
-  @IsIn(['user', 'admin_cliente'])
-  role?: string;
+  @IsIn([UserRole.OPERATOR, UserRole.MANAGER])
+  role?: UserRole;
 
   @IsOptional()
   @IsString()
@@ -81,7 +82,7 @@ class AdminUpdateUserDto {
 
 @Controller('v1/app/admin/users')
 @UseGuards(AuthGuard, RolesGuard)
-@Roles('super_admin')
+@Roles(UserRole.SUPERADMIN)
 export class AdminUsersController {
   constructor(
     @InjectRepository(User)

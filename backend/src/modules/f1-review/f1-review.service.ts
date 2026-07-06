@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { StorageService } from '../../common/storage/storage.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { AuditService } from '../audit/audit.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
@@ -241,7 +242,7 @@ export class F1ReviewService {
 
   private async getUserLanguage(clientId: string): Promise<string> {
     const rows = await this.ds.query(
-      `SELECT language FROM users WHERE client_id = $1 AND role = 'admin_cliente' LIMIT 1`,
+      `SELECT language FROM users WHERE client_id = $1 AND role = '${UserRole.MANAGER}' LIMIT 1`,
       [clientId],
     ).catch(() => []);
     return rows[0]?.language ?? 'es';

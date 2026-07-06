@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { AuditService } from '../audit/audit.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Injectable()
 export class StockReturnsService {
@@ -265,7 +266,7 @@ export class StockReturnsService {
 
   private async getUserLanguage(clientId: string): Promise<string> {
     const rows = await this.ds.query(
-      `SELECT language FROM users WHERE client_id = $1 AND role = 'admin_cliente' LIMIT 1`,
+      `SELECT language FROM users WHERE client_id = $1 AND role = '${UserRole.MANAGER}' LIMIT 1`,
       [clientId],
     ).catch(() => []);
     return rows[0]?.language ?? 'es';

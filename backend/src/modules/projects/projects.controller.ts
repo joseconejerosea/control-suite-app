@@ -7,6 +7,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -56,26 +57,26 @@ export class ProjectsController {
   constructor(private readonly service: ProjectsService) {}
 
   @Post()
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'CREATE_PROJECT', entity: 'Project' })
   create(@Req() req: AuthedRequest, @Body() dto: CreateProjectDto) {
     return this.service.create(req.user.client_id, dto);
   }
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@Req() req: AuthedRequest) {
     return this.service.findAll(req.user.client_id);
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Patch(':id')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'UPDATE_PROJECT', entity: 'Project' })
   update(
     @Req() req: AuthedRequest,
@@ -86,7 +87,7 @@ export class ProjectsController {
   }
 
   @Get(':id/summary')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   summary(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.summary(req.user.client_id, id);
   }
@@ -94,7 +95,7 @@ export class ProjectsController {
   // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────
 
   @Post(':id/aprobar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'APPROVE_PROJECT', entity: 'Project' })
   aprobar(
     @Req() req: AuthedRequest,
@@ -109,13 +110,13 @@ export class ProjectsController {
   //   POST /projects/:id/turno-equipo        → asignar persona a día(s)
 
   @Get(':id/turno-equipo')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getTurnoEquipo(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.getTurnoEquipo(req.user.client_id, id);
   }
 
   @Post(':id/turno-equipo')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   asignarTurno(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -130,7 +131,7 @@ export class ProjectsController {
   //   PATCH /projects/:id/convocatorias/:convId → actualizar estado manualmente
 
   @Post(':id/convocar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   @AuditAction({ action: 'SEND_CONVOCATION', entity: 'Project' })
   enviarConvocatoria(
     @Req() req: AuthedRequest,
@@ -141,13 +142,13 @@ export class ProjectsController {
   }
 
   @Get(':id/convocatorias')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getConvocatorias(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.getConvocatorias(req.user.client_id, id);
   }
 
   @Patch(':id/convocatorias/:convId')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
   updateConvocatoria(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,

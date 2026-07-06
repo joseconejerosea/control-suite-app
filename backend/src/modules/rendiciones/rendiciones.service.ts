@@ -14,6 +14,7 @@ import {
 } from './dto/rendicion.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
+import { UserRole } from '../../common/enums/user-role.enum';
 import PDFDocument from 'pdfkit';
 
 @Injectable()
@@ -178,7 +179,7 @@ export class RendicionesService {
   private async getAdminPhones(clientId: string): Promise<{ phone: string; language: string }[]> {
     return this.ds.query(
       `SELECT u.phone, u.language FROM users u
-       WHERE u.client_id = $1 AND u.role = 'admin_cliente' AND u.phone IS NOT NULL`,
+       WHERE u.client_id = $1 AND u.role = '${UserRole.MANAGER}' AND u.phone IS NOT NULL`,
       [clientId],
     ).catch(() => []);
   }
