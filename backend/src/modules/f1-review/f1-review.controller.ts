@@ -27,7 +27,7 @@ export class F1ReviewController {
   constructor(private readonly service: F1ReviewService) {}
 
   @Get()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(
     @Req() req: AuthedRequest,
     @Query('project_id') projectId?: string,
@@ -54,7 +54,7 @@ export class F1ReviewController {
   }
 
   @Get(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -63,7 +63,7 @@ export class F1ReviewController {
   }
 
   @Put(':id/approve')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'APPROVE_DOCUMENT', entity: 'eventos_crudos' })
   approve(
     @Req() req: AuthedRequest,
@@ -78,7 +78,7 @@ export class F1ReviewController {
   }
 
   @Put(':id/reject')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'REJECT_DOCUMENT', entity: 'eventos_crudos' })
   reject(
     @Req() req: AuthedRequest,

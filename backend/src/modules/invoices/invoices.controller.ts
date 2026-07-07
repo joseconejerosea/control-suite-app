@@ -35,13 +35,13 @@ export class InvoicesController {
   // ─── Existing endpoints ───────────────────────────────────────────────────
 
   @Post()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   create(@Req() req: AuthedRequest, @Body() dto: CreateInvoiceDto) {
     return this.service.create(req.user.client_id, dto);
   }
 
   @Post('extract-image')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   extractImage(
     @Req() req: AuthedRequest,
     @Body() body: { image_base64: string; mime_type: string },
@@ -54,7 +54,7 @@ export class InvoicesController {
   }
 
   @Get()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(
     @Req() req: AuthedRequest,
     @Query('category') category?: string,
@@ -67,7 +67,7 @@ export class InvoicesController {
   }
 
   @Get('report')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getReport(
     @Req() req: AuthedRequest,
     @Query('from')       from?: string,
@@ -78,13 +78,13 @@ export class InvoicesController {
   }
 
   @Get(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Patch(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   update(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -94,7 +94,7 @@ export class InvoicesController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.remove(req.user.client_id, id);
@@ -102,7 +102,7 @@ export class InvoicesController {
 
   // ─── Upload — base64 JSON (Fastify compatible) ────────────────────────────
   @Post('upload')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   @HttpCode(HttpStatus.ACCEPTED)
   async upload(
     @Req() req: AuthedRequest,
@@ -132,7 +132,7 @@ export class InvoicesController {
   // ─── Eventos endpoints ────────────────────────────────────────────────────
 
   @Get('eventos/status/:eventoId')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   async eventoStatus(
     @Req() req: AuthedRequest,
     @Param('eventoId', ParseUUIDPipe) eventoId: string,
@@ -141,13 +141,13 @@ export class InvoicesController {
   }
 
   @Get('eventos/list')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   async eventosList(@Req() req: AuthedRequest) {
     return this.service.f1ListEventos(req.user.client_id);
   }
 
   @Post('eventos/:eventoId/reprocess')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @HttpCode(HttpStatus.OK)
   async eventosReprocess(
     @Req() req: AuthedRequest,

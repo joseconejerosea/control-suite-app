@@ -17,13 +17,13 @@ export class StockReturnsController {
   constructor(private readonly svc: StockReturnsService) {}
 
   @Get('pending')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findPending(@CurrentUser() user: JwtPayload) {
     return this.svc.findPending(user.client_id);
   }
 
   @Put(':id/confirm')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'CONFIRM_RETURN', entity: 'stock_return_requests' })
   confirm(
     @CurrentUser() user: JwtPayload,
@@ -34,7 +34,7 @@ export class StockReturnsController {
   }
 
   @Put(':id/reject')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'REJECT_RETURN', entity: 'stock_return_requests' })
   reject(
     @CurrentUser() user: JwtPayload,

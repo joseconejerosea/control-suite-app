@@ -18,31 +18,31 @@ export class DashboardController {
   constructor(private readonly service: DashboardService) {}
 
   @Get('overview')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   overview(@Req() req: AuthedRequest, @Query() filters: DashboardFiltersDto) {
     return this.service.overview(req.user.client_id, filters);
   }
 
   @Get('campaigns')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   campaigns(@Req() req: AuthedRequest, @Query() filters: DashboardFiltersDto) {
     return this.service.campaigns(req.user.client_id, filters);
   }
 
   @Get('activations')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   activations(@Req() req: AuthedRequest, @Query() filters: DashboardFiltersDto) {
     return this.service.activations(req.user.client_id, filters);
   }
 
   @Get('events')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   events(@Req() req: AuthedRequest, @Query() filters: DashboardFiltersDto) {
     return this.service.events(req.user.client_id, filters);
   }
 
   @Get('documents')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   documents(@Req() req: AuthedRequest, @Query() filters: DashboardFiltersDto) {
     return this.service.documents(req.user.client_id, filters);
   }

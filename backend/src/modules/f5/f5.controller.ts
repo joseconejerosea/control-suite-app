@@ -149,7 +149,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reporte-cliente/generar')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async generarReporte(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     // Lock de edición post-aprobación: si ya hay un reporte APROBADO pendiente de
     // envío, no se regenera (evita que un borrador nuevo compita con lo aprobado).
@@ -197,7 +197,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reporte-cliente/aprobar')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   async aprobarReporte(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -226,7 +226,7 @@ export class F5Controller {
   }
 
   @Post('activaciones/:id/reporte-cliente/enviar')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   async enviarReporte(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

@@ -17,7 +17,7 @@ export class F5ViewController {
 
   // ── Checkins ────────────────────────────────────────────────────────────
   @Get('activaciones/:id/checkins')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async getCheckins(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ds.query(
       `SELECT * FROM checkins WHERE activacion_id=$1 AND client_id=$2 ORDER BY ts DESC`,
@@ -26,7 +26,7 @@ export class F5ViewController {
   }
 
   @Post('activaciones/:id/checkins')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async createCheckin(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -42,7 +42,7 @@ export class F5ViewController {
 
   // ── Incidencias ──────────────────────────────────────────────────────────
   @Get('activaciones/:id/incidencias')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async getIncidencias(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ds.query(
       `SELECT * FROM incidencias WHERE activacion_id=$1 AND client_id=$2 ORDER BY created_at DESC`,
@@ -51,7 +51,7 @@ export class F5ViewController {
   }
 
   @Post('activaciones/:id/incidencias')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async createIncidencia(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -66,7 +66,7 @@ export class F5ViewController {
   }
 
   @Patch('incidencias/:id/resolver')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async resolverIncidencia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.ds.query(
       `UPDATE incidencias SET estado='resuelta', resuelta_at=NOW(), resuelta_por_user_id=$2, updated_at=NOW()
@@ -78,7 +78,7 @@ export class F5ViewController {
 
   // ── Reportes avance ──────────────────────────────────────────────────────
   @Get('activaciones/:id/reportes')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async getReportes(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ds.query(
       `SELECT * FROM reportes_avance WHERE activacion_id=$1 AND client_id=$2 ORDER BY ts ASC`,
@@ -87,7 +87,7 @@ export class F5ViewController {
   }
 
   @Post('activaciones/:id/reportes')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async createReporte(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -107,7 +107,7 @@ export class F5ViewController {
   // FLAG: acción destructiva (cierra activación). Restringida a MANAGER+SUPERADMIN.
   // Si se requiere que OPERATOR pueda cerrar, revisar junto al PO antes de cambiar.
   @Post('activaciones/:id/cerrar')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   async cerrarActivacion(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -128,7 +128,7 @@ export class F5ViewController {
   // SUPERVISOR NO incluido: filtra por client_id completo, no por "lo propio" del supervisor.
   // Revisar con PO si SUPERVISOR debe ver solo sus activaciones asignadas.
   @Get('dashboard')
-  @Roles(UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
   async dashboard(@CurrentUser() user: JwtPayload) {
     const rows = await this.ds.query(
       `SELECT

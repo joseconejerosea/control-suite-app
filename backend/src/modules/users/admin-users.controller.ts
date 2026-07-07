@@ -83,7 +83,7 @@ class AdminUpdateUserDto {
 
 @Controller('v1/app/admin/users')
 @UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+@Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
 export class AdminUsersController {
   constructor(
     @InjectRepository(User)

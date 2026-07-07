@@ -64,7 +64,7 @@ export class DocumentIngestionController {
   ) {}
 
   @Post('upload')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'UPLOAD_DOCUMENT', entity: 'DocumentUpload' })
   async upload(@Req() req: AuthedRequest) {
     const data = await (req as any).file();
@@ -135,7 +135,7 @@ export class DocumentIngestionController {
   }
 
   @Get()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(
     @Req() req: AuthedRequest,
     @Query('status') status?: string,
@@ -148,25 +148,25 @@ export class DocumentIngestionController {
   }
 
   @Get(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Post(':id/parse')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   parse(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.parse(req.user.client_id, id);
   }
 
   @Get(':id/preview')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   preview(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.preview(req.user.client_id, id);
   }
 
   @Post(':id/populate')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   populate(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -176,7 +176,7 @@ export class DocumentIngestionController {
   }
 
   @Post(':id/reprocess')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   reprocess(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.reprocess(req.user.client_id, id);
   }

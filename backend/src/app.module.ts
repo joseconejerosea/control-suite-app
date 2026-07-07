@@ -8,6 +8,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ClientIsolationGuard } from './common/guards/client-isolation.guard';
 import { AuthGuard } from './common/guards/auth.guard';
+import { ServiceLeadGuard } from './common/guards/service-lead.guard';
+import { ServiceLeadTenant } from './modules/auth/entities/service-lead-tenant.entity';
 
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -77,6 +79,10 @@ import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module
       }),
     }),
 
+    // Repo del guard global ServiceLeadGuard (APP_GUARD). Se registra en el
+    // injector raíz para que el guard pueda inyectar el repositorio.
+    TypeOrmModule.forFeature([ServiceLeadTenant]),
+
     UsersModule, AuthModule, LocationsModule, PromotersModule,
     CampaignsModule, ActivationsModule, CanalEntradaModule,
     EventosCrudosModule, WebhooksModule, QueueModule,
@@ -104,6 +110,9 @@ import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Global AuthGuard — runs first, decodes JWT, respects @Public()
     { provide: APP_GUARD, useClass: AuthGuard },
+    // ServiceLeadGuard — corre DESPUÉS de AuthGuard (necesita req.user).
+    // Sólo el SERVICE_LEAD paga costo de DB; valida el tenant activo (Diseño B).
+    { provide: APP_GUARD, useClass: ServiceLeadGuard },
     // Brief Rule 09: isolation check runs after user is set
     { provide: APP_GUARD, useClass: ClientIsolationGuard },
     // Tenant binding (Fase 2 · E4a) — el MÁS externo: abre la tx con

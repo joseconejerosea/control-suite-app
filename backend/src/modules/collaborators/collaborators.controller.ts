@@ -30,25 +30,25 @@ export class CollaboratorsController {
   constructor(private readonly service: CollaboratorsService) {}
 
   @Post()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   create(@Req() req: AuthedRequest, @Body() dto: CreateCollaboratorDto) {
     return this.service.create(req.user.client_id, dto);
   }
 
   @Get()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@Req() req: AuthedRequest, @Query('project_id') projectId?: string) {
     return this.service.findAll(req.user.client_id, projectId);
   }
 
   @Get(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Patch(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   update(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,

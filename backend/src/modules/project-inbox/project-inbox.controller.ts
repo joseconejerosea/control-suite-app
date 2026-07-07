@@ -20,13 +20,13 @@ export class ProjectInboxController {
   constructor(private readonly svc: ProjectInboxService) {}
 
   @Get()
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@CurrentUser() user: JwtPayload) {
     return this.svc.findAll(user.client_id);
   }
 
   @Get(':id')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -35,7 +35,7 @@ export class ProjectInboxController {
   }
 
   @Post('upload')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'UPLOAD_BRIEF', entity: 'project_inbox' })
   upload(
     @CurrentUser() user: JwtPayload,
@@ -49,7 +49,7 @@ export class ProjectInboxController {
   }
 
   @Put(':id/approve')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'APPROVE_INBOX', entity: 'project_inbox' })
   approve(
     @CurrentUser() user: JwtPayload,
@@ -61,7 +61,7 @@ export class ProjectInboxController {
   }
 
   @Put(':id/reject')
-  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'REJECT_INBOX', entity: 'project_inbox' })
   reject(
     @CurrentUser() user: JwtPayload,
