@@ -1,6 +1,6 @@
 import {
   Body, Controller, Get, Param, ParseUUIDPipe,
-  Patch, Post, Req, UseGuards,
+  Patch, Post, Put, Req, UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -12,7 +12,7 @@ import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
 import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
@@ -47,6 +47,12 @@ class ResponderConvocatoriaDto {
 
 class AprobarProyectoDto {
   @IsOptional() @IsString() comentario?: string;
+}
+
+class ReportRecipientsDto {
+  @IsArray()
+  @IsEmail({}, { each: true })
+  emails: string[];
 }
 
 // ── Controller ────────────────────────────────────────────────────────────────
@@ -90,6 +96,27 @@ export class ProjectsController {
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   summary(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.summary(req.user.client_id, id);
+  }
+
+  // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
+  //   GET /projects/:id/report-recipients → lista configurada
+  //   PUT /projects/:id/report-recipients → reemplaza la lista
+
+  @Get(':id/report-recipients')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  getReportRecipients(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getReportRecipients(req.user.client_id, id);
+  }
+
+  @Put(':id/report-recipients')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'SET_REPORT_RECIPIENTS', entity: 'Project' })
+  setReportRecipients(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportRecipientsDto,
+  ) {
+    return this.service.setReportRecipients(req.user.client_id, id, dto.emails);
   }
 
   // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────

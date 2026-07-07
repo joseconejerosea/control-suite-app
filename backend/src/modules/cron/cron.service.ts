@@ -7,6 +7,7 @@ import { Queue } from 'bullmq';
 import Anthropic from '@anthropic-ai/sdk';
 import { QUEUE_MIND_PROACTIVE } from '../queue/queue.module';
 import { RendicionesService } from '../rendiciones/rendiciones.service';
+import { OperatorNotifierService } from '../whatsapp/operator-notifier.service';
 import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 
 // Brief: F5 hourly mini-reports use Haiku (cheap), not Opus
@@ -26,6 +27,7 @@ export class CronService {
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_MIND_PROACTIVE) private readonly mindQueue: Queue,
     private readonly rendicionesService: RendicionesService,
+    private readonly notifier: OperatorNotifierService,
   ) {}
 
   // ── F5: Hourly mini-reports for live activations ──────────────────────────
@@ -210,6 +212,64 @@ export class CronService {
       this.logger.log(`[Cron] Return reminder done — ${overdue.length} overdue`);
     } catch (err) {
       this.logger.error('[Cron] Return reminder error:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── F5: Recordatorio D+1 de reporte al cliente — daily at 09:00 ──
+  // Process map §F5: el reporte al cliente se envía al día siguiente (D+1) de la
+  // activación. Este cron busca activaciones de AYER que no estén cerradas y cuyo
+  // reporte AÚN no fue enviado, y le recuerda al operador que tiene que enviarlo.
+  // Tenant/RLS: lista cross-tenant con runAsSystem; el chequeo "ya enviado" y la
+  // notificación corren en la tx del tenant con runWithTenant (mismo patrón que
+  // hourlyF5Reports / returnReminder24h).
+  @Cron('0 9 * * *')
+  async dailyF5ReportReminder(): Promise<void> {
+    this.logger.log('[Cron] F5 D+1 report reminder running...');
+    try {
+      const activaciones = await runAsSystem(() =>
+        this.ds.query(
+          `SELECT id, client_id, activation_date
+             FROM activations
+            WHERE activation_date = CURRENT_DATE - INTERVAL '1 day'
+              AND estado_f5 IS DISTINCT FROM 'cerrada'`,
+        ),
+      ).catch(() => []);
+
+      let recordatorios = 0;
+      for (const act of activaciones) {
+        await runWithTenant(this.ds, act.client_id, async () => {
+          // ¿Ya se envió el reporte al cliente de esta activación? Si sí → skip.
+          const [enviado] = await this.ds.query(
+            `SELECT 1 FROM reportes_cliente
+              WHERE activacion_id=$1 AND client_id=$2 AND estado='enviado'
+              LIMIT 1`,
+            [act.id, act.client_id],
+          ).catch(() => []);
+          if (enviado) return;
+
+          const fecha = act.activation_date
+            ? new Date(act.activation_date).toLocaleDateString('es-CL')
+            : 'ayer';
+          const msg =
+            `📋 Recordatorio: la activación ${act.id} del ${fecha} necesita que ` +
+            `envíes el reporte al cliente (D+1).`;
+          // dedupKey por día → el operador recibe el aviso una sola vez por jornada.
+          const day = new Date().toISOString().slice(0, 10);
+          await this.notifier
+            .notificar(act.client_id, msg, `f5-d1-reminder:${act.id}:${day}`)
+            .catch(() => {});
+          recordatorios++;
+        }).catch((err) =>
+          this.logger.error(
+            `[CronF5D1] cliente ${act.client_id}:`,
+            err instanceof Error ? err.message : err,
+          ),
+        );
+      }
+
+      this.logger.log(`[Cron] F5 D+1 reminder done — ${recordatorios} recordatorio(s) enviados`);
+    } catch (err) {
+      this.logger.error('[Cron] F5 D+1 reminder error:', err instanceof Error ? err.message : err);
     }
   }
 

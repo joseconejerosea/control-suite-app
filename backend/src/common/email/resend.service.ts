@@ -1,10 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 
 export interface EmailOptions {
   to: string | string[];
   subject: string;
   html: string;
   from?: string;
+  /**
+   * Headers custom para el proveedor (Resend los pasa tal cual al correo). Se usa
+   * para setear un `Message-ID` RFC propio y así poder matchear la respuesta del
+   * cliente (llega en su `In-Reply-To` / `References`).
+   */
+  headers?: Record<string, string>;
+}
+
+/** Resultado del envío: `id` = id de Resend; `messageId` = Message-ID RFC seteado (si hubo). */
+export interface SendResult {
+  ok: boolean;
+  id?: string;
+  messageId?: string;
 }
 
 @Injectable()
@@ -13,10 +27,10 @@ export class ResendEmailService {
   private readonly apiKey = process.env.RESEND_API_KEY;
   private readonly from = 'Control Suite <noreply@controlsuite.app>';
 
-  async send(opts: EmailOptions): Promise<boolean> {
+  async send(opts: EmailOptions): Promise<SendResult> {
     if (!this.apiKey) {
       this.logger.warn('[Email] RESEND_API_KEY not set');
-      return false;
+      return { ok: false };
     }
 
     try {
@@ -31,21 +45,32 @@ export class ResendEmailService {
           to: Array.isArray(opts.to) ? opts.to : [opts.to],
           subject: opts.subject,
           html: opts.html,
+          ...(opts.headers ? { headers: opts.headers } : {}),
         }),
       });
 
       if (!res.ok) {
         const err = await res.text();
         this.logger.error('[Email] Send failed:', err);
-        return false;
+        return { ok: false };
       }
 
-      this.logger.log(`[Email] Sent to ${opts.to}: ${opts.subject}`);
-      return true;
+      const data = (await res.json().catch(() => ({}))) as { id?: string };
+      this.logger.log(`[Email] Sent to ${opts.to}: ${opts.subject} (resend id: ${data?.id ?? 'n/a'})`);
+      return { ok: true, id: data?.id, messageId: opts.headers?.['Message-ID'] };
     } catch (err: any) {
       this.logger.error('[Email] Error:', err.message);
-      return false;
+      return { ok: false };
     }
+  }
+
+  /**
+   * Genera un Message-ID RFC-5322 propio para poder matchear la respuesta del
+   * cliente al reporte enviado. El dominio coincide con el del `from` de marca.
+   */
+  private buildMessageId(): string {
+    const rand = randomBytes(16).toString('hex');
+    return `<${Date.now()}.${rand}@controlsuite.app>`;
   }
 
   async sendReporteCliente(opts: {
@@ -54,10 +79,14 @@ export class ResendEmailService {
     activacionNombre: string;
     fecha: string;
     htmlReporte: string;
-  }): Promise<boolean> {
+  }): Promise<SendResult> {
+    // Message-ID propio → lo persistimos en reportes_cliente.email_message_id y lo
+    // usamos para ligar la respuesta del cliente (llega en In-Reply-To/References).
+    const messageId = this.buildMessageId();
     return this.send({
       to: opts.destinatarios,
       subject: `Reporte Activación — ${opts.activacionNombre} | ${opts.fecha}`,
+      headers: { 'Message-ID': messageId },
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: #C8202C; padding: 24px; border-radius: 12px 12px 0 0;">
@@ -83,7 +112,7 @@ export class ResendEmailService {
     severidad:     string;
     activacionId:  string;
   }): Promise<boolean> {
-    return this.send({
+    const { ok } = await this.send({
       to: opts.destinatarios,
       subject: `⚠ Incidencia ${opts.severidad.toUpperCase()} — Control Suite`,
       html: `
@@ -101,5 +130,6 @@ export class ResendEmailService {
         </div>
       `,
     });
+    return ok;
   }
 }

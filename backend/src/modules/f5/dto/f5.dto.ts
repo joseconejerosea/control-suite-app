@@ -1,5 +1,4 @@
 import {
-  ArrayNotEmpty,
   IsArray,
   IsEmail,
   IsIn,
@@ -39,6 +38,14 @@ export class CreateIncidenciaDto {
   @IsIn(['baja', 'media', 'alta'])
   @IsOptional()
   severidad?: 'baja' | 'media' | 'alta';
+
+  /**
+   * Canal de origen de la novedad. Por defecto 'MANUAL' (creada desde la app).
+   * 'EMAIL' lo setea el pipeline de Gmail cuando el feedback llega por correo.
+   */
+  @IsIn(['WHATSAPP', 'EMAIL', 'MANUAL', 'APP'])
+  @IsOptional()
+  source?: 'WHATSAPP' | 'EMAIL' | 'MANUAL' | 'APP';
 }
 
 export class CreateReporteAvanceDto {
@@ -66,10 +73,15 @@ export class AprobarReporteDto {
 }
 
 export class EnviarReporteDto {
+  /**
+   * Destinatarios explícitos (override, backward-compat). Si se omite o llega
+   * vacío, el envío resuelve la lista desde el proyecto de la activación
+   * (projects.config.report_recipients).
+   */
   @IsArray()
-  @ArrayNotEmpty()
+  @IsOptional()
   @IsEmail({}, { each: true })
-  destinatarios!: string[];
+  destinatarios?: string[];
 }
 
 export class CerrarActivacionDto {

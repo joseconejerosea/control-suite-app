@@ -6,6 +6,7 @@ import { google } from 'googleapis';
 import * as cron from 'node-cron';
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { InvoicesService } from '../invoices/invoices.service';
+import { OperatorNotifierService } from '../whatsapp/operator-notifier.service';
 import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class GmailService {
     private readonly config: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly invoicesService: InvoicesService,
+    private readonly notifier: OperatorNotifierService,
   ) {
     cron.schedule('*/10 * * * * *', async () => {
       this.logger.log('[GmailService] Auto-polling all connected Gmail accounts...');
@@ -213,9 +215,13 @@ export class GmailService {
         });
 
         const headers = full.data.payload?.headers ?? [];
-        const subject = headers.find((h) => h.name === 'Subject')?.value ?? '';
-        const from    = headers.find((h) => h.name === 'From')?.value ?? '';
-        const body    = this.extractBody(full.data.payload);
+        const hdr = (name: string) =>
+          headers.find((h) => (h.name ?? '').toLowerCase() === name.toLowerCase())?.value ?? '';
+        const subject     = hdr('Subject');
+        const from        = hdr('From');
+        const inReplyTo   = hdr('In-Reply-To');
+        const references  = hdr('References');
+        const body        = this.extractBody(full.data.payload);
 
         const imageAttachments = this.findImageAttachments(full.data.payload);
         let invoice: any = null;
@@ -261,7 +267,19 @@ export class GmailService {
           saved++;
           this.logger.log(`[GmailService] Invoice saved from email: "${subject}" — vendor: ${invoice.vendor_name}, amount: ${invoice.amount}`);
         } else {
-          this.logger.log(`[GmailService] Not an invoice: "${subject}"`);
+          // No es factura → intentamos tratarlo como feedback del cliente (respuesta
+          // al reporte) y convertirlo en una NOVEDAD/incidencia de la activación.
+          const created = await this.tryCreateIncidenciaFromFeedback(clientId, {
+            subject, from, body, inReplyTo, references,
+          }).catch((e) => {
+            this.logger.error(`[GmailService] feedback→incidencia error: ${e}`);
+            return false;
+          });
+          if (created) {
+            saved++;
+          } else {
+            this.logger.log(`[GmailService] Not an invoice / no match: "${subject}"`);
+          }
         }
       } catch (err) {
         this.logger.error(`[GmailService] Error processing email ${msg.id}: ${err}`);
@@ -269,6 +287,150 @@ export class GmailService {
     }
 
     return { checked: messages.length, saved };
+  }
+
+  /**
+   * Feedback del cliente por email → NOVEDAD (incidencia con source='EMAIL').
+   *
+   * MATCHING (en orden de preferencia):
+   *   a) THREADING: In-Reply-To / References del correo entrante contienen el
+   *      Message-ID que guardamos en reportes_cliente.email_message_id al enviar
+   *      el reporte. Es el camino confiable.
+   *   b) FALLBACK por remitente: el email del `from` figura en
+   *      projects.config.report_recipients de un proyecto que tiene una activación
+   *      con reporte ENVIADO. Heurística — puede matchear un reporte que no es el
+   *      que el cliente estaba respondiendo si el mismo destinatario recibió varios.
+   *
+   * Si no matchea NINGUNO → no se crea incidencia (no queremos huérfanas sin
+   * activación). Devuelve true si creó una incidencia.
+   *
+   * La creación corre bajo runWithTenant(clientId): pollInbox se ejecuta dentro de
+   * runAsSystem (cross-tenant) y el INSERT de incidencia debe ir scopeado al tenant
+   * para satisfacer RLS.
+   */
+  private async tryCreateIncidenciaFromFeedback(
+    clientId: string,
+    email: { subject: string; from: string; body: string; inReplyTo: string; references: string },
+  ): Promise<boolean> {
+    // Ignoramos correos que no parecen respuestas ni traen cuerpo útil.
+    if (!email.body && !email.subject) return false;
+
+    const rep = await this.matchReporte(clientId, email);
+    if (!rep) return false;
+
+    const fromEmail = this.extractEmailAddress(email.from);
+    const descripcion = this.buildIncidenciaDescripcion(email);
+
+    // Dedup: si ya creamos una incidencia EMAIL con esta misma descripción para la
+    // activación (reprocesamiento del mismo correo), no duplicamos.
+    const incidenciaId = await runWithTenant(this.dataSource, clientId, async () => {
+      const dup = await this.dataSource.query(
+        `SELECT id FROM incidencias
+          WHERE activacion_id=$1 AND client_id=$2 AND source='EMAIL' AND descripcion=$3
+          LIMIT 1`,
+        [rep.activacion_id, clientId, descripcion],
+      );
+      if (dup.length) return null;
+
+      const ins = await this.dataSource.query(
+        `INSERT INTO incidencias
+           (client_id, activacion_id, persona_id, descripcion, categoria, severidad, estado, source)
+         VALUES ($1,$2,NULL,$3,'feedback_cliente','media','abierta','EMAIL')
+         RETURNING id`,
+        [clientId, rep.activacion_id, descripcion],
+      );
+      return ins[0]?.id ?? null;
+    });
+
+    if (!incidenciaId) return false;
+
+    this.logger.log(
+      `[GmailService] Incidencia EMAIL creada (${incidenciaId}) para activación ${rep.activacion_id} — from: ${fromEmail}, match: ${rep.matchBy}`,
+    );
+
+    // Notificación al operador (mismo patrón que F5 Fase 3). Best-effort.
+    await this.notifier
+      .notificar(
+        clientId,
+        `📧 Feedback del cliente recibido por email en activación ${rep.activacion_id}: ${email.subject || '(sin asunto)'}`,
+        `email-feedback:${incidenciaId}`,
+      )
+      .catch(() => {});
+
+    return true;
+  }
+
+  /**
+   * Resuelve el reporte (y su activación) al que corresponde el correo entrante.
+   * Devuelve { activacion_id, matchBy } o null.
+   */
+  private async matchReporte(
+    clientId: string,
+    email: { from: string; inReplyTo: string; references: string },
+  ): Promise<{ activacion_id: string; matchBy: 'threading' | 'sender' } | null> {
+    return runWithTenant(this.dataSource, clientId, async () => {
+      // a) Threading: los Message-ID que enviamos aparecen en In-Reply-To/References.
+      const ids = this.extractMessageIds(`${email.inReplyTo} ${email.references}`);
+      if (ids.length) {
+        const rows = await this.dataSource.query(
+          `SELECT activacion_id FROM reportes_cliente
+            WHERE client_id=$1 AND email_message_id = ANY($2::text[])
+            ORDER BY enviado_at DESC NULLS LAST LIMIT 1`,
+          [clientId, ids],
+        );
+        if (rows[0]?.activacion_id) {
+          return { activacion_id: rows[0].activacion_id, matchBy: 'threading' as const };
+        }
+      }
+
+      // b) Fallback por remitente: el from ∈ report_recipients de un proyecto con
+      //    reporte enviado. Tomamos el reporte enviado más reciente de ese proyecto.
+      const fromEmail = this.extractEmailAddress(email.from).toLowerCase();
+      if (fromEmail) {
+        const rows = await this.dataSource.query(
+          `SELECT rc.activacion_id
+             FROM reportes_cliente rc
+             JOIN activations a ON a.id = rc.activacion_id
+             JOIN projects   p ON p.id = a.project_id
+            WHERE rc.client_id=$1
+              AND rc.estado='enviado'
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements_text(
+                  COALESCE(p.config->'report_recipients','[]'::jsonb)
+                ) AS r(email)
+                WHERE lower(r.email) = $2
+              )
+            ORDER BY rc.enviado_at DESC NULLS LAST LIMIT 1`,
+          [clientId, fromEmail],
+        );
+        if (rows[0]?.activacion_id) {
+          return { activacion_id: rows[0].activacion_id, matchBy: 'sender' as const };
+        }
+      }
+
+      return null;
+    });
+  }
+
+  /** Extrae todos los `<...>` que parezcan Message-IDs de un string de headers. */
+  private extractMessageIds(raw: string): string[] {
+    if (!raw) return [];
+    const matches = raw.match(/<[^>]+>/g) ?? [];
+    return Array.from(new Set(matches.map((m) => m.trim())));
+  }
+
+  /** Extrae la dirección de un header From del tipo `Nombre <mail@x.com>`. */
+  private extractEmailAddress(from: string): string {
+    const m = from.match(/<([^>]+)>/);
+    if (m) return m[1].trim();
+    return from.trim();
+  }
+
+  /** Descripción de la incidencia: asunto + cuerpo recortado. */
+  private buildIncidenciaDescripcion(email: { subject: string; body: string }): string {
+    const asunto = email.subject ? `${email.subject}\n\n` : '';
+    const cuerpo = (email.body ?? '').trim().slice(0, 2000);
+    return `${asunto}${cuerpo}`.trim().slice(0, 3900);
   }
 
   private findImageAttachments(payload: any): Array<{ attachmentId: string; mimeType: string }> {

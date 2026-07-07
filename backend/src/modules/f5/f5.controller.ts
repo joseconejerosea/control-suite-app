@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   UseGuards,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -74,9 +75,9 @@ export class F5Controller {
   @Post('activaciones/:id/incidencias')
   async createIncidencia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() body: CreateIncidenciaDto) {
     const res = await this.ds.query(
-      `INSERT INTO incidencias (client_id, activacion_id, persona_id, descripcion, categoria, severidad)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [user.client_id, id, user.sub, body.descripcion, body.categoria ?? 'general', body.severidad ?? 'media'],
+      `INSERT INTO incidencias (client_id, activacion_id, persona_id, descripcion, categoria, severidad, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [user.client_id, id, user.sub, body.descripcion, body.categoria ?? 'general', body.severidad ?? 'media', body.source ?? 'MANUAL'],
     );
     const incidencia = res[0];
 
@@ -235,7 +236,7 @@ export class F5Controller {
     // Sólo se envía un reporte APROBADO y aún no enviado. El contenido es el que se
     // guardó al aprobar — NUNCA del request. Sin reporte aprobado → 409.
     const [rep] = await this.ds.query(
-      `SELECT rc.*, c.nombre AS cliente_nombre, a.activation_date
+      `SELECT rc.*, c.nombre AS cliente_nombre, a.activation_date, a.project_id
          FROM reportes_cliente rc
          JOIN activations a ON a.id = rc.activacion_id
          JOIN clients c     ON c.id = rc.client_id
@@ -253,8 +254,14 @@ export class F5Controller {
       throw new ConflictException('El reporte aprobado no tiene contenido para enviar.');
     }
 
-    const ok = await this.emailService.sendReporteCliente({
-      destinatarios: body.destinatarios,
+    // Resolución de destinatarios:
+    //  1. body.destinatarios con elementos → override explícito (backward-compat).
+    //  2. sin destinatarios → se resuelven a nivel PROJECT desde
+    //     projects.config.report_recipients (la activación cuelga de project_id).
+    const destinatarios = await this.resolverDestinatarios(user.client_id, rep.project_id, body.destinatarios);
+
+    const { ok, messageId } = await this.emailService.sendReporteCliente({
+      destinatarios,
       clienteNombre: rep.cliente_nombre ?? 'Cliente',
       activacionNombre: `Activación ${rep.activation_date ?? ''}`,
       fecha: new Date().toLocaleDateString('es-CL'),
@@ -267,21 +274,52 @@ export class F5Controller {
       // Compensación: el operador tiene que enterarse de que el envío falló.
       const msgFalla = `⚠️ Falló el envío del reporte de la activación ${id}. Quedó APROBADO — reintentá el envío.`;
       await this.notifier.notificar(user.client_id, msgFalla, `f5-envio-fallo:${rep.id}`).catch(() => {});
-      return { sent: false, destinatarios: body.destinatarios };
+      return { sent: false, destinatarios };
     }
 
+    // Persistimos el Message-ID del correo enviado para poder ligar la respuesta
+    // del cliente (llega en In-Reply-To/References) de vuelta a este reporte.
     await this.ds.query(
       `UPDATE reportes_cliente
-          SET estado='enviado', enviado_at=NOW(), destinatarios=$1, updated_at=NOW()
-        WHERE id=$2 AND client_id=$3`,
-      [body.destinatarios, rep.id, user.client_id],
+          SET estado='enviado', enviado_at=NOW(), destinatarios=$1,
+              email_message_id=$2, updated_at=NOW()
+        WHERE id=$3 AND client_id=$4`,
+      [destinatarios, messageId ?? null, rep.id, user.client_id],
     );
 
     // F5 Fase 3: process map — "avisa cuando se envió".
-    const msgEnviado = `📤 Reporte de la activación ${id} enviado al cliente (${body.destinatarios.length} destinatario/s).`;
+    const msgEnviado = `📤 Reporte de la activación ${id} enviado al cliente (${destinatarios.length} destinatario/s).`;
     await this.notifier.notificar(user.client_id, msgEnviado, `f5-enviado:${rep.id}`).catch(() => {});
 
-    return { sent: true, destinatarios: body.destinatarios };
+    return { sent: true, destinatarios };
+  }
+
+  /**
+   * Resuelve la lista de destinatarios del reporte:
+   *  - Si `explicitos` trae elementos → se usan tal cual (override, backward-compat).
+   *  - Si no → se leen de projects.config.report_recipients del proyecto de la activación.
+   * Sin project o sin lista configurada → BadRequest (nada que enviar).
+   */
+  private async resolverDestinatarios(
+    clientId: string,
+    projectId: string | null,
+    explicitos?: string[],
+  ): Promise<string[]> {
+    if (explicitos && explicitos.length > 0) return explicitos;
+
+    if (projectId) {
+      const [row] = await this.ds.query(
+        `SELECT config->'report_recipients' AS recipients
+           FROM projects WHERE id=$1 AND client_id=$2 LIMIT 1`,
+        [projectId, clientId],
+      ).catch(() => []);
+      const recipients = row?.recipients;
+      if (Array.isArray(recipients) && recipients.length > 0) return recipients;
+    }
+
+    throw new BadRequestException(
+      'No hay destinatarios configurados para el proyecto de esta activación. Configuralos en el proyecto o pasalos explícitamente.',
+    );
   }
 
   @Patch('activaciones/:id/cerrar')

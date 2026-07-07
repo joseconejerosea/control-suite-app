@@ -169,6 +169,41 @@ export class ProjectsService {
     };
   }
 
+  // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
+  // Guardados en projects.config.report_recipients (string[]). Sin migración:
+  // config JSONB ya existe. El envío del reporte (F5Controller) los resuelve
+  // automáticamente cuando no se pasan destinatarios explícitos.
+
+  async getReportRecipients(clientId: string, projectId: string): Promise<string[]> {
+    const [row] = await this.dataSource.query(
+      `SELECT config->'report_recipients' AS recipients
+         FROM projects WHERE id=$1 AND client_id=$2 LIMIT 1`,
+      [projectId, clientId],
+    );
+    if (!row) throw new NotFoundException('Proyecto no encontrado');
+    const recipients = row.recipients;
+    return Array.isArray(recipients) ? recipients : [];
+  }
+
+  async setReportRecipients(
+    clientId: string,
+    projectId: string,
+    emails: string[],
+  ): Promise<{ report_recipients: string[] }> {
+    // Merge en config existente: jsonb_set NO pisa otras claves (ia_status, etc.).
+    const rows = await this.dataSource.query(
+      `UPDATE projects
+          SET config = jsonb_set(COALESCE(config,'{}'), '{report_recipients}', $1::jsonb),
+              updated_at = NOW()
+        WHERE id=$2 AND client_id=$3
+        RETURNING config->'report_recipients' AS recipients`,
+      [JSON.stringify(emails), projectId, clientId],
+    );
+    if (!rows.length) throw new NotFoundException('Proyecto no encontrado');
+    this.logger.log(`[F5] report_recipients actualizados proyecto=${projectId} (${emails.length})`);
+    return { report_recipients: rows[0].recipients ?? [] };
+  }
+
   // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────
 
   async aprobarProyecto(
