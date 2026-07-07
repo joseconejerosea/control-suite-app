@@ -18,8 +18,8 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column()
-  client_id!: string;
+  @Column({ type: 'uuid', nullable: true })
+  client_id!: string | null;
 
   @Column()
   email!: string;
@@ -49,7 +49,10 @@ export class User {
   @UpdateDateColumn({ type: 'timestamptz' })
   updated_at!: Date;
 
-  @ManyToOne(() => Client, (client) => client.users, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => Client, (client) => client.users, {
+    onDelete: 'RESTRICT',
+    nullable: true,
+  })
   @JoinColumn({ name: 'client_id' })
-  client!: Client;
+  client!: Client | null;
 }
