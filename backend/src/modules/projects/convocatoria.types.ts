@@ -26,6 +26,10 @@ export const CONVOCATORIA_ESTADOS = [
   'confirmada',
   'rechazada',
   'no_show',
+  // 'cancelada' — el promotor confirmó pero DESPUÉS avisa que no puede. Es terminal
+  //   (no hay reemplazo automático: dispara notificación al operador para que busque
+  //   un reemplazo manualmente). Distinto de 'no_show' (confirmó y no apareció sin avisar).
+  'cancelada',
   'reemplazada',
 ] as const;
 
@@ -35,6 +39,7 @@ export type ConvocatoriaEstado = (typeof CONVOCATORIA_ESTADOS)[number];
 export const CONVOCATORIA_ESTADOS_TERMINALES: readonly ConvocatoriaEstado[] = [
   'rechazada',
   'no_show',
+  'cancelada',
   'reemplazada',
 ];
 

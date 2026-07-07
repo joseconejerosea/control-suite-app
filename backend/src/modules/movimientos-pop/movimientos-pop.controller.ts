@@ -2,13 +2,17 @@ import { Controller, Get, Post, Param, Body, Query, UseGuards } from '@nestjs/co
 import { MovimientosPopService } from './movimientos-pop.service';
 import { CreateMovimientoDto, MovimientoFiltersDto } from './dto/movimiento-pop.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
-@UseGuards(AuthGuard, ClientIsolationGuard, ClientActiveGuard)
+@UseGuards(AuthGuard, RolesGuard, ClientIsolationGuard, ClientActiveGuard)
+@Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
 @Controller('v1/app/movimientos')
 export class MovimientosPopController {
   constructor(private readonly svc: MovimientosPopService) {}

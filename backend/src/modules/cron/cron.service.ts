@@ -8,6 +8,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { QUEUE_MIND_PROACTIVE } from '../queue/queue.module';
 import { RendicionesService } from '../rendiciones/rendiciones.service';
 import { OperatorNotifierService } from '../whatsapp/operator-notifier.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 
 // Brief: F5 hourly mini-reports use Haiku (cheap), not Opus
@@ -17,6 +20,17 @@ const HAIKU_OUTPUT_PRICE = 0.00000400;
 
 // Brief: sales-invoice reminder — days without billing before alert
 const BILLING_ALERT_DAYS = 7;
+
+// ── Convocatoria (C3/C4) — recordatorios de no-respuesta ──────────────────────
+// FLAG (timing de negocio, ajustable): horas mínimas que deben pasar sin respuesta
+//   —desde el último envío/reenvío— antes de mandar el próximo recordatorio.
+//   El cron corre cada hora; con 24h cada promotor recibe a lo sumo 1 recordatorio
+//   por día. Total de recordatorios extra = CONVOCATORIA_MAX_REENVIOS (2), es decir
+//   día original + 2 reintentos ≈ ventana de 3 días antes de escalar al operador.
+const CONVOCATORIA_RECORDATORIO_HORAS = 24;
+// Máximo de recordatorios automáticos antes de escalar la tarea al OPERATOR.
+// Coincide con el invariante de negocio "2 recordatorios" (reenvio_count 1 y 2).
+const CONVOCATORIA_MAX_REENVIOS = 2;
 
 @Injectable()
 export class CronService {
@@ -28,6 +42,8 @@ export class CronService {
     @InjectQueue(QUEUE_MIND_PROACTIVE) private readonly mindQueue: Queue,
     private readonly rendicionesService: RendicionesService,
     private readonly notifier: OperatorNotifierService,
+    private readonly wa: WhatsAppService,
+    private readonly waOutput: WhatsappOutputService,
   ) {}
 
   // ── F5: Hourly mini-reports for live activations ──────────────────────────
@@ -271,6 +287,159 @@ export class CronService {
     } catch (err) {
       this.logger.error('[Cron] F5 D+1 reminder error:', err instanceof Error ? err.message : err);
     }
+  }
+
+  // ── F4 (C3/C4): Recordatorios de convocatoria sin respuesta — cada hora ──────
+  // C3: convocatorias en 'enviada' sin respuesta (respuesta_at IS NULL) reciben
+  //     hasta CONVOCATORIA_MAX_REENVIOS recordatorios por WhatsApp, uno cada
+  //     CONVOCATORIA_RECORDATORIO_HORAS. reenvio_count lleva la cuenta (idempotencia:
+  //     el UPDATE condicionado a reenvio_count evita mandar dos veces el mismo nivel).
+  // C4: al agotar los recordatorios (reenvio_count = MAX) y seguir sin respuesta, se
+  //     crea UNA tarea al OPERATOR ('user') vía mind_propuesta + WhatsApp. escalada_at
+  //     es el guard de idempotencia (se setea una sola vez).
+  // Tenant/RLS: lista cross-tenant con runAsSystem; cada fila se procesa en la tx de
+  //     su tenant con runWithTenant (mismo patrón que dailyF5ReportReminder).
+  @Cron('0 * * * *')
+  async convocatoriaRecordatorios(): Promise<void> {
+    this.logger.log('[Cron] Convocatoria recordatorios running...');
+    try {
+      // Candidatas: enviadas, sin respuesta, con recordatorios pendientes O ya
+      // agotados pero sin escalar. El filtro fino (¿reenviar? ¿escalar?) se hace
+      // por fila para poder usar el timing y los guards de forma precisa.
+      const pendientes = await runAsSystem(() =>
+        this.ds.query(
+          `SELECT c.id, c.client_id, c.proyecto_id, c.persona_id, c.dia,
+                  c.local_nombre, c.local_direccion, c.reenvio_count,
+                  c.escalada_at,
+                  COALESCE(c.mensaje_enviado_at, c.updated_at) AS ultimo_envio,
+                  EXTRACT(EPOCH FROM (NOW() - COALESCE(c.mensaje_enviado_at, c.updated_at)))/3600 AS horas_desde_envio,
+                  pr.name  AS proyecto_nombre,
+                  p.name   AS persona_nombre,
+                  p.phone  AS persona_phone
+             FROM convocatorias c
+             LEFT JOIN projects  pr ON pr.id = c.proyecto_id
+             LEFT JOIN promoters p  ON p.id  = c.persona_id
+            WHERE c.estado = 'enviada'
+              AND c.respuesta_at IS NULL`,
+        ),
+      ).catch(() => []);
+
+      let reenviados = 0;
+      let escalados  = 0;
+
+      for (const c of pendientes) {
+        await runWithTenant(this.ds, c.client_id, async () => {
+          const horas   = Number(c.horas_desde_envio) || 0;
+          const reenvio = Number(c.reenvio_count) || 0;
+
+          // ── C3: reenviar recordatorio si toca ──────────────────────────────
+          if (reenvio < CONVOCATORIA_MAX_REENVIOS && horas >= CONVOCATORIA_RECORDATORIO_HORAS) {
+            if (!c.persona_phone) {
+              this.logger.warn(`[CronConv] conv=${c.id} sin teléfono — no se puede recordar`);
+              return;
+            }
+            // Idempotencia: sólo reenvía si reenvio_count no cambió (otra corrida
+            // concurrente no lo incrementó primero). El bump del contador es atómico.
+            const bump = await this.ds.query(
+              `UPDATE convocatorias
+                  SET reenvio_count = reenvio_count + 1,
+                      mensaje_enviado_at = NOW(),
+                      updated_at = NOW()
+                WHERE id = $1 AND client_id = $2
+                  AND estado = 'enviada' AND respuesta_at IS NULL
+                  AND reenvio_count = $3
+                RETURNING reenvio_count`,
+              [c.id, c.client_id, reenvio],
+            ).catch(() => []);
+            if (!bump.length) return; // ya lo tomó otra corrida
+
+            const nivel = bump[0].reenvio_count;
+            const ok = await this.wa.enviarConvocatoria({
+              telefono:       c.persona_phone,
+              nombrePromotor: c.persona_nombre ?? '',
+              proyecto:       c.proyecto_nombre ?? 'la activación',
+              fecha:          c.dia ? new Date(c.dia).toLocaleDateString('es-CL') : 'por confirmar',
+              local:          c.local_nombre    ?? 'Por confirmar',
+              direccion:      c.local_direccion ?? 'Por confirmar',
+            }).catch(() => false);
+            reenviados++;
+            this.logger.log(`[CronConv] Recordatorio ${nivel}/${CONVOCATORIA_MAX_REENVIOS} conv=${c.id} ok=${ok}`);
+            return;
+          }
+
+          // ── C4: escalar al OPERATOR tras agotar recordatorios ──────────────
+          if (reenvio >= CONVOCATORIA_MAX_REENVIOS && !c.escalada_at
+              && horas >= CONVOCATORIA_RECORDATORIO_HORAS) {
+            // Guard de idempotencia: setea escalada_at sólo si aún es NULL.
+            const marca = await this.ds.query(
+              `UPDATE convocatorias
+                  SET escalada_at = NOW(), updated_at = NOW()
+                WHERE id = $1 AND client_id = $2
+                  AND estado = 'enviada' AND respuesta_at IS NULL
+                  AND escalada_at IS NULL
+                RETURNING id`,
+              [c.id, c.client_id],
+            ).catch(() => []);
+            if (!marca.length) return; // ya escalada por otra corrida
+
+            const fecha = c.dia ? new Date(c.dia).toLocaleDateString('es-CL') : 'la fecha asignada';
+
+            // Tarea persistente en el dashboard de Mind. Se alinea al esquema REAL de
+            // mind_propuestas (migración 022): tipo VARCHAR(20), severidad (no 'prioridad'),
+            // accion_propuesta JSONB (no 'datos_soporte'), estado='abierta' (lo que filtra
+            // el dashboard en mind-propuestas.service). tipo='conv_sin_resp' (≤20 chars).
+            await this.ds.query(
+              `INSERT INTO mind_propuestas
+                 (client_id, tipo, titulo, descripcion, accion_propuesta, severidad, estado, created_at)
+               VALUES ($1, 'conv_sin_resp', $2, $3, $4::jsonb, 'alta', 'abierta', NOW())`,
+              [
+                c.client_id,
+                `Convocatoria sin respuesta: ${c.persona_nombre ?? 'promotor'} — "${c.proyecto_nombre ?? 'proyecto'}"`,
+                `${c.persona_nombre ?? 'El promotor'} no respondió tras ${CONVOCATORIA_MAX_REENVIOS} ` +
+                  `recordatorios para el turno del ${fecha}. Contactalo o asigná un reemplazo.`,
+                JSON.stringify({
+                  convocatoria_id: c.id,
+                  project_id:      c.proyecto_id,
+                  persona_id:      c.persona_id,
+                  dia:             c.dia,
+                  reenvios:        reenvio,
+                }),
+              ],
+            ).catch((err: any) => this.logger.warn(`[CronConv] mind_propuesta insert conv=${c.id}: ${err?.message}`));
+
+            // Aviso directo al OPERATOR ('user') por WhatsApp (idempotente por conv).
+            const msg =
+              `📵 Convocatoria "${c.proyecto_nombre ?? 'proyecto'}": ${c.persona_nombre ?? 'un promotor'} ` +
+              `no respondió tras ${CONVOCATORIA_MAX_REENVIOS} recordatorios (turno del ${fecha}). ` +
+              `Requiere seguimiento manual o reemplazo.`;
+            const operators = await this.getOperatorPhones(c.client_id);
+            for (const op of operators) {
+              await this.waOutput.sendTextOnce(op.phone, msg, `conv-sin-resp:${c.id}:${op.phone}`).catch(() => {});
+            }
+            escalados++;
+            this.logger.warn(`[CronConv] Escalado a operador conv=${c.id} (${operators.length} operador/es 'user')`);
+          }
+        }).catch((err) =>
+          this.logger.error(
+            `[CronConv] cliente ${c.client_id}:`,
+            err instanceof Error ? err.message : err,
+          ),
+        );
+      }
+
+      this.logger.log(`[Cron] Convocatoria recordatorios done — ${reenviados} reenviado(s), ${escalados} escalado(s)`);
+    } catch (err) {
+      this.logger.error('[Cron] Convocatoria recordatorios error:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** Teléfonos de los OPERATOR (rol 'user') del tenant con phone registrado. */
+  private async getOperatorPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.ds.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.OPERATOR}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
   }
 
   // ── F2: Weekly rendition close (Sunday 23:00 Chile = Monday 02:00/03:00 UTC) ──

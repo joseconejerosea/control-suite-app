@@ -109,7 +109,7 @@ export class AdminServiceLeadsController {
     });
 
     const saved = await this.userRepo.save(user);
-    const { password: _password, ...result } = saved as Record<string, unknown>;
+    const { password: _password, ...result } = saved as any;
     return result;
   }
 

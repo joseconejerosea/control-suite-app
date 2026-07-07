@@ -41,8 +41,9 @@ class EnviarConvocatoriaDto {
 }
 
 class ResponderConvocatoriaDto {
-  // 'no_show' — el operador marca (día de activación) que un promotor confirmado no se presentó.
-  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada', 'no_show']) estado: string;
+  // 'no_show'   — el operador marca (día de activación) que un promotor confirmado no se presentó.
+  // 'cancelada' — el promotor confirmó pero luego avisa que no puede; dispara aviso de reemplazo.
+  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada', 'no_show', 'cancelada']) estado: string;
 }
 
 class AprobarProyectoDto {

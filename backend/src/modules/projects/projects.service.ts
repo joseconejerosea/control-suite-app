@@ -417,9 +417,51 @@ export class ProjectsService {
        WHERE id=$2 AND client_id=$3 AND proyecto_id=$4`,
       [estado, convId, clientId, projectId],
     );
+
+    // C2 — El promotor confirmó pero canceló después → hay que reemplazarlo.
+    //   No existe búsqueda automática de reemplazo: se notifica al OPERATOR del
+    //   tenant (rol 'user'), que es quien gestiona la operación en terreno, para
+    //   que consiga un reemplazo manualmente para ese turno/día.
+    if (estado === 'cancelada') {
+      await this.notificarReemplazoNecesario(clientId, projectId, convId).catch((err) =>
+        this.logger.warn(`[F4] notificarReemplazo error conv=${convId}: ${err?.message}`),
+      );
+    }
+
     // Resolver manualmente una convocatoria puede completar la ronda → CLOSED.
     await this.cerrarConvocatoriaSiCompleta(clientId, projectId);
     return { ok: true };
+  }
+
+  /**
+   * C2 — Avisa a los OPERATOR del tenant que un promotor canceló y se necesita
+   * reemplazo para su turno. Idempotente por convocatoria (sendTextOnce con
+   * dedupKey por convId): si la cancelación se re-procesa, no duplica el aviso.
+   */
+  private async notificarReemplazoNecesario(
+    clientId: string, projectId: string, convId: string,
+  ): Promise<void> {
+    const [row] = await this.dataSource.query(
+      `SELECT c.dia, pr.name AS proyecto_nombre, p.name AS persona_nombre
+         FROM convocatorias c
+         LEFT JOIN projects  pr ON pr.id = c.proyecto_id
+         LEFT JOIN promoters p  ON p.id  = c.persona_id
+        WHERE c.id=$1 AND c.client_id=$2 AND c.proyecto_id=$3`,
+      [convId, clientId, projectId],
+    ).catch(() => []);
+    if (!row) return;
+
+    const fecha = row.dia ? new Date(row.dia).toLocaleDateString('es-CL') : 'la fecha asignada';
+    const msg =
+      `🔁 Reemplazo necesario en "${row.proyecto_nombre ?? 'proyecto'}": ` +
+      `${row.persona_nombre ?? 'un promotor'} canceló su turno del ${fecha}. ` +
+      `Buscá un reemplazo para ese día.`;
+
+    const operators = await this.getOperatorPhones(clientId);
+    for (const op of operators) {
+      await this.waOutput.sendTextOnce(op.phone, msg, `conv-reemplazo:${convId}:${op.phone}`).catch(() => {});
+    }
+    this.logger.log(`[F4] Reemplazo notificado conv=${convId} (${operators.length} operador/es 'user')`);
   }
 
   // ── F4 Fase 3: CLOSED lifecycle ───────────────────────────────────────────
@@ -481,6 +523,21 @@ export class ProjectsService {
     return this.dataSource.query(
       `SELECT phone FROM users
         WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+  }
+
+  /**
+   * Teléfonos de los OPERATOR (rol 'user') del tenant con phone registrado.
+   * Análogo a getAdminPhones pero para el operador de terreno: es el destinatario
+   * de las tareas del ciclo de convocatoria (reemplazo por cancelación C2,
+   * no-respuesta tras 2 recordatorios C4). Distinto del MANAGER que recibe las
+   * escaladas de ambigüedad y el cierre de ronda.
+   */
+  private async getOperatorPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.dataSource.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.OPERATOR}' AND phone IS NOT NULL`,
       [clientId],
     ).catch(() => []);
   }
