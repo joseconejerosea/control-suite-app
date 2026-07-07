@@ -16,6 +16,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 // Escapa texto que se interpola en el HTML de las páginas de callback (evita XSS
 // reflejado vía url / mensajes de error / email).
@@ -82,7 +83,7 @@ export class GmailController {
    */
   @Post('poll')
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('super_admin')
+  @Roles(UserRole.SUPERADMIN)
   @HttpCode(HttpStatus.OK)
   async poll() {
     this.logger.log(`[GmailController] Poll all clients started`);

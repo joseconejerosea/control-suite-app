@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Usuarios y Roles — Control Suite BTL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16232E; --ink-soft:#42525F; --ink-mute:#7A8994;
+    --paper:#F6F8F9; --card:#FFFFFF; --line:#DDE4E8;
+    --accent:#B45309; --accent-bg:#FEF3E2;
+    --green:#166534; --green-bg:#E7F3EA;
+    --blue:#1E4E79;  --blue-bg:#E8F0F7;
+    --gray-bg:#EEF1F3;
+    --red:#9F1239;   --red-bg:#FBE9EE;
+    --purple:#5B3E8C; --purple-bg:#F1ECF7;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --sans:'IBM Plex Sans',system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:var(--sans);background:var(--paper);color:var(--ink);line-height:1.55;font-size:15px}
+  .wrap{max-width:1220px;margin:0 auto;padding:0 24px 80px}
+  header{border-bottom:1px solid var(--line);background:var(--card)}
+  .hd{max-width:1220px;margin:0 auto;padding:36px 24px 28px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:10px}
+  h1{font-size:30px;font-weight:700;letter-spacing:-.01em}
+  .hd p{color:var(--ink-soft);margin-top:8px;max-width:78ch}
+  h2{font-size:20px;font-weight:700;margin:48px 0 6px;letter-spacing:-.01em}
+  .sub{color:var(--ink-mute);margin-bottom:20px;font-size:14px}
+  code{font-family:var(--mono);font-size:13px}
+
+  /* organigrama de dos lados */
+  .sides{display:grid;grid-template-columns:1fr 1.4fr;gap:14px}
+  .side{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px}
+  .side h4{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:12px}
+  .side .r{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14px}
+  .side .r:last-child{border-bottom:none}
+  .side .r b{font-family:var(--mono);font-size:12.5px;min-width:130px}
+  .side .r span{color:var(--ink-soft);font-size:13px}
+
+  .roles{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .role{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px}
+  .role .code{font-family:var(--mono);font-size:12px;font-weight:600;background:var(--gray-bg);border:1px solid var(--line);border-radius:4px;padding:2px 8px;display:inline-block}
+  .role .code.plat{background:var(--blue-bg);border-color:#C4D6E5;color:var(--blue)}
+  .role .code.nouser{background:var(--red-bg);border-color:#EFC4CF;color:var(--red)}
+  .role h3{font-size:17px;margin:10px 0 2px}
+  .role .who{font-size:13px;color:var(--ink-mute);margin-bottom:10px}
+  .role ul{list-style:none;margin-top:8px}
+  .role li{padding:5px 0 5px 20px;position:relative;font-size:14px;color:var(--ink-soft)}
+  .role li::before{content:"";position:absolute;left:2px;top:12px;width:8px;height:8px;border-radius:2px;background:var(--ink)}
+  .role li.wa::before{background:#5B8A5E}
+  .role li.no::before{background:var(--line)}
+  .role li.no{color:var(--ink-mute)}
+  .role li.hv::before{background:var(--accent)}
+
+  .matrix-scroll{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;min-width:1160px}
+  th,td{padding:11px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font-size:13px}
+  thead th{font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;background:var(--gray-bg);color:var(--ink-soft)}
+  tbody th{font-weight:600;white-space:nowrap;color:var(--ink)}
+  tbody th small{display:block;font-weight:400;color:var(--ink-mute);font-size:11.5px}
+  tr:last-child td, tr:last-child th{border-bottom:none}
+  .chip{display:inline-block;font-size:11.5px;font-weight:600;border-radius:4px;padding:2px 7px;margin:0 2px 4px 0}
+  .c-full{background:var(--blue-bg);color:var(--blue)}
+  .c-hv{background:var(--accent-bg);color:var(--accent)}
+  .c-own{background:var(--green-bg);color:var(--green)}
+  .c-wa{background:#EDF3EC;color:#3F6B42}
+  .c-no{background:var(--gray-bg);color:var(--ink-mute)}
+  .c-mail{background:var(--purple-bg);color:var(--purple)}
+  td .d{display:block;color:var(--ink-soft);font-size:12px;line-height:1.45}
+
+  .callout{border-radius:8px;padding:16px 18px;margin-top:16px;border:1px solid}
+  .callout b{display:block;margin-bottom:4px;font-size:14px}
+  .callout p{font-size:13.5px;color:var(--ink-soft)}
+  .co-warn{background:var(--red-bg);border-color:#EFC4CF}
+  .co-warn b{color:var(--red)}
+  .co-amber{background:var(--accent-bg);border-color:#F3D9B4}
+  .co-amber b{color:var(--accent)}
+  .co-note{background:var(--card);border-color:var(--line)}
+
+  .leg{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 0;font-size:12.5px;color:var(--ink-soft)}
+  .leg span{display:flex;align-items:center;gap:6px}
+  footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--ink-mute);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  @media(max-width:860px){.sides{grid-template-columns:1fr}.roles{grid-template-columns:1fr}h1{font-size:24px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hd">
+    <div class="eyebrow">Control Suite BTL · Documentación interna · v4 — 02-07-2026 · Modelo final</div>
+    <h1>Usuarios y roles del sistema</h1>
+    <p>Fuente de verdad: <code>USUARIOS_Y_ROLES.md</code>. El sistema tiene dos lados: <strong>plataforma</strong> (Control Suite) y <strong>tenant</strong> (agencia BTL). Seis roles en el enum <code>UserRole</code> + un actor sin cuenta (la marca). Regla transversal: toda acción consecuente requiere aprobación humana — nada se auto-confirma.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <h2>Los dos lados del sistema</h2>
+  <div class="sides">
+    <div class="side">
+      <h4>Plataforma — Control Suite</h4>
+      <div class="r"><b>SUPERADMIN</b><span>José. Todo: tenants, Stripe, prompts, agentes IA, API, finanzas, intervención global.</span></div>
+      <div class="r"><b>SERVICE_LEAD</b><span>Líder de Servicio. Multi-tenant con selector de agencia. Solo operación — sin ver agentes/API/finanzas.</span></div>
+    </div>
+    <div class="side">
+      <h4>Tenant — Agencia BTL</h4>
+      <div class="r"><b>MANAGER</b><span>Líder/dueño de la agencia. Todo lo del Service Lead en su tenant + dashboard con todos los indicadores de su negocio.</span></div>
+      <div class="r"><b>OPERATOR</b><span>Opera y aprueba F1–F5. También envía por WhatsApp.</span></div>
+      <div class="r"><b>SUPERVISOR</b><span>Terreno. WhatsApp + dashboard limitado.</span></div>
+      <div class="r"><b>STAFF</b><span>Promotores. Sin login — registro + WhatsApp.</span></div>
+      <div class="r"><b>—</b><span>Cliente (marca): sin cuenta, recibe reporte D+1 por email.</span></div>
+    </div>
+  </div>
+
+  <h2>Los roles, uno por uno</h2>
+
+  <div class="roles">
+    <div class="role">
+      <span class="code plat">SUPERADMIN</span>
+      <h3>Superadmin — José</h3>
+      <div class="who">Control total de la plataforma.</div>
+      <ul>
+        <li>Exclusivo: rendimiento de agentes IA, rendimiento de API, finanzas de la app, prompts, panel /admin</li>
+        <li class="hv">Modo intervención global con AuditLog (editar, reprocesar, aprobar on-behalf)</li>
+        <li class="no">Respeta el courtesy lock de WhatsApp — sin excepciones</li>
+      </ul>
+    </div>
+
+    <div class="role">
+      <span class="code plat">SERVICE_LEAD</span>
+      <h3>Líder de Servicio</h3>
+      <div class="who">Persona de Control Suite. Atiende varias agencias — selector de agencia al entrar. <strong>Misión: garantizar la calidad del servicio al cliente en un 100% — rol totalmente operacional.</strong></div>
+      <ul>
+        <li>En sus tenants asignados: gestiona usuarios, configura reglas, opera y aprueba F1–F5</li>
+        <li class="hv">Envía el reporte F5 al cliente el <strong>D+1</strong> del evento</li>
+        <li class="hv">Intervención operacional (eventos, conversaciones IA, mensajes) acotada a sus tenants, con AuditLog</li>
+        <li class="no">NO ve: agentes IA, API, finanzas de la plataforma, prompts, tenants no asignados</li>
+      </ul>
+    </div>
+
+    <div class="role">
+      <span class="code">MANAGER</span>
+      <h3>Manager — líder de la agencia</h3>
+      <div class="who">Dueño/gerente del tenant.</div>
+      <ul>
+        <li>Todo lo del Service Lead dentro de su tenant: usuarios, reglas, aprobaciones, envío D+1</li>
+        <li class="wa">También envía por WhatsApp para registrar cosas si es necesario (documentos, boletas, material, novedades)</li>
+        <li><strong>Dashboard de rendimiento</strong>: todos los indicadores de su negocio — facturación, rendición de gastos, inventario, alertas y KPIs operacionales</li>
+      </ul>
+    </div>
+
+    <div class="role">
+      <span class="code">OPERATOR</span>
+      <h3>Operador de agencia</h3>
+      <div class="who">Varios por tenant, permisos idénticos.</div>
+      <ul>
+        <li class="wa">También envía por WhatsApp como un supervisor — y además gestiona y aprueba lo que los supervisores reportan</li>
+        <li class="hv">F4: <strong>crea la activación completa desde un archivo</strong> (la IA arma el setup, él revisa y aprueba)</li>
+        <li class="hv">F5: genera, edita y valida el informe (el envío al cliente es del Manager / Service Lead)</li>
+        <li class="hv">Aprueba documentos y rendiciones; tareas urgentes en pool con claim</li>
+        <li class="no">No gestiona usuarios ni reglas</li>
+      </ul>
+    </div>
+
+    <div class="role">
+      <span class="code">SUPERVISOR</span>
+      <h3>Supervisor de terreno</h3>
+      <div class="who">WhatsApp como input + dashboard limitado.</div>
+      <ul>
+        <li class="wa">F1/F2: documentos y boletas por WhatsApp; validación OCR; lo propio RO en dashboard</li>
+        <li class="wa"><strong>F3 (pieza fundamental):</strong> envía imágenes del material → el sistema lee → crea ID de pieza si no existía; si existía, registra dejar/retirar en bodega X. En la app ve el stock por bodega con filtros por cliente</li>
+        <li class="wa">F4: RO de sus proyectos + recibe y confirma convocatoria por WhatsApp</li>
+        <li class="wa">F5: reporta novedades y evidencias; multi-proyecto → la IA le pregunta cuál</li>
+        <li class="no">No aprueba. No sube desde el dashboard. Rechazos: solo en dashboard</li>
+      </ul>
+    </div>
+
+    <div class="role">
+      <span class="code">STAFF</span>
+      <h3>Personal BTL (promotores)</h3>
+      <div class="who">Sin cuenta — registro + WhatsApp.</div>
+      <ul>
+        <li class="wa">Recibe convocatorias, confirma/rechaza y puede cancelar (notifica para reemplazo)</li>
+        <li>Sin respuesta: 2 recordatorios → tarea al operador</li>
+        <li>Freelancer en 2 agencias: resuelve por convocatoria activa; ambigüedad → IA pregunta</li>
+      </ul>
+    </div>
+
+    <div class="role" style="grid-column:1 / -1">
+      <span class="code nouser">SIN CUENTA</span>
+      <h3>Cliente de la agencia (marca)</h3>
+      <div class="who">No es usuario del sistema.</div>
+      <ul>
+        <li class="hv">Recibe el reporte F5 por email el <strong>D+1 del evento</strong>, a una lista configurable de destinatarios por marca, tras aprobación humana</li>
+        <li>Su feedback por email entra al sistema como novedad de la activación (source EMAIL)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Matriz de permisos por módulo</h2>
+
+  <div class="matrix-scroll">
+    <table>
+      <thead>
+        <tr><th>Módulo</th><th>Superadmin</th><th>Service Lead¹</th><th>Manager</th><th>Operador</th><th>Supervisor</th><th>Staff</th><th>Cliente</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>F1 <small>Documentos + OCR</small></th>
+          <td><span class="chip c-full">Total</span><span class="d">+ intervención</span></td>
+          <td><span class="chip c-hv">Aprueba</span><span class="d">+ interviene</span></td>
+          <td><span class="chip c-hv">Aprueba</span> <span class="chip c-wa">WhatsApp</span></td>
+          <td><span class="chip c-hv">Aprueba</span> <span class="chip c-wa">WhatsApp</span></td>
+          <td><span class="chip c-wa">WhatsApp</span> <span class="chip c-own">Lo propio (RO)</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>F2 <small>Rendiciones</small></th>
+          <td><span class="chip c-full">Total</span><span class="d">+ intervención</span></td>
+          <td><span class="chip c-hv">Aprueba</span><span class="d">+ exporta</span></td>
+          <td><span class="chip c-hv">Aprueba</span> <span class="chip c-wa">WhatsApp</span><span class="d">+ exporta</span></td>
+          <td><span class="chip c-hv">Aprueba</span> <span class="chip c-wa">WhatsApp</span><span class="d">+ exporta</span></td>
+          <td><span class="chip c-wa">WhatsApp</span> <span class="chip c-own">Lo propio (RO)</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>F3 <small>Inventario POP</small></th>
+          <td><span class="chip c-full">Total</span></td>
+          <td><span class="chip c-full">Gestión</span></td>
+          <td><span class="chip c-full">Gestión</span> <span class="chip c-wa">WhatsApp</span></td>
+          <td><span class="chip c-full">Gestión</span> <span class="chip c-wa">WhatsApp</span></td>
+          <td><span class="chip c-wa">WhatsApp</span> <span class="chip c-own">Ve stock</span><span class="d">Imágenes → auto-ID de pieza / dejar-retirar en bodega X. Ve stock por bodega con filtro por cliente</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>F4 <small>Setup + Convocatoria</small></th>
+          <td><span class="chip c-hv">On-behalf</span></td>
+          <td><span class="chip c-hv">Crea + aprueba</span></td>
+          <td><span class="chip c-hv">Crea + aprueba</span> <span class="chip c-wa">WhatsApp</span></td>
+          <td><span class="chip c-hv">Crea setup desde archivo</span> <span class="chip c-wa">WhatsApp</span><span class="d">IA arma el proyecto completo; operador revisa y aprueba el envío</span></td>
+          <td><span class="chip c-own">RO asignados</span> <span class="chip c-wa">Confirma</span></td>
+          <td><span class="chip c-wa">WhatsApp</span><span class="d">Confirma / rechaza / cancela. 2 recordatorios</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>F5 <small>Activaciones</small></th>
+          <td><span class="chip c-hv">On-behalf</span></td>
+          <td><span class="chip c-hv">Valida + envía D+1</span></td>
+          <td><span class="chip c-hv">Valida + envía D+1</span> <span class="chip c-wa">WhatsApp</span></td>
+          <td><span class="chip c-hv">Genera + valida</span> <span class="chip c-wa">WhatsApp</span><span class="d">El envío al cliente NO es suyo</span></td>
+          <td><span class="chip c-wa">WhatsApp</span> <span class="chip c-own">Lo propio (RO)</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-mail">Email D+1</span><span class="d">Feedback entra al sistema</span></td>
+        </tr>
+        <tr>
+          <th>Dashboard <small>indicadores negocio</small></th>
+          <td><span class="chip c-full">Todos</span></td>
+          <td><span class="chip c-full">Sus tenants²</span></td>
+          <td><span class="chip c-full">Sí — todo su negocio</span><span class="d">Facturación, rendiciones, inventario, alertas, KPIs</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>Tareas urgentes</th>
+          <td><span class="chip c-full">Ve todas</span></td>
+          <td><span class="chip c-full">Pool + claim</span></td>
+          <td><span class="chip c-full">Pool + claim</span></td>
+          <td><span class="chip c-full">Pool + claim</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>Usuarios y reglas <small>del tenant</small></th>
+          <td><span class="chip c-full">Total</span></td>
+          <td><span class="chip c-full">CRUD + configura</span></td>
+          <td><span class="chip c-full">CRUD + configura</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+        <tr>
+          <th>Agentes IA · API · Finanzas · Prompts · /admin</th>
+          <td><span class="chip c-full">Exclusivo</span></td>
+          <td><span class="chip c-no">Oculto</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+          <td><span class="chip c-no">—</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="leg">
+    <span><span class="chip c-full">Total / Gestión</span> acceso completo</span>
+    <span><span class="chip c-hv">Aprueba / Crea</span> gate de aprobación humana</span>
+    <span><span class="chip c-own">Lo propio / RO</span> read-only limitado</span>
+    <span><span class="chip c-wa">WhatsApp</span> input por WhatsApp</span>
+    <span><span class="chip c-mail">Email</span> destinatario, no usuario</span>
+  </div>
+  <p class="sub" style="margin-top:10px">¹ Siempre acotado a sus agencias asignadas, con selector al entrar. ² Asunción a validar por José.</p>
+
+  <h2>Aclaraciones para implementación</h2>
+
+  <div class="callout co-warn">
+    <b>Conceptos que NO existen</b>
+    <p>"Promotor" = <code>STAFF</code>. "Colaborador" y "brand marketer" no son roles. <strong>"Operador principal" queda eliminado</strong>: ese concepto se dividió en <code>SERVICE_LEAD</code> (lado Control Suite) y <code>MANAGER</code> (lado agencia). El flag <code>isPrincipal</code> de la versión anterior de esta spec queda descartado — nunca se implementó.</p>
+  </div>
+
+  <div class="callout co-note">
+    <b>Service Lead multi-tenant</b>
+    <p>Nuevo modelo <code>ServiceLeadTenant</code> (userId ↔ tenantId). El JWT lleva <code>activeTenantId</code> elegido en el selector de agencia; un guard valida la asignación en cada request. <code>ClientIsolationGuard</code> no cambia — el tenant sigue saliendo siempre del JWT.</p>
+  </div>
+
+  <div class="callout co-amber">
+    <b>Regla de negocio nueva — envío D+1</b>
+    <p>El reporte F5 se envía al cliente <strong>el día posterior al evento</strong>, únicamente por <code>MANAGER</code>, <code>SERVICE_LEAD</code> o <code>SUPERADMIN</code>, siempre con <code>HumanValidationBanner</code>. Recordatorio automático al responsable el D+1.</p>
+  </div>
+
+  <footer>
+    <span>USUARIOS_Y_ROLES.md · SUPERADMIN_INTERVENTION.md · schema.prisma</span>
+    <span>SUPERADMIN · SERVICE_LEAD · MANAGER · OPERATOR · SUPERVISOR · STAFF</span>
+  </footer>
+
+</div>
+</body>
+</html>

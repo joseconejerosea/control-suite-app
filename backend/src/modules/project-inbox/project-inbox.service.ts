@@ -1,7 +1,11 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+
+const QUEUE_PROJECT_INBOX_EXTRACT = 'project-inbox-extract';
 
 @Injectable()
 export class ProjectInboxService {
@@ -9,6 +13,7 @@ export class ProjectInboxService {
 
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
+    @InjectQueue(QUEUE_PROJECT_INBOX_EXTRACT) private readonly extractQueue: Queue,
     private readonly audit: AuditService,
   ) {}
 
@@ -48,7 +53,16 @@ export class ProjectInboxService {
        RETURNING *`,
       [tenantId, source, JSON.stringify(rawContent)],
     );
-    return res[0];
+    const item = res[0];
+
+    // F4 Fase 4: extracción IA en background → puebla extracted_data y pasa a READY.
+    await this.extractQueue.add(
+      'extract',
+      { tenant_id: tenantId, inbox_id: item.id },
+      { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+    ).catch((err: any) => this.logger.warn(`[ProjectInbox] No se pudo encolar extracción ${item.id}: ${err.message}`));
+
+    return item;
   }
 
   async approve(

@@ -30,7 +30,6 @@ const CLIENT_SECTIONS = [
   { label: "Configuración", items: [
     { label: "Configuración",     icon: Settings,    href: "/client/config" },
     { label: "Equivalencias OCR", icon: GitCompare,  href: "/client/equivalencias" },
-    { label: "Reglas Aprobación", icon: ShieldCheck, href: "/client/rendiciones-config" },
   ]},
   { label: "IA", items: [{ label: "Control Mind", icon: Brain, href: "/client/mind" }] },
 ];

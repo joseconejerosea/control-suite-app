@@ -45,6 +45,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { StorageService } from '../../common/storage/storage.service';
 import { DocumentIngestionService } from './document-ingestion.service';
@@ -63,7 +64,7 @@ export class DocumentIngestionController {
   ) {}
 
   @Post('upload')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'UPLOAD_DOCUMENT', entity: 'DocumentUpload' })
   async upload(@Req() req: AuthedRequest) {
     const data = await (req as any).file();
@@ -134,7 +135,7 @@ export class DocumentIngestionController {
   }
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(
     @Req() req: AuthedRequest,
     @Query('status') status?: string,
@@ -147,25 +148,25 @@ export class DocumentIngestionController {
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Post(':id/parse')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   parse(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.parse(req.user.client_id, id);
   }
 
   @Get(':id/preview')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   preview(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.preview(req.user.client_id, id);
   }
 
   @Post(':id/populate')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   populate(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -175,7 +176,8 @@ export class DocumentIngestionController {
   }
 
   @Post(':id/reprocess')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'REPROCESS_DOCUMENT', entity: 'Document' })
   reprocess(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.reprocess(req.user.client_id, id);
   }

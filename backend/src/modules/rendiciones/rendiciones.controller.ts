@@ -6,6 +6,9 @@ import { Response } from 'express';
 import { RendicionesService } from './rendiciones.service';
 import { RechazarRendicionDto, MarcarPagadaDto, RendicionFiltersDto } from './dto/rendicion.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -13,7 +16,8 @@ import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @Controller('rendiciones')
-@UseGuards(AuthGuard, ClientIsolationGuard, ClientActiveGuard)
+@UseGuards(AuthGuard, RolesGuard, ClientIsolationGuard, ClientActiveGuard)
+@Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
 export class RendicionesController {
   constructor(private readonly svc: RendicionesService) {}
 
@@ -79,6 +83,7 @@ export class RendicionesController {
   }
 
   @Patch(':id/marcar-pagada')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @HttpCode(HttpStatus.OK)
   @AuditAction({ action: 'MARK_RENDITION_PAID', entity: 'Rendicion' })
   marcarPagada(

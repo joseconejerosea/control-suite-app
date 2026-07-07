@@ -56,16 +56,25 @@ export class MovimientosPopService {
     const estado = ['consumo', 'merma'].includes(dto.tipo) ? dto.tipo :
                    dto.tipo === 'salida' ? 'en_terreno' : 'devuelto_completo';
 
+    // Correlativo secuencial por (client_id, sku_id). Teóricamente hay race condition bajo
+    // alta concurrencia multi-write, aceptable para MVP con escrituras single-tenant.
+    const corrRows = await this.ds.query(
+      `SELECT COALESCE(MAX(correlativo), 0) + 1 AS next_correlativo
+       FROM movimientos_pop WHERE client_id=$1 AND sku_id=$2`,
+      [clientId, dto.sku_id],
+    );
+    const correlativo: number = corrRows[0]?.next_correlativo ?? 1;
+
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
          (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id ?? null,
         dto.proyecto_destino_id ?? null, dto.tipo, dto.cantidad,
         dto.foto_key ?? null, dto.tiempo_uso_dias ?? null,
-        dto.fecha_retorno_esperada ?? null, estado, dto.observacion ?? null,
+        dto.fecha_retorno_esperada ?? null, estado, dto.observacion ?? null, correlativo,
       ],
     );
 
@@ -94,22 +103,38 @@ export class MovimientosPopService {
     // Fase 2 — este QueryRunner manual no pasa por el patch del ds: setear el GUC acá.
     await queryRunner.query(`SELECT set_config('app.current_tenant', $1, true)`, [clientId]);
     try {
-      // OUT from origin
+      // Correlativo secuencial por (client_id, sku_id) dentro de la transacción.
+      // Teóricamente hay race condition bajo alta concurrencia multi-write, aceptable para MVP.
+      const corrRows = await queryRunner.query(
+        `SELECT COALESCE(MAX(correlativo), 0) + 1 AS next_correlativo
+         FROM movimientos_pop WHERE client_id=$1 AND sku_id=$2`,
+        [clientId, dto.sku_id],
+      );
+      const corrOut: number = corrRows[0]?.next_correlativo ?? 1;
+      const corrIn: number  = corrOut + 1;
+
+      // OUT from origin — incluye proyecto_destino_id si fue enviado (requerido por DTO para transfer)
       const outRes = await queryRunner.query(
         `INSERT INTO movimientos_pop
-           (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion)
-         VALUES ($1,$2,$3,$4,'salida',$5,'transfer_out',$6) RETURNING id`,
-        [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id, dto.cantidad,
-         `Transfer a bodega ${dto.bodega_destino_id}. ${dto.observacion ?? ''}`],
+           (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
+            tipo, cantidad, estado, observacion, correlativo)
+         VALUES ($1,$2,$3,$4,$5,'salida',$6,'transfer_out',$7,$8) RETURNING id`,
+        [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id,
+         dto.proyecto_destino_id ?? null, dto.cantidad,
+         `Transfer a bodega ${dto.bodega_destino_id}. ${dto.observacion ?? ''}`,
+         corrOut],
       );
 
       // IN to destination
       const inRes = await queryRunner.query(
         `INSERT INTO movimientos_pop
-           (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion)
-         VALUES ($1,$2,$3,$4,'entrada',$5,'transfer_in',$6) RETURNING id`,
-        [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_destino_id, dto.cantidad,
-         `Transfer desde bodega ${dto.bodega_origen_id}. ${dto.observacion ?? ''}`],
+           (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
+            tipo, cantidad, estado, observacion, correlativo)
+         VALUES ($1,$2,$3,$4,$5,'entrada',$6,'transfer_in',$7,$8) RETURNING id`,
+        [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_destino_id,
+         dto.proyecto_destino_id ?? null, dto.cantidad,
+         `Transfer desde bodega ${dto.bodega_origen_id}. ${dto.observacion ?? ''}`,
+         corrIn],
       );
 
       // Update inventory: subtract from origin
@@ -153,12 +178,21 @@ export class MovimientosPopService {
     const currentQty = inv[0]?.cantidad ?? 0;
     const diff = dto.cantidad - currentQty;
 
+    // Correlativo secuencial por (client_id, sku_id). Race condition teórica bajo alta
+    // concurrencia multi-write, aceptable para MVP con escrituras single-tenant.
+    const corrRows = await this.ds.query(
+      `SELECT COALESCE(MAX(correlativo), 0) + 1 AS next_correlativo
+       FROM movimientos_pop WHERE client_id=$1 AND sku_id=$2`,
+      [clientId, dto.sku_id],
+    );
+    const correlativo: number = corrRows[0]?.next_correlativo ?? 1;
+
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
-         (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion)
-       VALUES ($1,$2,$3,$4,'adjustment',$5,'adjustment',$6) RETURNING *`,
+         (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion, correlativo)
+       VALUES ($1,$2,$3,$4,'adjustment',$5,'adjustment',$6,$7) RETURNING *`,
       [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id, Math.abs(diff),
-       `Ajuste: ${currentQty} → ${dto.cantidad}. ${dto.observacion ?? ''}`],
+       `Ajuste: ${currentQty} → ${dto.cantidad}. ${dto.observacion ?? ''}`, correlativo],
     );
 
     // Set inventory to exact quantity
@@ -179,10 +213,12 @@ export class MovimientosPopService {
       `SELECT cantidad FROM inventario WHERE client_id=$1 AND sku_id=$2 AND bodega_id=$3`,
       [clientId, skuId, bodegaId],
     );
-    if (!inv.length || inv[0].cantidad < cantidad) {
-      throw new BadRequestException(
-        `Stock insuficiente en bodega. Disponible: ${inv[0]?.cantidad ?? 0}, requerido: ${cantidad}`,
-      );
+    const disponible = inv[0]?.cantidad ?? 0;
+    if (!inv.length || disponible < cantidad) {
+      throw new BadRequestException({
+        message: `Stock insuficiente en bodega. Disponible: ${disponible}, requerido: ${cantidad} — usá un movimiento ADJUSTMENT para corregir`,
+        code: 'STOCK_NEGATIVO',
+      });
     }
   }
 

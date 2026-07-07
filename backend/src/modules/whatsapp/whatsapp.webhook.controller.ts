@@ -12,9 +12,17 @@ import { ProjectResolverService } from '../project-resolver/project-resolver.ser
 import { Public } from '../../common/decorators/public.decorator';
 import { WebhookSignatureGuard } from '../../common/guards/webhook-signature.guard';
 import { constantTimeEqual } from '../../common/utils/constant-time';
+import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 const QUEUE_OCR = 'ocr';
+const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
+
+// F4 Fase 3 (alta urgente): dedup de la notificación al operador por número
+// desconocido. Module-level (vida del proceso) para no re-avisar en cada mensaje
+// del mismo número; clave `${clientId}:${from}`.
+const altaUrgenteNotified = new Set<string>();
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppWebhookController {
@@ -28,6 +36,7 @@ export class WhatsAppWebhookController {
     private readonly projectResolver: ProjectResolverService,
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
+    @InjectQueue(QUEUE_CONVOCATORIA_CLASSIFY) private readonly convocatoriaQueue: Queue,
     private readonly shield: PromptShieldService,
   ) {}
 
@@ -67,8 +76,6 @@ export class WhatsAppWebhookController {
   @HttpCode(200)
   async handleIncoming(@Body() body: any) {
     try {
-      // TEMP DEBUG: ver el payload crudo que manda Meta (quitar después)
-      this.logger.log(`[WhatsApp] RAW payload: ${JSON.stringify(body)?.slice(0, 1500)}`);
       const entry   = body?.entry?.[0];
       const changes = entry?.changes?.[0];
       const value   = changes?.value;
@@ -80,6 +87,11 @@ export class WhatsAppWebhookController {
       const messages = value?.messages;
       if (!messages?.length) return 'ok';
 
+      // Per-invocation cache: avoid querying the same sender twice and sending
+      // multiple "not registered" replies for batch payloads from the same from.
+      const senderAuthCache = new Map<string, boolean>();
+      const notifiedSenders = new Set<string>();
+
       for (const msg of messages) {
         const messageId = msg.id as string;
         const from      = msg.from as string;
@@ -89,6 +101,30 @@ export class WhatsAppWebhookController {
           this.logger.log(`[WhatsApp] Duplicate message ${messageId} — skipping`);
           continue;
         }
+
+        // ── Sender gate (Req 7 — togglable via env) ──────────────────────────
+        if (process.env.WHATSAPP_SENDER_GATE !== 'off') {
+          let authorized: boolean;
+          if (senderAuthCache.has(from)) {
+            authorized = senderAuthCache.get(from)!;
+          } else {
+            authorized = await this.isAuthorizedSender(from, clientId);
+            senderAuthCache.set(from, authorized);
+          }
+
+          if (!authorized) {
+            this.logger.warn(`[WhatsApp] Unauthorized sender from=${from} clientId=${clientId}`);
+            if (!notifiedSenders.has(from)) {
+              notifiedSenders.add(from);
+              await this.wa.sendText(from, 'No estás registrado, contactá a tu coordinador.');
+            }
+            // F4 Fase 3 (alta urgente): en vez de sólo descartar, avisar al operador
+            // que un número desconocido intenta contactar, para darlo de alta.
+            await this.notificarAltaUrgente(from, clientId);
+            continue;
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${messageId}`);
 
@@ -152,6 +188,33 @@ export class WhatsAppWebhookController {
       [messageId],
     ).catch(() => []);
     return existing.length > 0;
+  }
+
+  // ── Sender authorization gate ─────────────────────────────────────────────
+
+  private async isAuthorizedSender(from: string, clientId: string): Promise<boolean> {
+    const digits = normalizePhone(from);
+    try {
+      const rows = await this.ds.query(
+        `SELECT 1
+         FROM promoters
+         WHERE client_id = $1
+           AND status = 'active'
+           AND regexp_replace(phone, '\\D', '', 'g') = $2
+         UNION
+         SELECT 1
+         FROM collaborators
+         WHERE client_id = $1
+           AND is_active = true
+           AND regexp_replace(phone, '\\D', '', 'g') = $2
+         LIMIT 1`,
+        [clientId, digits],
+      );
+      return rows.length > 0;
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] isAuthorizedSender error from=${from} clientId=${clientId}: ${err.message}`);
+      return false; // fail-closed
+    }
   }
 
   // ── Persist to eventos_crudos ─────────────────────────────────────────────
@@ -474,12 +537,21 @@ export class WhatsAppWebhookController {
       return;
     }
 
-    if (/^s[ií]$/i.test(text)) {
-      await this.handleConvocatoriaReply(from, 'si', clientId);
-      return;
-    }
-    if (/^no$/i.test(text)) {
-      await this.handleConvocatoriaReply(from, 'no', clientId);
+    // ── F4 Fase 2: si el sender tiene una convocatoria abierta, cualquier texto
+    //    es una respuesta a la convocatoria. NO se parsea si/no acá: se persiste
+    //    el evento y se delega la clasificación (confirma/rechaza/ambiguo) al
+    //    processor 'convocatoria-classify' (IA con Claude, igual que F1).
+    if (await this.tieneConvocatoriaAbierta(from, clientId)) {
+      // Persistir el evento entrante ANTES de procesar la respuesta (invariante eventos_crudos)
+      const eventId = await this.persistEvent({
+        clientId, canalId, messageId, from, type: 'text', flow: 'F4',
+        payload: { text, convocatoria_reply: 'pending_classification' },
+      });
+      await this.convocatoriaQueue.add(
+        'convocatoria-classify',
+        { evento_crudo_id: eventId, client_id: clientId, from, text, wa_message_id: messageId },
+        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+      );
       return;
     }
 
@@ -525,22 +597,45 @@ export class WhatsAppWebhookController {
 
   // ── Convocation reply (F4) ────────────────────────────────────────────────
 
-  private async handleConvocatoriaReply(from: string, reply: 'si' | 'no', clientId: string) {
-    const estado   = reply === 'si' ? 'confirmada' : 'rechazada';
-    const texto    = reply === 'si' ? 'SI - Confirmado' : 'NO - Rechazado';
-    const replyMsg = reply === 'si'
-      ? 'Perfecto! Tu participacion ha sido confirmada.'
-      : 'Entendido. Buscaremos otro promotor. Gracias!';
+  /**
+   * ¿El teléfono tiene una convocatoria sin resolver? Decide si un texto libre
+   * debe rutearse al clasificador F4 (Fase 2) en vez del handler genérico.
+   */
+  private async tieneConvocatoriaAbierta(from: string, clientId: string): Promise<boolean> {
+    const rows = await this.ds.query(
+      `SELECT 1 FROM convocatorias c
+        WHERE c.client_id=$1
+          AND c.estado IN ('enviada','pendiente')
+          AND c.persona_id IN (
+            SELECT id FROM promoters WHERE phone=$2 AND client_id=$1 LIMIT 1
+          )
+        LIMIT 1`,
+      [clientId, from],
+    ).catch(() => []);
+    return rows.length > 0;
+  }
 
-    await this.ds.query(
-      `UPDATE convocatorias
-       SET estado=$1, respuesta_texto=$2, respuesta_at=NOW(), updated_at=NOW()
-       WHERE client_id=$4 AND persona_id IN (
-         SELECT id FROM promoters WHERE phone=$3 AND client_id=$4 LIMIT 1
-       ) AND estado='pendiente'`,
-      [estado, texto, from, clientId],
-    ).catch(() => {});
+  /**
+   * F4 Fase 3 (alta urgente): notifica UNA vez a los operadores del tenant que un
+   * número no registrado intentó escribir, para que decidan darlo de alta. El
+   * evento entrante NO se persiste (el gate lo descarta) — es sólo un aviso.
+   */
+  private async notificarAltaUrgente(from: string, clientId: string): Promise<void> {
+    const key = `${clientId}:${from}`;
+    if (altaUrgenteNotified.has(key)) return;
+    altaUrgenteNotified.add(key);
 
-    await this.wa.sendText(from, replyMsg);
+    const admins = await this.ds.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+
+    const msg = `📲 Alta urgente: el número ${from} (no registrado) intentó escribir. `
+      + `Si es un promotor, dalo de alta para que pueda operar.`;
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
+    this.logger.log(`[F4] Alta urgente notificada: ${from} → ${admins.length} operadores`);
   }
 }

@@ -13,6 +13,7 @@ import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { F1ReviewService } from './f1-review.service';
 
@@ -26,7 +27,7 @@ export class F1ReviewController {
   constructor(private readonly service: F1ReviewService) {}
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(
     @Req() req: AuthedRequest,
     @Query('project_id') projectId?: string,
@@ -53,7 +54,7 @@ export class F1ReviewController {
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -62,7 +63,7 @@ export class F1ReviewController {
   }
 
   @Put(':id/approve')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'APPROVE_DOCUMENT', entity: 'eventos_crudos' })
   approve(
     @Req() req: AuthedRequest,
@@ -77,7 +78,7 @@ export class F1ReviewController {
   }
 
   @Put(':id/reject')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'REJECT_DOCUMENT', entity: 'eventos_crudos' })
   reject(
     @Req() req: AuthedRequest,

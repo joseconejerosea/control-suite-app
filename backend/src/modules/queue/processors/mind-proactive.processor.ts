@@ -163,22 +163,24 @@ export class MindProactiveProcessor extends WorkerHost {
 
   // ── Trigger 5: Stock insuficiente ─────────────────────────────────────────
   private async trigger5_StockInsuficiente(clientId: string): Promise<void> {
+    // Usa <= min_stock para consistencia con skus.service.ts#alertasStock().
+    // Solo aplica a SKUs que tienen min_stock configurado (> 0).
     const alertas = await this.ds.query(
-      `SELECT s.nombre, p.name as proyecto, p.start_date,
+      `SELECT s.nombre, s.min_stock, p.name as proyecto, p.start_date,
               COALESCE(SUM(inv.cantidad),0) as disponible
        FROM skus s CROSS JOIN projects p
        LEFT JOIN inventario inv ON inv.sku_id=s.id
-       WHERE s.client_id=$1 AND p.client_id=$1 AND s.active=true
+       WHERE s.client_id=$1 AND p.client_id=$1 AND s.active=true AND s.min_stock > 0
          AND p.status='active' AND p.start_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'
-       GROUP BY s.id, s.nombre, p.id, p.name, p.start_date
-       HAVING COALESCE(SUM(inv.cantidad),0) < 5`,
+       GROUP BY s.id, s.nombre, s.min_stock, p.id, p.name, p.start_date
+       HAVING COALESCE(SUM(inv.cantidad),0) <= s.min_stock`,
       [clientId],
     );
     if (!alertas.length || await this.propuestaYaExiste(clientId, 'stock_bajo')) return;
     await this.mindSvc.crear({
       clientId, tipo: 'proactivo', perfilOrigen: 'stock_bajo',
       titulo: `Stock bajo para activaciones próximas (${alertas.length} SKUs)`,
-      descripcion: `${alertas.length} SKUs con stock < 5 unidades para proyectos en los próximos 7 días.`,
+      descripcion: `${alertas.length} SKUs con stock en o bajo su mínimo configurado para proyectos en los próximos 7 días.`,
       severidad: 'alta',
       accionPropuesta: { tipo: 'marcar_stock_revision', alertas },
       expiresInHours: 24,

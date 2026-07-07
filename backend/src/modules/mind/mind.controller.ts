@@ -3,14 +3,19 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { MindPropuestasService } from './mind-propuestas.service';
 import { MindChatService } from './mind-chat.service';
 import { MindAnalistaService } from './mind-analista.service';
 import { SendMessageDto, AprobarPropuestaDto, RechazarPropuestaDto } from './dto/mind.dto';
 
-@UseGuards(AuthGuard, ClientIsolationGuard, ClientActiveGuard)
+@UseGuards(AuthGuard, RolesGuard, ClientIsolationGuard, ClientActiveGuard)
+@Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.OPERATOR, UserRole.SUPERADMIN)
 @Controller('v1/app/mind')
 export class MindController {
   constructor(
@@ -35,11 +40,13 @@ export class MindController {
   }
 
   @Post('propuestas/:id/aprobar')
+  @AuditAction({ action: 'MIND_APPROVE_PROPOSAL', entity: 'MindPropuesta' })
   aprobar(@Request() req: any, @Param('id') id: string, @Body() _dto: AprobarPropuestaDto) {
     return this.propuestasService.aprobar(req.user.client_id, id, req.user.sub);
   }
 
   @Post('propuestas/:id/rechazar')
+  @AuditAction({ action: 'MIND_REJECT_PROPOSAL', entity: 'MindPropuesta' })
   rechazar(@Request() req: any, @Param('id') id: string, @Body() dto: RechazarPropuestaDto) {
     return this.propuestasService.rechazar(req.user.client_id, id, dto.motivo);
   }

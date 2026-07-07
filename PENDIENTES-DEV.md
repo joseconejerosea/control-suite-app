@@ -123,6 +123,16 @@ Y agregar `REDIS_TLS=true` al bloque del `.env` en `.github/workflows/deploy-bac
       rendiciones) FUERA de la transacción del invoice. Hoy, cualquier query que falle ahí
       adentro tira abajo la factura entera. El invoice + UPDATE evento deberían ser la tx;
       el resto, post-commit.
+- [ ] **Mind → WhatsApp (BLOQUEADO — falta decisión de producto)**: la acción
+      `enviar_recordatorio` de Mind (`mind-propuestas.service.ts:126`) nunca envía —
+      devuelve `status: 'pendiente_whatsapp'`. El action se crea con `target: 'admins'`
+      (`queue/processors/mind-proactive.processor.ts:110`), pero un "admin" es
+      `users.role='admin_cliente'` y **`users` no tiene columna `phone`** (ver
+      `user.entity.ts`; el UNION con users ya falló en stock-returns). Único teléfono real:
+      `collaborators` (coordinator/brand_manager) o `promoters`. **Definir destinatario**
+      (coordinadores / personas que deben rendir / ambos) antes de cablear `wa.sendText`.
+      Implementación: importar `WhatsAppModule` en `MindModule` + inyectar `WhatsAppService`.
+      Nota: F3 (stock returns) ya está cableado a WhatsApp y NO era huérfano.
 - [ ] Sacar la línea de debug `[WhatsApp] RAW payload:` en
       `whatsapp.webhook.controller.ts` (loguea PII).
 - [ ] Rotar credenciales expuestas en el chat (DB pass, Supabase service role, tokens).

@@ -9,6 +9,7 @@ import {
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { OnboardingService } from './onboarding.service';
 import { ConfigureChannelDto } from './dto/configure-channel.dto';
 import { VerifyChannelDto } from './dto/verify-channel.dto';
@@ -41,7 +42,7 @@ import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
  */
 @Controller('onboarding')
 @UseGuards(AuthGuard, RolesGuard)
-@Roles('super_admin')
+@Roles(UserRole.SUPERADMIN)
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
 

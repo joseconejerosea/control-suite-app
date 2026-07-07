@@ -5,6 +5,7 @@ import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
@@ -16,13 +17,13 @@ export class StockReturnsController {
   constructor(private readonly svc: StockReturnsService) {}
 
   @Get('pending')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findPending(@CurrentUser() user: JwtPayload) {
     return this.svc.findPending(user.client_id);
   }
 
   @Put(':id/confirm')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'CONFIRM_RETURN', entity: 'stock_return_requests' })
   confirm(
     @CurrentUser() user: JwtPayload,
@@ -33,7 +34,7 @@ export class StockReturnsController {
   }
 
   @Put(':id/reject')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @AuditAction({ action: 'REJECT_RETURN', entity: 'stock_return_requests' })
   reject(
     @CurrentUser() user: JwtPayload,

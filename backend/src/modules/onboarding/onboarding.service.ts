@@ -18,6 +18,7 @@ import { CreateAdminUserDto } from './dto/create-admin-user.dto';
 import { ProvisionWhatsAppDto } from './dto/provision-whatsapp.dto';
 import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
 import { tenantManager } from '../../common/tenant/tenant-context';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 const STEP_ORDER = [
   'client_created',
@@ -219,7 +220,7 @@ export class OnboardingService {
       email:     dto.email,
       password:  await bcrypt.hash(dto.password, 12),
       full_name: dto.full_name ?? null,
-      role:      'admin_cliente',
+      role:      UserRole.MANAGER,
       client_id: clientId,
     });
     const saved = await this.userRepo.save(user);
@@ -244,7 +245,7 @@ export class OnboardingService {
 
     const errors: string[] = [];
     if (!(client.canales ?? []).some(c => c.is_active))             errors.push('At least one active channel required.');
-    if (!(client.users ?? []).some(u => u.role === 'admin_cliente')) errors.push('At least one admin_cliente user required.');
+    if (!(client.users ?? []).some(u => u.role === UserRole.MANAGER)) errors.push('At least one admin_cliente user required.');
     if (client.onboarding_step !== 'admin_created')                  errors.push(`Step must be 'admin_created' (current: '${client.onboarding_step}').`);
 
     if (errors.length > 0) throw new BadRequestException({ message: 'Cannot complete onboarding.', errors });

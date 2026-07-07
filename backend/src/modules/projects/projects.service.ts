@@ -6,7 +6,9 @@ import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
 import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 export interface ProjectSummary {
   project_id:       string;
@@ -34,6 +36,7 @@ export class ProjectsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly waOutput: WhatsappOutputService,
     private readonly stockReturns: StockReturnsService,
   ) {
     this.repo = new TenantRepository<Project>(dataSource, Project);
@@ -87,7 +90,58 @@ export class ProjectsService {
       );
     }
 
+    // F4 Fase 4: editar un proyecto cuya convocatoria YA se envió invalida la
+    // aprobación → hay que re-aprobar antes de re-enviar (el gate vuelve a cerrar).
+    await this.invalidarAprobacionSiEditadoPostEnvio(clientId, id, dto);
+
     return updated;
+  }
+
+  /**
+   * Si el proyecto ya tenía convocatoria ENVIADA y se editó un campo relevante
+   * (nombre/fechas/presupuesto/config/descripción), resetea la aprobación y avisa
+   * al operador. Sin esto, un cambio post-envío podría re-disparar WhatsApp masivo
+   * sin pasar de nuevo por el gate humano — el mismo invariante que arreglamos en Tier 1.
+   */
+  private async invalidarAprobacionSiEditadoPostEnvio(
+    clientId: string, projectId: string, dto: UpdateProjectDto,
+  ): Promise<void> {
+    const sustantivo =
+      dto.name !== undefined || dto.description !== undefined ||
+      dto.start_date !== undefined || dto.end_date !== undefined ||
+      dto.budget !== undefined || dto.config !== undefined;
+    if (!sustantivo) return;
+
+    const rows = await this.dataSource.query(
+      `UPDATE projects p
+          SET aprobado_por_user_id  = NULL,
+              aprobado_at           = NULL,
+              convocatoria_cerrada_at = NULL,
+              config = jsonb_set(COALESCE(config,'{}'), '{ia_status}', '"pending_human_approval"'),
+              updated_at = NOW()
+        WHERE p.id = $1 AND p.client_id = $2
+          AND p.aprobado_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+               AND c.mensaje_enviado_at IS NOT NULL
+          )
+        RETURNING p.name`,
+      [projectId, clientId],
+    ).catch((err: any) => {
+      this.logger.warn(`[F4] invalidarAprobacion error proyecto=${projectId}: ${err.message}`);
+      return [];
+    });
+
+    if (!rows.length) return; // no estaba aprobado, o no había convocatoria enviada
+
+    this.logger.warn(`[F4] Aprobación invalidada por edición post-envío proyecto=${projectId}`);
+    const msg = `⚠️ El proyecto "${rows[0].name}" fue editado después de enviar la convocatoria. `
+      + `Requiere RE-APROBACIÓN antes de volver a enviar.`;
+    const admins = await this.getAdminPhones(clientId);
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
   }
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
@@ -113,6 +167,41 @@ export class ProjectsService {
       budget_allocated:  project.budget,
       budget_used:       counts.budget_used ?? '0',
     };
+  }
+
+  // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
+  // Guardados en projects.config.report_recipients (string[]). Sin migración:
+  // config JSONB ya existe. El envío del reporte (F5Controller) los resuelve
+  // automáticamente cuando no se pasan destinatarios explícitos.
+
+  async getReportRecipients(clientId: string, projectId: string): Promise<string[]> {
+    const [row] = await this.dataSource.query(
+      `SELECT config->'report_recipients' AS recipients
+         FROM projects WHERE id=$1 AND client_id=$2 LIMIT 1`,
+      [projectId, clientId],
+    );
+    if (!row) throw new NotFoundException('Proyecto no encontrado');
+    const recipients = row.recipients;
+    return Array.isArray(recipients) ? recipients : [];
+  }
+
+  async setReportRecipients(
+    clientId: string,
+    projectId: string,
+    emails: string[],
+  ): Promise<{ report_recipients: string[] }> {
+    // Merge en config existente: jsonb_set NO pisa otras claves (ia_status, etc.).
+    const rows = await this.dataSource.query(
+      `UPDATE projects
+          SET config = jsonb_set(COALESCE(config,'{}'), '{report_recipients}', $1::jsonb),
+              updated_at = NOW()
+        WHERE id=$2 AND client_id=$3
+        RETURNING config->'report_recipients' AS recipients`,
+      [JSON.stringify(emails), projectId, clientId],
+    );
+    if (!rows.length) throw new NotFoundException('Proyecto no encontrado');
+    this.logger.log(`[F5] report_recipients actualizados proyecto=${projectId} (${emails.length})`);
+    return { report_recipients: rows[0].recipients ?? [] };
   }
 
   // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────
@@ -208,15 +297,17 @@ export class ProjectsService {
       [clientId, projectId, body.persona_id],
     );
 
-    // Crear convocatorias pendientes por cada día (sin enviar WA todavía)
+    // Crear convocatorias pendientes por cada día (sin enviar WA todavía).
+    // ON CONFLICT apunta al índice único uq_convocatorias_turno (migración 047):
+    // re-asignar el mismo turno es idempotente en vez de duplicar la fila.
     for (const dia of body.dias) {
       await this.dataSource.query(
         `INSERT INTO convocatorias
            (client_id, proyecto_id, persona_id, dia, local_nombre, local_direccion, estado)
          VALUES ($1,$2,$3,$4,$5,$6,'pendiente')
-         ON CONFLICT DO NOTHING`,
+         ON CONFLICT (client_id, proyecto_id, persona_id, dia) DO NOTHING`,
         [clientId, projectId, body.persona_id, dia, body.local_nombre ?? null, body.local_direccion ?? null],
-      ).catch(() => {});
+      );
     }
 
     this.logger.log(`[F4] Turnos asignados persona=${body.persona_id} proyecto=${projectId} dias=${body.dias.length}`);
@@ -232,10 +323,21 @@ export class ProjectsService {
     modo:      'ai' | 'manual',
   ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
     const [proyecto] = await this.dataSource.query(
-      `SELECT name FROM projects WHERE id=$1 AND client_id=$2`,
+      `SELECT name, aprobado_por_user_id, aprobado_at FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
     );
     if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    // ── Gate humano F4: el envío masivo JAMÁS se dispara sin aprobación explícita.
+    // El proyecto debe tener aprobado_por_user_id y aprobado_at seteados por
+    // aprobarProyecto() antes de que cualquier WhatsApp salga. Sin esto, nada se envía.
+    if (!proyecto.aprobado_por_user_id || !proyecto.aprobado_at) {
+      this.logger.warn(`[F4] Intento de envío sin aprobación humana proyecto=${projectId}`);
+      throw new BadRequestException({
+        message: 'La convocatoria no fue aprobada. Requiere aprobación humana antes del envío.',
+        code:    'CONVOCATORIA_NO_APROBADA',
+      });
+    }
 
     let enviados = 0;
     let errores  = 0;
@@ -251,6 +353,14 @@ export class ProjectsService {
       if (!promotor?.phone) {
         errores++;
         detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: 'Sin teléfono registrado' });
+        continue;
+      }
+
+      // Lock de idempotencia (Fase 4): no re-enviar el mismo turno dentro de 5 min
+      // (doble click / reintento / doble job). Clave por proyecto+persona+día.
+      const dedupKey = `conv:${clientId}:${projectId}:${item.persona_id}:${item.dia}`;
+      if (!(await this.waOutput.guard(dedupKey))) {
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: 'Duplicado suprimido (lock)' });
         continue;
       }
 
@@ -307,91 +417,129 @@ export class ProjectsService {
        WHERE id=$2 AND client_id=$3 AND proyecto_id=$4`,
       [estado, convId, clientId, projectId],
     );
-    return { ok: true };
-  }
 
-  async getReemplazos(
-    clientId:  string,
-    projectId: string,
-    convId:    string,
-  ): Promise<{ sugeridos: unknown[] }> {
-    const [conv] = await this.dataSource.query(
-      `SELECT persona_id, dia FROM convocatorias WHERE id=$1 AND client_id=$2 AND proyecto_id=$3`,
-      [convId, clientId, projectId],
-    );
-    if (!conv) throw new NotFoundException('Convocatoria no encontrada');
-
-    const sugeridos = await this.dataSource.query(
-      `SELECT p.id, p.name, p.phone, p.skills
-       FROM promoters p
-       WHERE p.client_id = $1
-         AND p.active = true
-         AND p.id != $2
-         AND p.id NOT IN (
-           SELECT c.persona_id FROM convocatorias c
-           WHERE c.client_id = $1 AND c.dia = $3
-             AND c.estado NOT IN ('rechazada', 'no_show')
-         )
-       ORDER BY p.name
-       LIMIT 10`,
-      [clientId, conv.persona_id, conv.dia],
-    );
-
-    return { sugeridos };
-  }
-
-  async asignarReemplazo(
-    clientId:   string,
-    projectId:  string,
-    convId:     string,
-    newPersonaId: string,
-  ): Promise<{ ok: boolean }> {
-    const [conv] = await this.dataSource.query(
-      `SELECT dia, local_nombre, local_direccion FROM convocatorias
-       WHERE id=$1 AND client_id=$2 AND proyecto_id=$3`,
-      [convId, clientId, projectId],
-    );
-    if (!conv) throw new NotFoundException('Convocatoria no encontrada');
-
-    await this.dataSource.query(
-      `UPDATE convocatorias SET estado='reemplazada', updated_at=NOW() WHERE id=$1 AND client_id=$2`,
-      [convId, clientId],
-    );
-
-    await this.dataSource.query(
-      `INSERT INTO proyecto_equipo (client_id, proyecto_id, persona_id, rol)
-       VALUES ($1,$2,$3,'Promotor')
-       ON CONFLICT (client_id, proyecto_id, persona_id) DO NOTHING`,
-      [clientId, projectId, newPersonaId],
-    );
-
-    await this.dataSource.query(
-      `INSERT INTO convocatorias
-         (client_id, proyecto_id, persona_id, dia, local_nombre, local_direccion, estado)
-       VALUES ($1,$2,$3,$4,$5,$6,'pendiente')`,
-      [clientId, projectId, newPersonaId, conv.dia, conv.local_nombre, conv.local_direccion],
-    );
-
-    const [promotor] = await this.dataSource.query(
-      `SELECT name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
-      [newPersonaId, clientId],
-    ).catch(() => []);
-
-    if (promotor?.phone) {
-      const [proyecto] = await this.dataSource.query(
-        `SELECT name FROM projects WHERE id=$1 AND client_id=$2`, [projectId, clientId],
+    // C2 — El promotor confirmó pero canceló después → hay que reemplazarlo.
+    //   No existe búsqueda automática de reemplazo: se notifica al OPERATOR del
+    //   tenant (rol 'user'), que es quien gestiona la operación en terreno, para
+    //   que consiga un reemplazo manualmente para ese turno/día.
+    if (estado === 'cancelada') {
+      await this.notificarReemplazoNecesario(clientId, projectId, convId).catch((err) =>
+        this.logger.warn(`[F4] notificarReemplazo error conv=${convId}: ${err?.message}`),
       );
-      await this.wa.enviarConvocatoria({
-        telefono:       promotor.phone,
-        nombrePromotor: promotor.name,
-        proyecto:       proyecto?.name ?? '',
-        fecha:          conv.dia,
-        local:          conv.local_nombre ?? 'Por confirmar',
-        direccion:      conv.local_direccion ?? 'Por confirmar',
-      });
     }
 
-    this.logger.log(`[F4] Reemplazo asignado conv=${convId} → persona=${newPersonaId}`);
+    // Resolver manualmente una convocatoria puede completar la ronda → CLOSED.
+    await this.cerrarConvocatoriaSiCompleta(clientId, projectId);
     return { ok: true };
   }
+
+  /**
+   * C2 — Avisa a los OPERATOR del tenant que un promotor canceló y se necesita
+   * reemplazo para su turno. Idempotente por convocatoria (sendTextOnce con
+   * dedupKey por convId): si la cancelación se re-procesa, no duplica el aviso.
+   */
+  private async notificarReemplazoNecesario(
+    clientId: string, projectId: string, convId: string,
+  ): Promise<void> {
+    const [row] = await this.dataSource.query(
+      `SELECT c.dia, pr.name AS proyecto_nombre, p.name AS persona_nombre
+         FROM convocatorias c
+         LEFT JOIN projects  pr ON pr.id = c.proyecto_id
+         LEFT JOIN promoters p  ON p.id  = c.persona_id
+        WHERE c.id=$1 AND c.client_id=$2 AND c.proyecto_id=$3`,
+      [convId, clientId, projectId],
+    ).catch(() => []);
+    if (!row) return;
+
+    const fecha = row.dia ? new Date(row.dia).toLocaleDateString('es-CL') : 'la fecha asignada';
+    const msg =
+      `🔁 Reemplazo necesario en "${row.proyecto_nombre ?? 'proyecto'}": ` +
+      `${row.persona_nombre ?? 'un promotor'} canceló su turno del ${fecha}. ` +
+      `Buscá un reemplazo para ese día.`;
+
+    const operators = await this.getOperatorPhones(clientId);
+    for (const op of operators) {
+      await this.waOutput.sendTextOnce(op.phone, msg, `conv-reemplazo:${convId}:${op.phone}`).catch(() => {});
+    }
+    this.logger.log(`[F4] Reemplazo notificado conv=${convId} (${operators.length} operador/es 'user')`);
+  }
+
+  // ── F4 Fase 3: CLOSED lifecycle ───────────────────────────────────────────
+
+  /**
+   * Cierra la ronda de convocatoria del proyecto si TODAS las convocatorias
+   * quedaron resueltas (ninguna en 'enviada'/'pendiente'), y notifica al operador
+   * UNA sola vez. El UPDATE es atómico e idempotente: el guard
+   * convocatoria_cerrada_at IS NULL + el chequeo de pendientes evitan doble aviso
+   * aunque dos respuestas lleguen casi simultáneas.
+   */
+  async cerrarConvocatoriaSiCompleta(clientId: string, projectId: string): Promise<void> {
+    const cerradas = await this.dataSource.query(
+      `UPDATE projects p
+          SET convocatoria_cerrada_at = NOW(), updated_at = NOW()
+        WHERE p.id = $1 AND p.client_id = $2
+          AND p.convocatoria_cerrada_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+               AND c.estado IN ('enviada','pendiente')
+          )
+        RETURNING p.name`,
+      [projectId, clientId],
+    ).catch((err: any) => {
+      this.logger.warn(`[F4] cerrarConvocatoria error proyecto=${projectId}: ${err.message}`);
+      return [];
+    });
+
+    if (!cerradas.length) return; // nada que cerrar (o ya estaba cerrada)
+
+    const nombre = cerradas[0].name;
+    // Resumen de la ronda para el operador.
+    const [resumen] = await this.dataSource.query(
+      `SELECT
+          COUNT(*)                                        AS total,
+          COUNT(*) FILTER (WHERE estado='confirmada')     AS confirmadas,
+          COUNT(*) FILTER (WHERE estado='rechazada')      AS rechazadas
+         FROM convocatorias
+        WHERE proyecto_id=$1 AND client_id=$2`,
+      [projectId, clientId],
+    ).catch(() => [{ total: '?', confirmadas: '?', rechazadas: '?' }]);
+
+    const msg = `✅ Convocatoria "${nombre}" cerrada: todos respondieron. `
+      + `${resumen.confirmadas}/${resumen.total} confirmaron, ${resumen.rechazadas} rechazaron.`;
+    const admins = await this.getAdminPhones(clientId);
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
+    this.logger.log(`[F4] Convocatoria cerrada proyecto=${projectId} (${admins.length} operadores notificados)`);
+  }
+
+  /** Teléfonos de los admin_cliente del tenant con phone registrado. */
+  private async getAdminPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.dataSource.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+  }
+
+  /**
+   * Teléfonos de los OPERATOR (rol 'user') del tenant con phone registrado.
+   * Análogo a getAdminPhones pero para el operador de terreno: es el destinatario
+   * de las tareas del ciclo de convocatoria (reemplazo por cancelación C2,
+   * no-respuesta tras 2 recordatorios C4). Distinto del MANAGER que recibe las
+   * escaladas de ambigüedad y el cierre de ronda.
+   */
+  private async getOperatorPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.dataSource.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.OPERATOR}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+  }
+
 }

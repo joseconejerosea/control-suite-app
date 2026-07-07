@@ -9,10 +9,20 @@ import { ClassifyProcessor } from './processors/classify.processor';
 import { PersistProcessor } from './processors/persist.processor';
 import { MindProactiveProcessor } from './processors/mind-proactive.processor';
 import { ReportProcessor } from './processors/report.processor';
+import {
+  ConvocatoriaClassifyProcessor,
+  QUEUE_CONVOCATORIA_CLASSIFY,
+} from './processors/convocatoria-classify.processor';
+import {
+  ProjectInboxExtractProcessor,
+  QUEUE_PROJECT_INBOX_EXTRACT,
+} from './processors/project-inbox-extract.processor';
 import { MetricsModule } from '../metrics/metrics.module';
 import { SheetsModule } from '../sheets/sheets.module';
 import { MindModule } from '../mind/mind.module';
 import { RendicionesModule } from '../rendiciones/rendiciones.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { ProjectsModule } from '../projects/projects.module';
 
 const QUEUE_OCR            = 'ocr';
 const QUEUE_CLASSIFY       = 'classify';
@@ -38,12 +48,16 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
       { name: QUEUE_CLASSIFY },
       { name: QUEUE_PERSIST },
       { name: QUEUE_MIND_PROACTIVE },
+      { name: QUEUE_CONVOCATORIA_CLASSIFY },
+      { name: QUEUE_PROJECT_INBOX_EXTRACT },
       { name: 'report-gen' },
     ),
     MetricsModule,
     SheetsModule,
     MindModule,
     RendicionesModule,
+    WhatsAppModule,
+    ProjectsModule,
   ],
   providers: [
     EventProducer,
@@ -54,6 +68,8 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
     PersistProcessor,
     MindProactiveProcessor,
     ReportProcessor,
+    ConvocatoriaClassifyProcessor,
+    ProjectInboxExtractProcessor,
   ],
   exports: [BullModule, EventProducer],
 })

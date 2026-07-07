@@ -4,12 +4,13 @@ import { DataSource } from 'typeorm';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 const SAVINGS_RATE_USD_PER_HOUR = 15;
 const HOURS_SAVED_PER_DAY       = 3;
 
 @UseGuards(AuthGuard, RolesGuard)
-@Roles('super_admin')
+@Roles(UserRole.SUPERADMIN)
 @Controller('admin/monitoring')
 export class MonitoringController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}

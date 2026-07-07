@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { Client } from './client.entity';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Injectable()
 export class ClientsService {
@@ -81,7 +82,7 @@ export class ClientsService {
 
     const activeChannels = (client.canales ?? []).filter((c) => c.is_active);
     const adminUsers = (client.users ?? []).filter(
-      (u) => u.role === 'admin_cliente',
+      (u) => u.role === UserRole.MANAGER,
     );
 
     return {

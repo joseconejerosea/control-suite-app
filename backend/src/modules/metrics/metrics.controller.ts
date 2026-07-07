@@ -4,11 +4,12 @@ import { MetricsService } from './metrics.service';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 // C6 — /metrics expone labels client_id de TODOS los tenants (enumeración +
 // volumen de negocio). Reservado a super_admin.
 @UseGuards(AuthGuard, RolesGuard)
-@Roles('super_admin')
+@Roles(UserRole.SUPERADMIN)
 @Controller('metrics')
 export class MetricsController {
   constructor(private readonly metricsService: MetricsService) {}

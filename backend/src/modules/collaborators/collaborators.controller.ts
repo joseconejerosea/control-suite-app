@@ -15,6 +15,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { CollaboratorsService } from './collaborators.service';
 import { CreateCollaboratorDto } from './dto/create-collaborator.dto';
 import { UpdateCollaboratorDto } from './dto/update-collaborator.dto';
@@ -29,25 +30,25 @@ export class CollaboratorsController {
   constructor(private readonly service: CollaboratorsService) {}
 
   @Post()
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   create(@Req() req: AuthedRequest, @Body() dto: CreateCollaboratorDto) {
     return this.service.create(req.user.client_id, dto);
   }
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@Req() req: AuthedRequest, @Query('project_id') projectId?: string) {
     return this.service.findAll(req.user.client_id, projectId);
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Patch(':id')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   update(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
