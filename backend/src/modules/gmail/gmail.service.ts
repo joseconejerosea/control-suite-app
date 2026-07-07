@@ -219,8 +219,6 @@ export class GmailService {
           headers.find((h) => (h.name ?? '').toLowerCase() === name.toLowerCase())?.value ?? '';
         const subject     = hdr('Subject');
         const from        = hdr('From');
-        const inReplyTo   = hdr('In-Reply-To');
-        const references  = hdr('References');
         const body        = this.extractBody(full.data.payload);
 
         const imageAttachments = this.findImageAttachments(full.data.payload);
@@ -270,7 +268,7 @@ export class GmailService {
           // No es factura → intentamos tratarlo como feedback del cliente (respuesta
           // al reporte) y convertirlo en una NOVEDAD/incidencia de la activación.
           const created = await this.tryCreateIncidenciaFromFeedback(clientId, {
-            subject, from, body, inReplyTo, references,
+            subject, from, body,
           }).catch((e) => {
             this.logger.error(`[GmailService] feedback→incidencia error: ${e}`);
             return false;
@@ -293,9 +291,10 @@ export class GmailService {
    * Feedback del cliente por email → NOVEDAD (incidencia con source='EMAIL').
    *
    * MATCHING (en orden de preferencia):
-   *   a) THREADING: In-Reply-To / References del correo entrante contienen el
-   *      Message-ID que guardamos en reportes_cliente.email_message_id al enviar
-   *      el reporte. Es el camino confiable.
+   *   a) TOKEN en el asunto: `[#token]` que embebimos al enviar el reporte y
+   *      guardamos en reportes_cliente.email_message_id. Sobrevive en la respuesta
+   *      del cliente (`Re: ... [#token]`). Es el camino confiable — no dependemos
+   *      del Message-ID, que Resend controla y no permite fijar.
    *   b) FALLBACK por remitente: el email del `from` figura en
    *      projects.config.report_recipients de un proyecto que tiene una activación
    *      con reporte ENVIADO. Heurística — puede matchear un reporte que no es el
@@ -310,7 +309,7 @@ export class GmailService {
    */
   private async tryCreateIncidenciaFromFeedback(
     clientId: string,
-    email: { subject: string; from: string; body: string; inReplyTo: string; references: string },
+    email: { subject: string; from: string; body: string },
   ): Promise<boolean> {
     // Ignoramos correos que no parecen respuestas ni traen cuerpo útil.
     if (!email.body && !email.subject) return false;
@@ -366,20 +365,21 @@ export class GmailService {
    */
   private async matchReporte(
     clientId: string,
-    email: { from: string; inReplyTo: string; references: string },
-  ): Promise<{ activacion_id: string; matchBy: 'threading' | 'sender' } | null> {
+    email: { subject: string; from: string },
+  ): Promise<{ activacion_id: string; matchBy: 'token' | 'sender' } | null> {
     return runWithTenant(this.dataSource, clientId, async () => {
-      // a) Threading: los Message-ID que enviamos aparecen en In-Reply-To/References.
-      const ids = this.extractMessageIds(`${email.inReplyTo} ${email.references}`);
-      if (ids.length) {
+      // a) Token en el asunto: [#<token>] embebido al enviar, guardado en
+      //    reportes_cliente.email_message_id. Sobrevive en la respuesta del cliente.
+      const token = this.extractSubjectToken(email.subject);
+      if (token) {
         const rows = await this.dataSource.query(
           `SELECT activacion_id FROM reportes_cliente
-            WHERE client_id=$1 AND email_message_id = ANY($2::text[])
+            WHERE client_id=$1 AND email_message_id=$2
             ORDER BY enviado_at DESC NULLS LAST LIMIT 1`,
-          [clientId, ids],
+          [clientId, token],
         );
         if (rows[0]?.activacion_id) {
-          return { activacion_id: rows[0].activacion_id, matchBy: 'threading' as const };
+          return { activacion_id: rows[0].activacion_id, matchBy: 'token' as const };
         }
       }
 
@@ -412,11 +412,10 @@ export class GmailService {
     });
   }
 
-  /** Extrae todos los `<...>` que parezcan Message-IDs de un string de headers. */
-  private extractMessageIds(raw: string): string[] {
-    if (!raw) return [];
-    const matches = raw.match(/<[^>]+>/g) ?? [];
-    return Array.from(new Set(matches.map((m) => m.trim())));
+  /** Extrae el token de referencia `[#token]` del asunto de la respuesta (si está). */
+  private extractSubjectToken(subject: string): string | null {
+    const m = (subject ?? '').match(/\[#([a-z0-9]+)\]/i);
+    return m ? m[1].toLowerCase() : null;
   }
 
   /** Extrae la dirección de un header From del tipo `Nombre <mail@x.com>`. */

@@ -6,19 +6,22 @@ export interface EmailOptions {
   subject: string;
   html: string;
   from?: string;
-  /**
-   * Headers custom para el proveedor (Resend los pasa tal cual al correo). Se usa
-   * para setear un `Message-ID` RFC propio y así poder matchear la respuesta del
-   * cliente (llega en su `In-Reply-To` / `References`).
-   */
+  /** Dirección de respuesta (Resend: reply_to). Para que la respuesta del cliente
+   *  caiga en el buzón que corresponde (p.ej. el Gmail conectado del tenant). */
+  replyTo?: string;
+  /** Headers custom opcionales para el proveedor (Resend los pasa tal cual al correo). */
   headers?: Record<string, string>;
 }
 
-/** Resultado del envío: `id` = id de Resend; `messageId` = Message-ID RFC seteado (si hubo). */
+/**
+ * Resultado del envío. `id` = id interno de Resend. `ref` = token de referencia
+ * embebido en el asunto del reporte (`[#token]`), que usamos para ligar la
+ * respuesta del cliente de vuelta al reporte — Resend NO deja fijar el Message-ID.
+ */
 export interface SendResult {
   ok: boolean;
   id?: string;
-  messageId?: string;
+  ref?: string;
 }
 
 @Injectable()
@@ -45,6 +48,7 @@ export class ResendEmailService {
           to: Array.isArray(opts.to) ? opts.to : [opts.to],
           subject: opts.subject,
           html: opts.html,
+          ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
           ...(opts.headers ? { headers: opts.headers } : {}),
         }),
       });
@@ -57,7 +61,7 @@ export class ResendEmailService {
 
       const data = (await res.json().catch(() => ({}))) as { id?: string };
       this.logger.log(`[Email] Sent to ${opts.to}: ${opts.subject} (resend id: ${data?.id ?? 'n/a'})`);
-      return { ok: true, id: data?.id, messageId: opts.headers?.['Message-ID'] };
+      return { ok: true, id: data?.id };
     } catch (err: any) {
       this.logger.error('[Email] Error:', err.message);
       return { ok: false };
@@ -65,12 +69,13 @@ export class ResendEmailService {
   }
 
   /**
-   * Genera un Message-ID RFC-5322 propio para poder matchear la respuesta del
-   * cliente al reporte enviado. El dominio coincide con el del `from` de marca.
+   * Token de referencia corto que embebemos en el asunto del reporte (`[#token]`).
+   * Al responder, el cliente conserva el token en el asunto (`Re: ... [#token]`), y
+   * lo usamos para ligar la respuesta al reporte. No dependemos del Message-ID
+   * porque Resend lo controla y no permite fijarlo.
    */
-  private buildMessageId(): string {
-    const rand = randomBytes(16).toString('hex');
-    return `<${Date.now()}.${rand}@controlsuite.app>`;
+  private buildRefToken(): string {
+    return randomBytes(4).toString('hex');
   }
 
   async sendReporteCliente(opts: {
@@ -79,14 +84,17 @@ export class ResendEmailService {
     activacionNombre: string;
     fecha: string;
     htmlReporte: string;
+    replyTo?: string;
   }): Promise<SendResult> {
-    // Message-ID propio → lo persistimos en reportes_cliente.email_message_id y lo
-    // usamos para ligar la respuesta del cliente (llega en In-Reply-To/References).
-    const messageId = this.buildMessageId();
-    return this.send({
+    // Token de referencia en el asunto → lo persistimos en
+    // reportes_cliente.email_message_id y lo usamos para ligar la respuesta del
+    // cliente (que conserva el `[#token]` en el asunto). No usamos Message-ID:
+    // Resend lo controla y no permite fijarlo.
+    const ref = this.buildRefToken();
+    const res = await this.send({
       to: opts.destinatarios,
-      subject: `Reporte Activación — ${opts.activacionNombre} | ${opts.fecha}`,
-      headers: { 'Message-ID': messageId },
+      subject: `Reporte Activación — ${opts.activacionNombre} | ${opts.fecha}  [#${ref}]`,
+      replyTo: opts.replyTo,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: #C8202C; padding: 24px; border-radius: 12px 12px 0 0;">
@@ -104,6 +112,7 @@ export class ResendEmailService {
         </div>
       `,
     });
+    return { ...res, ref };
   }
 
   async sendAlertaIncidencia(opts: {

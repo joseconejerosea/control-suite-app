@@ -18,6 +18,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { InvoicesService } from './invoices.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -148,6 +149,7 @@ export class InvoicesController {
 
   @Post('eventos/:eventoId/reprocess')
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'REPROCESS_INVOICE_EVENT', entity: 'InvoiceEvent' })
   @HttpCode(HttpStatus.OK)
   async eventosReprocess(
     @Req() req: AuthedRequest,

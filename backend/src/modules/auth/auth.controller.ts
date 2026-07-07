@@ -39,20 +39,21 @@ export class AuthController {
     return this.authService.refreshToken(dto.refreshToken);
   }
 
-  // Diseño B — el SERVICE_LEAD lista sus agencias asignadas para poder elegir
-  // la activa. Accesible aun sin tenant activo (ServiceLeadGuard whitelistea
-  // esta ruta cuando el SL todavía no seleccionó agencia).
+  // Diseño B — el SERVICE_LEAD lista sus agencias asignadas (el SUPERADMIN, todas)
+  // para poder elegir la activa. Accesible aun sin tenant activo (ServiceLeadGuard
+  // whitelistea esta ruta cuando el SL todavía no seleccionó agencia).
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SERVICE_LEAD)
+  @Roles(UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @Get('my-tenants')
   myTenants(@CurrentUser() user: JwtPayload) {
     return this.authService.getAssignedTenants(user.sub);
   }
 
-  // El SERVICE_LEAD elige la agencia con la que va a operar → se re-emite el JWT
-  // con client_id = tenant elegido + marcador activeTenantId.
+  // El SERVICE_LEAD (o el SUPERADMIN, para intervención global) elige la agencia
+  // con la que va a operar → se re-emite el JWT con client_id = tenant elegido +
+  // marcador activeTenantId.
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SERVICE_LEAD)
+  @Roles(UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   @Post('select-tenant')
   @HttpCode(HttpStatus.OK)
   selectTenant(

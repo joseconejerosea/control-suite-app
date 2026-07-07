@@ -66,11 +66,20 @@ export class AuthService {
   }
 
   /**
-   * Devuelve las agencias (clients) asignadas a un SERVICE_LEAD vía
-   * service_lead_tenants. Se usa en GET /auth/my-tenants para que el SL elija
-   * su tenant activo antes de operar.
+   * Devuelve las agencias (clients) que un usuario puede operar. El SERVICE_LEAD ve
+   * las asignadas vía service_lead_tenants; el SUPERADMIN (intervención global) ve
+   * TODAS. Se usa en GET /auth/my-tenants para elegir el tenant activo antes de operar.
    */
   async getAssignedTenants(userId: string) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+
+    // SUPERADMIN interviene en cualquier agencia → el selector le muestra todas.
+    if (user.role === UserRole.SUPERADMIN) {
+      const clients = await this.clientRepo.find({ order: { nombre: 'ASC' } });
+      return clients.map((c) => ({ id: c.id, nombre: c.nombre ?? null }));
+    }
+
     const rows = await this.serviceLeadTenantRepo.find({
       where: { user_id: userId },
       relations: { tenant: true },
@@ -84,17 +93,25 @@ export class AuthService {
   }
 
   /**
-   * Un SERVICE_LEAD elige la agencia con la que va a operar. Valida que sea SL y
-   * que exista la asignación (user_id, tenant_id); si OK re-emite el JWT con
-   * client_id = tenantId elegido y el marcador activeTenantId (Diseño B).
+   * Elige la agencia activa. El SERVICE_LEAD sólo puede elegir una agencia asignada
+   * (service_lead_tenants). El SUPERADMIN (intervención global) puede elegir CUALQUIER
+   * agencia existente. Si OK re-emite el JWT con client_id = tenantId y el marcador
+   * activeTenantId (Diseño B) — así el audit registra el tenant intervenido.
    */
   async selectTenant(userId: string, tenantId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
+    // SUPERADMIN: intervención global — puede entrar a cualquier agencia existente.
+    if (user.role === UserRole.SUPERADMIN) {
+      const tenant = await this.clientRepo.findOne({ where: { id: tenantId } });
+      if (!tenant) throw new ForbiddenException('La agencia no existe');
+      return this.generateTokens(user, tenantId);
+    }
+
     if (user.role !== UserRole.SERVICE_LEAD) {
       throw new ForbiddenException(
-        'Sólo un service lead puede seleccionar agencia',
+        'Sólo un service lead o el superadmin pueden seleccionar agencia',
       );
     }
 

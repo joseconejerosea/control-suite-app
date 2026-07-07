@@ -260,12 +260,22 @@ export class F5Controller {
     //     projects.config.report_recipients (la activación cuelga de project_id).
     const destinatarios = await this.resolverDestinatarios(user.client_id, rep.project_id, body.destinatarios);
 
-    const { ok, messageId } = await this.emailService.sendReporteCliente({
+    // reply-to = el Gmail conectado del tenant, para que la respuesta del cliente
+    // caiga en el buzón que pollea GmailService (no en noreply@, que nadie lee).
+    const [gmailRow] = await this.ds.query(
+      `SELECT email FROM gmail_tokens
+        WHERE client_id=$1 AND tokens IS NOT NULL
+        ORDER BY updated_at DESC LIMIT 1`,
+      [user.client_id],
+    ).catch(() => []);
+
+    const { ok, ref } = await this.emailService.sendReporteCliente({
       destinatarios,
       clienteNombre: rep.cliente_nombre ?? 'Cliente',
       activacionNombre: `Activación ${rep.activation_date ?? ''}`,
       fecha: new Date().toLocaleDateString('es-CL'),
       htmlReporte: html,
+      replyTo: gmailRow?.email ?? undefined,
     });
 
     // Sólo marcamos ENVIADO si el email realmente salió — si falla, queda 'aprobado'
@@ -277,14 +287,14 @@ export class F5Controller {
       return { sent: false, destinatarios };
     }
 
-    // Persistimos el Message-ID del correo enviado para poder ligar la respuesta
-    // del cliente (llega en In-Reply-To/References) de vuelta a este reporte.
+    // Persistimos el token de referencia del asunto para poder ligar la respuesta
+    // del cliente (que conserva el `[#token]` en el asunto) de vuelta a este reporte.
     await this.ds.query(
       `UPDATE reportes_cliente
           SET estado='enviado', enviado_at=NOW(), destinatarios=$1,
               email_message_id=$2, updated_at=NOW()
         WHERE id=$3 AND client_id=$4`,
-      [destinatarios, messageId ?? null, rep.id, user.client_id],
+      [destinatarios, ref ?? null, rep.id, user.client_id],
     );
 
     // F5 Fase 3: process map — "avisa cuando se envió".

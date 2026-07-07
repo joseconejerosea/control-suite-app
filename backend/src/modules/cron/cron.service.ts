@@ -160,8 +160,8 @@ export class CronService {
         await runWithTenant(this.ds, p.client_id, () =>
           this.ds.query(
             `INSERT INTO mind_propuestas
-               (client_id, tipo, titulo, descripcion, datos_soporte, prioridad, estado, created_at)
-             VALUES ($1, 'alerta_facturacion', $2, $3, $4::jsonb, 'alta', 'pendiente', NOW())
+               (client_id, tipo, titulo, descripcion, accion_propuesta, severidad, estado, created_at)
+             VALUES ($1, 'alerta_facturacion', $2, $3, $4::jsonb, 'alta', 'abierta', NOW())
              ON CONFLICT DO NOTHING`,
             [
               p.client_id,
@@ -212,8 +212,8 @@ export class CronService {
         await runWithTenant(this.ds, row.client_id, () =>
           this.ds.query(
             `INSERT INTO mind_propuestas
-               (client_id, tipo, titulo, descripcion, datos_soporte, prioridad, estado, created_at)
-             VALUES ($1, 'alerta_devolucion', $2, $3, $4::jsonb, 'alta', 'pendiente', NOW())
+               (client_id, tipo, titulo, descripcion, accion_propuesta, severidad, estado, created_at)
+             VALUES ($1, 'alerta_devolucion', $2, $3, $4::jsonb, 'alta', 'abierta', NOW())
              ON CONFLICT DO NOTHING`,
             [
               row.client_id,

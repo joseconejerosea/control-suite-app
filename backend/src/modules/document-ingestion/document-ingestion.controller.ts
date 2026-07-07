@@ -177,6 +177,7 @@ export class DocumentIngestionController {
 
   @Post(':id/reprocess')
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'REPROCESS_DOCUMENT', entity: 'Document' })
   reprocess(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.reprocess(req.user.client_id, id);
   }
