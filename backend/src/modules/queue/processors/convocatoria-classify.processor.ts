@@ -8,6 +8,7 @@ import { UserRole } from '../../../common/enums/user-role.enum';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { normalizePhone } from '../../../common/utils/normalize-phone';
 import {
   ConvocatoriaClasificacion,
   CLASIFICACION_A_ESTADO,
@@ -56,10 +57,14 @@ export class ConvocatoriaClassifyProcessor extends WorkerHost {
   private async handle(data: ConvocatoriaClassifyJob): Promise<void> {
     const { evento_crudo_id, client_id, from, text, wa_message_id } = data;
 
-    // 1. Resolver promotor por teléfono.
+    // 1. Resolver promotor por teléfono. Comparar por DÍGITOS (igual que el gate
+    //    isAuthorizedSender y F1Persist): el `from` de Meta llega 549... pero el
+    //    phone guardado tiene '+', espacios, etc. Con match exacto se descartaba
+    //    la respuesta del promotor a la convocatoria.
+    const digits = normalizePhone(from);
     const [promotor] = await this.ds.query(
-      `SELECT id, name FROM promoters WHERE phone=$1 AND client_id=$2 LIMIT 1`,
-      [from, client_id],
+      `SELECT id, name FROM promoters WHERE regexp_replace(phone, '\\D', '', 'g')=$1 AND client_id=$2 LIMIT 1`,
+      [digits, client_id],
     ).catch(() => []);
     if (!promotor) {
       this.logger.warn(`[F4Classify] Sin promotor para ${from}; se descarta`);
