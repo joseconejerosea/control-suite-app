@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Query,
   Req,
   Res,
@@ -105,5 +106,15 @@ export class GmailController {
   async status(@Req() req: FastifyRequest & { user?: { client_id?: string } }) {
     const clientId = req.user?.client_id as string;
     return this.gmailService.statusForTenant(clientId);
+  }
+
+  /**
+   * Desconecta Gmail del tenant del JWT (borra sus tokens OAuth). Autenticado y
+   * scopeado al client_id del request — nunca a un tenant arbitrario del input.
+   */
+  @Delete('disconnect')
+  async disconnect(@Req() req: FastifyRequest & { user?: { client_id?: string } }) {
+    const clientId = req.user?.client_id as string;
+    return this.gmailService.disconnectTenant(clientId);
   }
 }

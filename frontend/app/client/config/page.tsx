@@ -4,6 +4,7 @@ import {
   Settings, Users, Warehouse, Link2, Building2,
   Save, Plus, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
+import GmailConnect from "@/components/integrations/gmail-connect";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
@@ -47,7 +48,6 @@ export default function ConfigPage() {
   // Integraciones
   const [apiToken, setApiToken]   = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [sheetsUrl, setSheetsUrl] = useState("");
 
   const user = getUser();
 
@@ -295,18 +295,14 @@ export default function ConfigPage() {
   // INTEGRACIONES
   const tabIntegraciones = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <GmailConnect onToast={showToast} />
+
       {card(<>
         {sectionTitle("Google Sheets — destino de exportación")}
-        <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>URL de la hoja de cálculo</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          {input(sheetsUrl, setSheetsUrl, "https://docs.google.com/spreadsheets/d/...")}
-          <button onClick={() => showToast("Sheets URL guardada ✓")}
-            style={{ padding: "8px 14px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
-            <Save size={14} />
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 6 }}>
-          Las exportaciones de F1, F2 y F5 se enviarán a esta hoja.
+        <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
+          Las exportaciones de F1, F2 y F5 se envían a la hoja definida en el canal de
+          entrada del cliente (se configura en el onboarding). Requiere tener Gmail
+          conectado arriba — se usa el mismo permiso para escribir en la hoja.
         </div>
       </>)}
 
