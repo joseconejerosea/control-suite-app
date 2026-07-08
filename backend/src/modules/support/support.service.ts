@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { ResendEmailService } from '../../common/email/resend.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 
 interface BroadcastDto {
@@ -16,7 +17,19 @@ export class SupportService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly email: ResendEmailService,
   ) {}
+
+  // Escapa texto de usuario que se interpola en el HTML del email (evita inyección
+  // de markup en el cuerpo del comunicado).
+  private escapeHtml(value: unknown): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   async findAll(filters: { estado?: string; prioridad?: string; client_id?: string }) {
     let q = `SELECT t.*, u.email as user_email, c.nombre as cliente_nombre
@@ -156,17 +169,37 @@ export class SupportService {
           detalle.push({ client_id: client.id, canal: 'banner', ok: true });
         }
 
-        // ── Email (via resend — future integration) ────────────────────────
+        // ── Email (via Resend) ─────────────────────────────────────────────
         if (canal === 'email') {
-          // Log intent — full Resend integration requires email template
-          await this.ds.query(
-            `INSERT INTO audit_log (accion, detalle, created_at)
-             VALUES ('admin_broadcast_email', $1::jsonb, NOW())
-             ON CONFLICT DO NOTHING`,
-            [JSON.stringify({ client_id: client.id, asunto: dto.asunto, preview: dto.mensaje.slice(0, 100) })],
-          ).catch(() => {});
-          enviados++;
-          detalle.push({ client_id: client.id, canal: 'email', ok: true });
+          // Destinatario: el admin (MANAGER) del cliente con email cargado.
+          const [adminUser] = await this.ds.query(
+            `SELECT u.email FROM users u WHERE u.client_id = $1 AND u.role = '${UserRole.MANAGER}' AND u.email IS NOT NULL LIMIT 1`,
+            [client.id],
+          ).catch(() => []);
+
+          if (!adminUser?.email) {
+            errores++;
+            detalle.push({ client_id: client.id, canal: 'email', ok: false, error: 'No admin email registered' });
+          } else {
+            const asunto = dto.asunto ?? 'Comunicado de Control Suite';
+            const { ok } = await this.email.send({
+              to: adminUser.email,
+              subject: asunto,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                  <div style="background: #C8202C; padding: 24px; border-radius: 12px 12px 0 0;">
+                    <h1 style="color: white; margin: 0; font-size: 20px;">Control Suite BTL</h1>
+                  </div>
+                  <div style="background: #f9f9f9; padding: 24px; border-radius: 0 0 12px 12px;">
+                    <h2 style="color: #1a1a1a; font-size: 18px;">${this.escapeHtml(asunto)}</h2>
+                    <p style="color: #333; white-space: pre-wrap;">${this.escapeHtml(dto.mensaje)}</p>
+                  </div>
+                </div>
+              `,
+            });
+            if (ok) { enviados++; } else { errores++; }
+            detalle.push({ client_id: client.id, canal: 'email', ok, error: ok ? undefined : 'Email send failed' });
+          }
         }
       }
     }
