@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import AppShell from "@/components/layout/app-shell";
 import { RefreshCw, RotateCcw, Trash2, List } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+// NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
+const API_BASE = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/api`;
 function getToken() { return typeof window !== "undefined" ? (localStorage.getItem("cs_token") ?? "") : ""; }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {

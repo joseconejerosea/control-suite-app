@@ -1,0 +1,97 @@
+- generic [ref=f35e1]:
+  - generic [ref=f35e2]:
+    - complementary [ref=f35e3]:
+      - generic [ref=f35e4]:
+        - img [ref=f35e6]
+        - generic [ref=f35e8]:
+          - generic [ref=f35e9]: Control Suite
+          - generic [ref=f35e10]: Operations Platform
+      - generic [ref=f35e11]:
+        - generic [ref=f35e12]: A
+        - generic [ref=f35e13]:
+          - generic [ref=f35e14]: admin@controlsuite.com
+          - generic [ref=f35e15]: super admin
+      - navigation [ref=f35e16]:
+        - generic [ref=f35e17]:
+          - link "Dashboard" [ref=f35e18] [cursor=pointer]:
+            - /url: /admin/dashboard
+            - img [ref=f35e19]
+            - generic [ref=f35e24]: Dashboard
+          - link "Onboarding" [ref=f35e25] [cursor=pointer]:
+            - /url: /admin/onboarding
+            - img [ref=f35e26]
+            - generic [ref=f35e30]: Onboarding
+          - link "Clientes" [ref=f35e31] [cursor=pointer]:
+            - /url: /admin/clientes
+            - img [ref=f35e32]
+            - generic [ref=f35e37]: Clientes
+          - link "Monitoreo" [ref=f35e38] [cursor=pointer]:
+            - /url: /admin/monitoring
+            - img [ref=f35e39]
+            - generic [ref=f35e41]: Monitoreo
+          - link "Tickets" [ref=f35e42] [cursor=pointer]:
+            - /url: /admin/tickets
+            - img [ref=f35e43]
+            - generic [ref=f35e46]: Tickets
+          - link "Auditoría AI" [ref=f35e47] [cursor=pointer]:
+            - /url: /admin/audit
+            - img [ref=f35e48]
+            - generic [ref=f35e51]: Auditoría AI
+            - img [ref=f35e52]
+          - link "Usuarios" [ref=f35e54] [cursor=pointer]:
+            - /url: /admin/usuarios
+            - img [ref=f35e55]
+            - generic [ref=f35e59]: Usuarios
+      - button "Sign out" [ref=f35e61] [cursor=pointer]
+    - generic [ref=f35e62]:
+      - banner [ref=f35e63]:
+        - heading "Control Suite" [level=1] [ref=f35e64]
+        - generic [ref=f35e65]:
+          - button [ref=f35e66] [cursor=pointer]:
+            - img [ref=f35e67]
+          - generic [ref=f35e71]: AD
+          - button "Sign out" [ref=f35e72] [cursor=pointer]:
+            - img [ref=f35e73]
+            - text: Sign out
+      - main [ref=f35e76]:
+        - generic [ref=f35e77]:
+          - generic [ref=f35e78]:
+            - generic [ref=f35e79]:
+              - heading "Auditoria" [level=1] [ref=f35e80]
+              - paragraph [ref=f35e81]: Costos AI + Log de acciones criticas
+            - combobox [ref=f35e83]:
+              - option "Ultimos 7 dias"
+              - option "Ultimos 30 dias" [selected]
+              - option "Ultimos 90 dias"
+          - generic [ref=f35e84]:
+            - button "Costos AI" [ref=f35e85] [cursor=pointer]
+            - button "Log de Acciones" [active] [ref=f35e86] [cursor=pointer]
+          - table [ref=f35e107]:
+            - rowgroup [ref=f35e108]:
+              - row "Accion Usuario Recurso Fecha" [ref=f35e109]:
+                - columnheader "Accion" [ref=f35e110]
+                - columnheader "Usuario" [ref=f35e111]
+                - columnheader "Recurso" [ref=f35e112]
+                - columnheader "Fecha" [ref=f35e113]
+            - rowgroup [ref=f35e114]:
+              - row "ADMIN_CREATE_USER admin@controlsuite.com User 08-07-2026, 2:43:23 a. m." [ref=f35e115]:
+                - cell "ADMIN_CREATE_USER" [ref=f35e116]
+                - cell "admin@controlsuite.com" [ref=f35e117]
+                - cell "User" [ref=f35e118]
+                - cell "08-07-2026, 2:43:23 a. m." [ref=f35e119]
+              - row "ADMIN_CREATE_USER admin@controlsuite.com User 06-07-2026, 7:13:39 p. m." [ref=f35e120]:
+                - cell "ADMIN_CREATE_USER" [ref=f35e121]
+                - cell "admin@controlsuite.com" [ref=f35e122]
+                - cell "User" [ref=f35e123]
+                - cell "06-07-2026, 7:13:39 p. m." [ref=f35e124]
+              - row "CREATE_CLIENT admin@controlsuite.com Client 24-06-2026, 2:47:16 a. m." [ref=f35e125]:
+                - cell "CREATE_CLIENT" [ref=f35e126]
+                - cell "admin@controlsuite.com" [ref=f35e127]
+                - cell "Client" [ref=f35e128]
+                - cell "24-06-2026, 2:47:16 a. m." [ref=f35e129]
+              - row "CREATE_CLIENT admin@controlsuite.com Client 24-06-2026, 2:45:54 a. m." [ref=f35e130]:
+                - cell "CREATE_CLIENT" [ref=f35e131]
+                - cell "admin@controlsuite.com" [ref=f35e132]
+                - cell "Client" [ref=f35e133]
+                - cell "24-06-2026, 2:45:54 a. m." [ref=f35e134]
+  - alert [ref=f35e88]

@@ -1,0 +1,66 @@
+- generic [active] [ref=f33e1]:
+  - generic [ref=f33e2]:
+    - complementary [ref=f33e3]:
+      - generic [ref=f33e4]:
+        - img [ref=f33e6]
+        - generic [ref=f33e8]:
+          - generic [ref=f33e9]: Control Suite
+          - generic [ref=f33e10]: Operations Platform
+      - generic [ref=f33e11]:
+        - generic [ref=f33e12]: A
+        - generic [ref=f33e13]:
+          - generic [ref=f33e14]: admin@controlsuite.com
+          - generic [ref=f33e15]: super admin
+      - navigation [ref=f33e16]:
+        - generic [ref=f33e17]:
+          - link "Dashboard" [ref=f33e18] [cursor=pointer]:
+            - /url: /admin/dashboard
+            - img [ref=f33e19]
+            - generic [ref=f33e24]: Dashboard
+            - img [ref=f33e25]
+          - link "Onboarding" [ref=f33e27] [cursor=pointer]:
+            - /url: /admin/onboarding
+            - img [ref=f33e28]
+            - generic [ref=f33e32]: Onboarding
+          - link "Clientes" [ref=f33e33] [cursor=pointer]:
+            - /url: /admin/clientes
+            - img [ref=f33e34]
+            - generic [ref=f33e39]: Clientes
+          - link "Monitoreo" [ref=f33e40] [cursor=pointer]:
+            - /url: /admin/monitoring
+            - img [ref=f33e41]
+            - generic [ref=f33e43]: Monitoreo
+          - link "Tickets" [ref=f33e44] [cursor=pointer]:
+            - /url: /admin/tickets
+            - img [ref=f33e45]
+            - generic [ref=f33e48]: Tickets
+          - link "Auditoría AI" [ref=f33e49] [cursor=pointer]:
+            - /url: /admin/audit
+            - img [ref=f33e50]
+            - generic [ref=f33e53]: Auditoría AI
+          - link "Usuarios" [ref=f33e54] [cursor=pointer]:
+            - /url: /admin/usuarios
+            - img [ref=f33e55]
+            - generic [ref=f33e59]: Usuarios
+      - button "Sign out" [ref=f33e61] [cursor=pointer]
+    - generic [ref=f33e62]:
+      - banner [ref=f33e63]:
+        - heading "Admin Dashboard" [level=1] [ref=f33e64]
+        - generic [ref=f33e65]:
+          - button [ref=f33e66] [cursor=pointer]:
+            - img [ref=f33e67]
+          - generic [ref=f33e71]: AD
+          - button "Sign out" [ref=f33e72] [cursor=pointer]:
+            - img [ref=f33e73]
+            - text: Sign out
+      - main [ref=f33e76]:
+        - generic [ref=f33e77]:
+          - generic [ref=f33e78]:
+            - generic [ref=f33e79]:
+              - heading "Dashboard Global" [level=1] [ref=f33e80]
+              - paragraph [ref=f33e81]: Vista panoramica de todos los clientes
+            - button "Refresh" [ref=f33e82] [cursor=pointer]:
+              - img [ref=f33e83]
+              - text: Refresh
+          - generic [ref=f33e88]: Cargando...
+  - alert [ref=f33e89]

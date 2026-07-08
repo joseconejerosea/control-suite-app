@@ -84,6 +84,23 @@ Activar/Suspender cliente · Crear/Editar/Desactivar usuario · flujo onboarding
 
 ---
 
+# RUTAS EXTRA (fuera de la nav) — auditadas 2026-07-08
+
+Descubiertas por `fd app/admin`: existen 4 rutas de admin que NO están en el menú lateral. Todas son huérfanas (nadie linkea a ellas) y son mock o están rotas. Parecen una versión VIEJA del panel (nombres en español) superada por las que sí funcionan (audit/monitoring en inglés) pero nunca borradas.
+
+- 🔴 **/admin/eventos** ("Eventos Crudos · Pipeline F1"): llama a `dev-api.controlsuitte.com/invoices/eventos/list` → **404**. La URL NO lleva el prefijo `/api` (las demás sí). Muestra "No hay eventos registrados" tapando el 404.
+- 🔴 **/admin/facturacion** ("Facturación"): **100% datos hardcodeados**, CERO llamadas a la API. Muestra "Clientes activos: 10" (real: 1), "$4.150.000", facturas de clientes inexistentes (Agencia Nexus BTL, Experience Events, BTL Masters). Página de mentira disfrazada de real.
+- 🔴 **/admin/auditoria** (duplicado de /admin/audit): **100% mock**, cero API. Usuarios falsos (jose@controlsuite.cl, María López, admin@nexusbtl.cl) que no existen. Ruta huérfana.
+- 🔴 **/admin/monitoreo** (duplicado de /admin/monitoring): llama a `/api/admin/monitoring` (200) PERO los KPIs quedan todos en "—" (mismatch de campos vs lo que devuelve el back). "Estado por Flow" F1-F5 todos "Operacional" (hardcodeado). Roto.
+
+**CORRECCIÓN (verificado en sidebar.tsx)**: NO son las 4 código muerto. Hay 3 menús por rol: `SUPER_ADMIN_ITEMS` (las 7 auditadas), `ADMIN_SECTIONS` (rol admin_cliente, toggle "Administrador"), `CLIENT_SECTIONS` (rol cliente). Reparto real:
+- `/admin/eventos` y `/admin/facturacion` → están en `ADMIN_SECTIONS` = pertenecen al rol **admin_cliente**, NO al super admin. Se auditaron como super admin vía URL directa. Son features rotas de OTRO rol (eventos 404, facturacion mock) → NO borrar; cablear en el contexto de ese rol.
+- `/admin/auditoria` y `/admin/monitoreo` → NO están en ningún menú (solo en el mapa de títulos de topbar.tsx). Huérfanas reales → candidatas a borrar.
+
+Nota: `ADMIN_SECTIONS` es parte del modelo VIEJO de 3 roles (el frontend está atrasado; ver plan docs/frontend-analysis-plan.md). Auditar el rol admin_cliente y el rol cliente es scope aparte (otros sidebars).
+
+---
+
 # FASE B — FIXES APLICADOS (2026-07-08)
 
 | # | Fix | Archivos |

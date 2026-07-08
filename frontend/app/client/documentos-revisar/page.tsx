@@ -102,11 +102,14 @@ export default function DocumentosRevisarPage() {
   const load = useCallback(async (page = 1) => {
     setLoading(true);
     try {
-      const res = await api.get<{ data: F1Doc[]; pagination: Pagination }>(
+      // El interceptor global envuelve la respuesta en { data, timestamp, path }, y
+      // el endpoint paginado ya devuelve { data, pagination } → doble nesting.
+      // Los docs están en res.data.data (no res.data, que es el objeto paginado).
+      const res = await api.get<{ data: { data: F1Doc[]; pagination: Pagination } }>(
         `/app/f1-documents?${buildQuery(page)}`
       );
-      setDocs(res.data ?? []);
-      setPagination(res.pagination ?? { page: 1, limit: 20, total: 0, pages: 0 });
+      setDocs(res.data?.data ?? []);
+      setPagination(res.data?.pagination ?? { page: 1, limit: 20, total: 0, pages: 0 });
     } catch {
       setDocs([]);
     } finally {
