@@ -8,6 +8,17 @@ export class WhatsAppService {
   private readonly phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   private readonly token = process.env.WHATSAPP_ACCESS_TOKEN;
 
+  /**
+   * Argentina (país 54): Meta ENTREGA los mensajes entrantes con el 9 de móvil
+   * (549...), pero RECHAZA el envío a ese formato con (#131030). Hay que mandar
+   * SIN el 9 (54 + área + número). Verificado contra la Graph API:
+   *   to=5492216205665 → 131030 ; to=542216205665 → 200 (wa_id sigue siendo 549...).
+   */
+  private toSendFormat(to: string): string {
+    const digits = String(to).replace(/\D/g, '');
+    return digits.startsWith('549') ? '54' + digits.slice(3) : digits;
+  }
+
   async sendText(to: string, message: string): Promise<boolean> {
     try {
       const res = await fetch(`${API}/${this.phoneNumberId}/messages`, {
@@ -19,7 +30,7 @@ export class WhatsAppService {
         body: JSON.stringify({
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
-          to,
+          to: this.toSendFormat(to),
           type: 'text',
           text: { preview_url: false, body: message },
         }),
@@ -47,7 +58,7 @@ export class WhatsAppService {
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
-          to,
+          to: this.toSendFormat(to),
           type: 'template',
           template: {
             name: templateName,
