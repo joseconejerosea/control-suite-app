@@ -1,0 +1,94 @@
+- generic [active] [ref=f7e1]:
+  - generic [ref=f7e2]:
+    - complementary [ref=f7e3]:
+      - generic [ref=f7e4]:
+        - img [ref=f7e6]
+        - generic [ref=f7e8]:
+          - generic [ref=f7e9]: Control Suite
+          - generic [ref=f7e10]: Operations Platform
+      - generic [ref=f7e11]:
+        - generic [ref=f7e12]: A
+        - generic [ref=f7e13]:
+          - generic [ref=f7e14]: admin@controlsuite.com
+          - generic [ref=f7e15]: super admin
+      - navigation [ref=f7e16]:
+        - generic [ref=f7e17]:
+          - link "Dashboard" [ref=f7e18] [cursor=pointer]:
+            - /url: /admin/dashboard
+            - img [ref=f7e19]
+            - generic [ref=f7e24]: Dashboard
+          - link "Onboarding" [ref=f7e25] [cursor=pointer]:
+            - /url: /admin/onboarding
+            - img [ref=f7e26]
+            - generic [ref=f7e30]: Onboarding
+            - img [ref=f7e31]
+          - link "Clientes" [ref=f7e33] [cursor=pointer]:
+            - /url: /admin/clientes
+            - img [ref=f7e34]
+            - generic [ref=f7e39]: Clientes
+          - link "Monitoreo" [ref=f7e40] [cursor=pointer]:
+            - /url: /admin/monitoring
+            - img [ref=f7e41]
+            - generic [ref=f7e43]: Monitoreo
+          - link "Tickets" [ref=f7e44] [cursor=pointer]:
+            - /url: /admin/tickets
+            - img [ref=f7e45]
+            - generic [ref=f7e48]: Tickets
+          - link "Auditoría AI" [ref=f7e49] [cursor=pointer]:
+            - /url: /admin/audit
+            - img [ref=f7e50]
+            - generic [ref=f7e53]: Auditoría AI
+          - link "Usuarios" [ref=f7e54] [cursor=pointer]:
+            - /url: /admin/usuarios
+            - img [ref=f7e55]
+            - generic [ref=f7e59]: Usuarios
+      - button "Sign out" [ref=f7e61] [cursor=pointer]
+    - generic [ref=f7e62]:
+      - banner [ref=f7e63]:
+        - heading "Client Onboarding" [level=1] [ref=f7e64]
+        - generic [ref=f7e65]:
+          - button [ref=f7e66] [cursor=pointer]:
+            - img [ref=f7e67]
+          - generic [ref=f7e71]: AD
+          - button "Sign out" [ref=f7e72] [cursor=pointer]:
+            - img [ref=f7e73]
+            - text: Sign out
+      - main [ref=f7e76]:
+        - generic [ref=f7e77]:
+          - generic [ref=f7e78]:
+            - generic [ref=f7e80]:
+              - img [ref=f7e82]
+              - generic [ref=f7e86]: Client
+            - generic [ref=f7e89]:
+              - img [ref=f7e91]
+              - generic [ref=f7e97]: Canal
+            - generic [ref=f7e100]:
+              - img [ref=f7e102]
+              - generic [ref=f7e105]: Verify
+            - generic [ref=f7e108]:
+              - img [ref=f7e110]
+              - generic [ref=f7e113]: Admin
+            - generic [ref=f7e116]:
+              - img [ref=f7e118]
+              - generic [ref=f7e123]: Listo
+          - generic [ref=f7e124]:
+            - generic [ref=f7e125]:
+              - heading "Crear Cliente" [level=2] [ref=f7e126]
+              - paragraph [ref=f7e127]: Configura el workspace de la empresa
+            - generic [ref=f7e128]:
+              - generic [ref=f7e129]:
+                - generic [ref=f7e130]: Nombre empresa *
+                - textbox "Acme Corp" [ref=f7e131]
+              - generic [ref=f7e132]:
+                - generic [ref=f7e133]: RUT
+                - textbox "76.123.456-7" [ref=f7e134]
+              - generic [ref=f7e135]:
+                - generic [ref=f7e136]: Plan
+                - combobox [ref=f7e137]:
+                  - option "Basic" [selected]
+                  - option "Pro"
+                  - option "Enterprise"
+              - button "Crear cliente" [disabled] [ref=f7e138] [cursor=pointer]:
+                - generic [ref=f7e139]: Crear cliente
+                - img [ref=f7e140]
+  - alert [ref=f7e142]

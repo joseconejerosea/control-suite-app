@@ -28,7 +28,7 @@ export interface SendResult {
 export class ResendEmailService {
   private readonly logger = new Logger(ResendEmailService.name);
   private readonly apiKey = process.env.RESEND_API_KEY;
-  private readonly from = 'Control Suite <noreply@controlsuite.app>';
+  private readonly from = 'Control Suite <noreply@controlsuitte.com>';
 
   async send(opts: EmailOptions): Promise<SendResult> {
     if (!this.apiKey) {

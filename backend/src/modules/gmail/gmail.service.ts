@@ -46,9 +46,13 @@ export class GmailService {
       access_type: 'offline',
       prompt: 'consent',
       // userinfo.email → para conocer la cuenta realmente conectada (no GMAIL_EMAIL).
+      // spreadsheets → SheetsService reutiliza estos MISMOS tokens para exportar
+      //   facturas (append/batchUpdate). Sin este scope, la exportación falla con
+      //   403 insufficient scope. El consentimiento es único (Gmail + Sheets).
       scope: [
         'https://www.googleapis.com/auth/gmail.readonly',
         'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/spreadsheets',
       ],
       state: this.buildState(clientId),
     });
@@ -144,6 +148,22 @@ export class GmailService {
         );
       }
     });
+  }
+
+  // Desconexión: borra los tokens OAuth del tenant. Scopeado por client_id explícito
+  // + runWithTenant para satisfacer el WITH CHECK de RLS (defensa en profundidad).
+  // Idempotente: si no había tokens, removed = 0.
+  async disconnectTenant(clientId: string): Promise<{ ok: boolean; removed: number }> {
+    if (!clientId) throw new UnauthorizedException('No tenant context to disconnect Gmail');
+    const rows = await runWithTenant(this.dataSource, clientId, () =>
+      this.dataSource.query(
+        `DELETE FROM gmail_tokens WHERE client_id = $1 RETURNING email`,
+        [clientId],
+      ),
+    );
+    const removed = Array.isArray(rows) ? rows.length : 0;
+    this.logger.log(`[GmailService] Gmail disconnected for client ${clientId} — ${removed} account(s) removed`);
+    return { ok: true, removed };
   }
 
   // Status del tenant del request (corre dentro del TenantInterceptor → ya scopeado).

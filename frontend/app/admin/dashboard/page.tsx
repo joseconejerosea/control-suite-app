@@ -9,31 +9,32 @@ export default function AdminDashboardPage() {
   const [overview, setOverview] = useState<any>(null);
   const [clients, setClients]   = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [period, setPeriod]     = useState("month");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ov, cl] = await Promise.all([
-        api.get<any>(`/dashboard/overview?period=${period}`).catch(() => null),
+      // KPIs globales REALES (agregado de todos los tenants) vienen de monitoring.
+      // /dashboard/overview es tenant-scoped → no sirve para la vista global.
+      const [mon, cl] = await Promise.all([
+        api.get<any>("/admin/monitoring").catch(() => null),
         api.get<any>("/clients").catch(() => []),
       ]);
-      setOverview(ov?.data ?? ov);
+      setOverview((mon?.data ?? mon)?.overview ?? null);
       setClients(Array.isArray(cl) ? cl : (cl?.data ?? []));
     } finally { setLoading(false); }
-  }, [period]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const k = overview?.kpis ?? {};
+  const o = overview ?? {};
 
   const kpis = [
-    { label: "Clientes activos",      value: clients.length || k.active_clients || "—", color: "#6366f1" },
-    { label: "Eventos (24h)",         value: k.events_received_24h ?? "—",              color: "#34b96e" },
-    { label: "Activaciones live",     value: k.total_activations ?? "—",               color: "#f59e0b" },
-    { label: "Docs procesados",       value: k.documents_populated ?? "—",             color: "#60a5fa" },
-    { label: "Promotores activos",    value: k.active_promoters ?? "—",                color: "#a78bfa" },
-    { label: "Campanas activas",      value: k.active_campaigns ?? "—",                color: "#e8353f" },
+    { label: "Clientes activos",   value: o.clients?.active ?? "—",    color: "#6366f1" },
+    { label: "Eventos (24h)",      value: o.events_24h?.total ?? "—",  color: "#34b96e" },
+    { label: "Activaciones live",  value: o.activations?.live ?? "—",  color: "#f59e0b" },
+    { label: "Docs (24h)",         value: o.docs_24h?.total ?? "—",    color: "#60a5fa" },
+    { label: "Errores (24h)",      value: o.events_24h?.failed ?? "—", color: "#a78bfa" },
+    { label: "Costo AI hoy",       value: o.ai_cost_hoy != null ? `$${Number(o.ai_cost_hoy).toFixed(4)}` : "—", color: "#e8353f" },
   ];
 
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("es-CL") : "—";
@@ -46,19 +47,10 @@ export default function AdminDashboardPage() {
             <h1 className="text-xl font-bold">Dashboard Global</h1>
             <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Vista panoramica de todos los clientes</p>
           </div>
-          <div className="flex gap-2">
-            <select value={period} onChange={e => setPeriod(e.target.value)}
-              style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none" }}>
-              <option value="day">Hoy</option>
-              <option value="week">Esta semana</option>
-              <option value="month">Este mes</option>
-              <option value="year">Este ano</option>
-            </select>
-            <button onClick={load} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs"
-              style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
-              <RefreshCw size={12} /> Refresh
-            </button>
-          </div>
+          <button onClick={load} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs"
+            style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
+            <RefreshCw size={12} /> Refresh
+          </button>
         </div>
 
         {loading && <div className="text-center py-12" style={{ color: "var(--muted-foreground)" }}>Cargando...</div>}
@@ -93,9 +85,9 @@ export default function AdminDashboardPage() {
                       <td className="px-4 py-3 text-sm" style={{ color: "var(--muted-foreground)" }}>{c.plan ?? "starter"}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{fmtDate(c.created_at)}</td>
                       <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                          style={{ background: c.activo !== false ? "rgba(42,157,92,0.15)" : "rgba(200,32,44,0.15)", color: c.activo !== false ? "#34b96e" : "#e8353f" }}>
-                          {c.activo !== false ? "Activo" : "Inactivo"}
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold capitalize"
+                          style={{ background: c.status === "active" ? "rgba(42,157,92,0.15)" : "rgba(200,32,44,0.15)", color: c.status === "active" ? "#34b96e" : "#e8353f" }}>
+                          {c.status ?? "—"}
                         </span>
                       </td>
                     </tr>

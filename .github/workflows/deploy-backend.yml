@@ -48,6 +48,10 @@ jobs:
               SUPABASE_URL="${{ secrets.PROD_SUPABASE_URL }}"
               SUPABASE_SERVICE_ROLE_KEY="${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}"
               ANTHROPIC_API_KEY="${{ secrets.PROD_ANTHROPIC_API_KEY }}"
+              GMAIL_CLIENT_ID="${{ secrets.PROD_GMAIL_CLIENT_ID }}"
+              GMAIL_CLIENT_SECRET="${{ secrets.PROD_GMAIL_CLIENT_SECRET }}"
+              GMAIL_REDIRECT_URI="${{ vars.PROD_GMAIL_REDIRECT_URI }}"
+              GOOGLE_SHEETS_ID="${{ vars.PROD_GOOGLE_SHEETS_ID }}"
               ENV_LABEL="prod"
               FRONTEND_PORT=3100
               NEXT_PUBLIC_API_URL="${{ vars.PROD_NEXT_PUBLIC_API_URL }}"
@@ -71,6 +75,10 @@ jobs:
               SUPABASE_URL="${{ secrets.DEV_SUPABASE_URL }}"
               SUPABASE_SERVICE_ROLE_KEY="${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}"
               ANTHROPIC_API_KEY="${{ secrets.DEV_ANTHROPIC_API_KEY }}"
+              GMAIL_CLIENT_ID="${{ secrets.DEV_GMAIL_CLIENT_ID }}"
+              GMAIL_CLIENT_SECRET="${{ secrets.DEV_GMAIL_CLIENT_SECRET }}"
+              GMAIL_REDIRECT_URI="${{ vars.DEV_GMAIL_REDIRECT_URI }}"
+              GOOGLE_SHEETS_ID="${{ vars.DEV_GOOGLE_SHEETS_ID }}"
               ENV_LABEL="dev"
               FRONTEND_PORT=3000
               NEXT_PUBLIC_API_URL="${{ vars.DEV_NEXT_PUBLIC_API_URL }}"
@@ -109,6 +117,10 @@ jobs:
             AI_MODEL=gpt-4o-mini
             AI_MAX_TOKENS=4096
             ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+            GMAIL_CLIENT_ID=$GMAIL_CLIENT_ID
+            GMAIL_CLIENT_SECRET=$GMAIL_CLIENT_SECRET
+            GMAIL_REDIRECT_URI=$GMAIL_REDIRECT_URI
+            GOOGLE_SHEETS_ID=$GOOGLE_SHEETS_ID
             META_APP_SECRET=${{ secrets.META_APP_SECRET }}
             WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
             WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
