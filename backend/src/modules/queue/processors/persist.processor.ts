@@ -6,6 +6,7 @@ import { Job } from 'bullmq';
 import { SheetsService } from '../../sheets/sheets.service';
 import { RendicionesService } from '../../rendiciones/rendiciones.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { normalizePhone } from '../../../common/utils/normalize-phone';
 
 @Processor('persist')
 export class PersistProcessor extends WorkerHost {
@@ -152,11 +153,16 @@ export class PersistProcessor extends WorkerHost {
   ): Promise<string | null> {
     const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone) : null;
     const email = typeof payload === 'object' ? payload?.email_from : null;
+    // Mismo criterio que el gate (isAuthorizedSender): comparar por DÍGITOS, no exacto.
+    // El `from` de Meta llega como dígitos (549...) pero el phone guardado tiene '+',
+    // espacios, etc. Con match exacto no encontraba al promotor → la factura quedaba
+    // sin persona (no entraba a rendición).
+    const digits = normalizePhone(phone);
 
-    if (phone) {
+    if (digits) {
       const rows = await this.dataSource.query(
-        `SELECT id FROM promoters WHERE client_id = $1 AND phone = $2 LIMIT 1`,
-        [clientId, phone],
+        `SELECT id FROM promoters WHERE client_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2 LIMIT 1`,
+        [clientId, digits],
       ).catch(() => []);
       if (rows.length) return rows[0].id;
     }
@@ -169,10 +175,10 @@ export class PersistProcessor extends WorkerHost {
       if (rows.length) return rows[0].id;
     }
 
-    if (canal === 'whatsapp' && phone) {
+    if (canal === 'whatsapp' && digits) {
       const rows = await this.dataSource.query(
-        `SELECT id FROM collaborators WHERE client_id = $1 AND phone = $2 LIMIT 1`,
-        [clientId, phone],
+        `SELECT id FROM collaborators WHERE client_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2 LIMIT 1`,
+        [clientId, digits],
       ).catch(() => []);
       if (rows.length) return rows[0].id;
     }

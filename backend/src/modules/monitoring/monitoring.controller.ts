@@ -22,7 +22,7 @@ export class MonitoringController {
       this.ds.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN status='in_progress' THEN 1 END) as live FROM activations`).catch(() => [{ total: 0, live: 0 }]),
       this.ds.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN processing_status='failed' THEN 1 END) as failed FROM eventos_crudos WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total: 0, failed: 0 }]),
       this.ds.query(`SELECT COUNT(*) as total FROM documents WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total: 0 }]),
-      this.ds.query(`SELECT COALESCE(SUM(costo_usd),0) as total_hoy FROM ai_costs_log WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total_hoy: 0 }]),
+      this.ds.query(`SELECT COALESCE(SUM(cost_usd),0) as total_hoy FROM ai_costs_log WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total_hoy: 0 }]),
     ]);
 
     const flows = await this.ds.query(`
