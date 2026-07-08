@@ -1,0 +1,30 @@
+- generic [active] [ref=f32e1]:
+  - generic [ref=f32e2]:
+    - generic [ref=f32e4]:
+      - generic [ref=f32e5]:
+        - img [ref=f32e7]
+        - generic [ref=f32e9]: Control Suite
+      - heading "Operations. Unified." [level=1] [ref=f32e10]:
+        - text: Operations.
+        - text: Unified.
+      - paragraph [ref=f32e11]: Complete platform for campaigns, activations, promoters, and AI-powered field operations.
+      - generic [ref=f32e12]: Client isolation & role-based access
+      - generic [ref=f32e14]: AI-powered document ingestion
+      - generic [ref=f32e16]: Real-time KPI dashboard
+    - generic [ref=f32e19]:
+      - heading "Sign in" [level=2] [ref=f32e20]
+      - paragraph [ref=f32e21]: Enter your credentials to continue
+      - generic [ref=f32e22]:
+        - generic [ref=f32e23]:
+          - generic [ref=f32e24]: Email
+          - textbox "you@company.com" [ref=f32e25]: admincliente.demo@controlsuite.com
+        - generic [ref=f32e26]:
+          - generic [ref=f32e27]: Password
+          - generic [ref=f32e28]:
+            - textbox "••••••••" [ref=f32e29]: AdminCliente1234!
+            - button [ref=f32e30] [cursor=pointer]:
+              - img [ref=f32e31]
+        - button "Sign in" [ref=f32e34] [cursor=pointer]:
+          - text: Sign in
+          - img [ref=f32e35]
+  - alert [ref=f32e37]

@@ -6,7 +6,8 @@ import {
 } from "lucide-react";
 import GmailConnect from "@/components/integrations/gmail-connect";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+// NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
+const API = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/api`;
 
 function getToken() {
   try { return localStorage.getItem("cs_token") ?? ""; } catch { return ""; }

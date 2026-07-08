@@ -1,0 +1,121 @@
+- generic [active] [ref=f20e1]:
+  - generic [ref=f20e2]:
+    - complementary [ref=f20e3]:
+      - generic [ref=f20e4]:
+        - img [ref=f20e6]
+        - generic [ref=f20e8]:
+          - generic [ref=f20e9]: Control Suite
+          - generic [ref=f20e10]: Operations Platform
+      - generic [ref=f20e12]:
+        - button "Administrador" [ref=f20e13] [cursor=pointer]
+        - button "Cliente" [ref=f20e14] [cursor=pointer]
+      - generic [ref=f20e15]:
+        - generic [ref=f20e16]: A
+        - generic [ref=f20e17]:
+          - generic [ref=f20e18]: admincliente.demo@controlsuite.com
+          - generic [ref=f20e19]: admin cliente
+      - navigation [ref=f20e20]:
+        - generic [ref=f20e21]:
+          - generic [ref=f20e22]: General
+          - link "Dashboard" [ref=f20e23] [cursor=pointer]:
+            - /url: /client/dashboard
+            - img [ref=f20e24]
+            - generic [ref=f20e29]: Dashboard
+        - generic [ref=f20e30]:
+          - generic [ref=f20e31]: Operación
+          - link "Reportes Internos" [ref=f20e32] [cursor=pointer]:
+            - /url: /client/reportes
+            - img [ref=f20e33]
+            - generic [ref=f20e36]: Reportes Internos
+          - link "Documentos por revisar" [ref=f20e37] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+            - img [ref=f20e38]
+            - generic [ref=f20e40]: Documentos por revisar
+          - link "Inventario POP" [ref=f20e41] [cursor=pointer]:
+            - /url: /client/inventario
+            - img [ref=f20e42]
+            - generic [ref=f20e46]: Inventario POP
+          - link "Rendiciones" [ref=f20e47] [cursor=pointer]:
+            - /url: /client/rendiciones
+            - img [ref=f20e48]
+            - generic [ref=f20e51]: Rendiciones
+            - img [ref=f20e52]
+          - link "Terreno" [ref=f20e54] [cursor=pointer]:
+            - /url: /client/terreno
+            - img [ref=f20e55]
+            - generic [ref=f20e61]: Terreno
+          - link "Calendario" [ref=f20e62] [cursor=pointer]:
+            - /url: /client/calendario
+            - img [ref=f20e63]
+            - generic [ref=f20e65]: Calendario
+          - link "Proyectos" [ref=f20e66] [cursor=pointer]:
+            - /url: /client/projects
+            - img [ref=f20e67]
+            - generic [ref=f20e69]: Proyectos
+          - link "Campañas" [ref=f20e70] [cursor=pointer]:
+            - /url: /client/campaigns
+            - img [ref=f20e71]
+            - generic [ref=f20e74]: Campañas
+          - link "Ubicaciones" [ref=f20e75] [cursor=pointer]:
+            - /url: /client/locations
+            - img [ref=f20e76]
+            - generic [ref=f20e79]: Ubicaciones
+          - link "Promotores" [ref=f20e80] [cursor=pointer]:
+            - /url: /client/promoters
+            - img [ref=f20e81]
+            - generic [ref=f20e86]: Promotores
+          - link "Documentos" [ref=f20e87] [cursor=pointer]:
+            - /url: /client/documents
+            - img [ref=f20e88]
+            - generic [ref=f20e91]: Documentos
+          - link "Colaboradores" [ref=f20e92] [cursor=pointer]:
+            - /url: /client/collaborators
+            - img [ref=f20e93]
+            - generic [ref=f20e97]: Colaboradores
+        - generic [ref=f20e98]:
+          - generic [ref=f20e99]: Configuración
+          - link "Configuración" [ref=f20e100] [cursor=pointer]:
+            - /url: /client/config
+            - img [ref=f20e101]
+            - generic [ref=f20e104]: Configuración
+          - link "Equivalencias OCR" [ref=f20e105] [cursor=pointer]:
+            - /url: /client/equivalencias
+            - img [ref=f20e106]
+            - generic [ref=f20e111]: Equivalencias OCR
+        - generic [ref=f20e112]:
+          - generic [ref=f20e113]: IA
+          - link "Control Mind" [ref=f20e114] [cursor=pointer]:
+            - /url: /client/mind
+            - img [ref=f20e115]
+            - generic [ref=f20e123]: Control Mind
+      - button "Sign out" [ref=f20e125] [cursor=pointer]
+    - generic [ref=f20e126]:
+      - banner [ref=f20e127]:
+        - heading "Control Suite" [level=1] [ref=f20e128]
+        - generic [ref=f20e129]:
+          - button [ref=f20e130] [cursor=pointer]:
+            - img [ref=f20e131]
+          - generic [ref=f20e135]: AD
+          - button "Sign out" [ref=f20e136] [cursor=pointer]:
+            - img [ref=f20e137]
+            - text: Sign out
+      - main [ref=f20e140]:
+        - generic [ref=f20e141]:
+          - generic [ref=f20e142]:
+            - heading "Rendiciones" [level=1] [ref=f20e143]
+            - paragraph [ref=f20e144]: Agrupación automática de gastos por persona, proyecto y semana
+          - table [ref=f20e146]:
+            - rowgroup [ref=f20e147]:
+              - row "Persona Proyecto Período Items Monto % Presupuesto Estado Acciones" [ref=f20e148]:
+                - columnheader "Persona" [ref=f20e149]
+                - columnheader "Proyecto" [ref=f20e150]
+                - columnheader "Período" [ref=f20e151]
+                - columnheader "Items" [ref=f20e152]
+                - columnheader "Monto" [ref=f20e153]
+                - columnheader "% Presupuesto" [ref=f20e154]
+                - columnheader "Estado" [ref=f20e155]
+                - columnheader "Acciones" [ref=f20e156]
+            - rowgroup [ref=f20e157]:
+              - row "Cargando..." [ref=f20e158]:
+                - cell "Cargando..." [ref=f20e159]
+  - alert [ref=f20e160]

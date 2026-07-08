@@ -2,7 +2,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Mail, Check, Loader2, Unplug } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+// NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts, que hace
+// `${BASE}/api${path}`). El /api se agrega acá — si se asume que la env ya lo
+// trae, en dev/prod se pierde y todo da 404.
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const API = `${BASE}/api`;
 
 function getToken() {
   try { return localStorage.getItem("cs_token") ?? ""; } catch { return ""; }

@@ -1,0 +1,95 @@
+- generic [active] [ref=f14e1]:
+  - generic [ref=f14e2]:
+    - complementary [ref=f14e3]:
+      - generic [ref=f14e4]:
+        - img [ref=f14e6]
+        - generic [ref=f14e8]:
+          - generic [ref=f14e9]: Control Suite
+          - generic [ref=f14e10]: Operations Platform
+      - generic [ref=f14e11]:
+        - generic [ref=f14e12]: A
+        - generic [ref=f14e13]:
+          - generic [ref=f14e14]: admin@controlsuite.com
+          - generic [ref=f14e15]: super admin
+      - navigation [ref=f14e16]:
+        - generic [ref=f14e17]:
+          - link "Dashboard" [ref=f14e18] [cursor=pointer]:
+            - /url: /admin/dashboard
+            - img [ref=f14e19]
+            - generic [ref=f14e24]: Dashboard
+          - link "Onboarding" [ref=f14e25] [cursor=pointer]:
+            - /url: /admin/onboarding
+            - img [ref=f14e26]
+            - generic [ref=f14e30]: Onboarding
+          - link "Clientes" [ref=f14e31] [cursor=pointer]:
+            - /url: /admin/clientes
+            - img [ref=f14e32]
+            - generic [ref=f14e37]: Clientes
+          - link "Monitoreo" [ref=f14e38] [cursor=pointer]:
+            - /url: /admin/monitoring
+            - img [ref=f14e39]
+            - generic [ref=f14e41]: Monitoreo
+          - link "Tickets" [ref=f14e42] [cursor=pointer]:
+            - /url: /admin/tickets
+            - img [ref=f14e43]
+            - generic [ref=f14e46]: Tickets
+          - link "Auditoría AI" [ref=f14e47] [cursor=pointer]:
+            - /url: /admin/audit
+            - img [ref=f14e48]
+            - generic [ref=f14e51]: Auditoría AI
+          - link "Usuarios" [ref=f14e52] [cursor=pointer]:
+            - /url: /admin/usuarios
+            - img [ref=f14e53]
+            - generic [ref=f14e57]: Usuarios
+            - img [ref=f14e58]
+      - button "Sign out" [ref=f14e61] [cursor=pointer]
+    - generic [ref=f14e62]:
+      - banner [ref=f14e63]:
+        - heading "Usuarios por Cliente" [level=1] [ref=f14e64]
+        - generic [ref=f14e65]:
+          - button [ref=f14e66] [cursor=pointer]:
+            - img [ref=f14e67]
+          - generic [ref=f14e71]: AD
+          - button "Sign out" [ref=f14e72] [cursor=pointer]:
+            - img [ref=f14e73]
+            - text: Sign out
+      - main [ref=f14e76]:
+        - generic [ref=f14e77]:
+          - generic [ref=f14e79]:
+            - heading "Usuarios por Tenant" [level=1] [ref=f14e80]
+            - paragraph [ref=f14e81]: Gestión de usuarios de cada cliente
+          - generic [ref=f14e82]:
+            - combobox [ref=f14e83]:
+              - option "Seleccionar cliente..."
+              - option "AAA (onboarding)"
+              - option "AAA (onboarding)"
+              - option "Control Suite Demo (active)" [selected]
+            - button "+ Crear usuario" [ref=f14e88] [cursor=pointer]
+          - generic [ref=f14e89]:
+            - generic [ref=f14e90]:
+              - generic [ref=f14e91]: "2"
+              - generic [ref=f14e92]: Total
+            - generic [ref=f14e93]:
+              - generic [ref=f14e94]: "2"
+              - generic [ref=f14e95]: Activos
+            - generic [ref=f14e96]:
+              - generic [ref=f14e97]: "1"
+              - generic [ref=f14e98]: Admins
+            - generic [ref=f14e99]:
+              - generic [ref=f14e100]: "0"
+              - generic [ref=f14e101]: Inactivos
+          - textbox "Buscar por email o nombre..." [ref=f14e103]
+          - table [ref=f14e105]:
+            - rowgroup [ref=f14e106]:
+              - row "Email Nombre Teléfono Rol Estado Creado Acciones" [ref=f14e107]:
+                - columnheader "Email" [ref=f14e108]
+                - columnheader "Nombre" [ref=f14e109]
+                - columnheader "Teléfono" [ref=f14e110]
+                - columnheader "Rol" [ref=f14e111]
+                - columnheader "Estado" [ref=f14e112]
+                - columnheader "Creado" [ref=f14e113]
+                - columnheader "Acciones" [ref=f14e114]
+            - rowgroup [ref=f14e115]:
+              - row "Cargando..." [ref=f14e153]:
+                - cell "Cargando..." [ref=f14e154]
+  - alert [ref=f14e87]

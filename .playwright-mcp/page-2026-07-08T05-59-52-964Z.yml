@@ -1,0 +1,80 @@
+- generic [active] [ref=f34e1]:
+  - generic [ref=f34e2]:
+    - complementary [ref=f34e3]:
+      - generic [ref=f34e4]:
+        - img [ref=f34e6]
+        - generic [ref=f34e8]:
+          - generic [ref=f34e9]: Control Suite
+          - generic [ref=f34e10]: Operations Platform
+      - generic [ref=f34e11]:
+        - generic [ref=f34e12]: A
+        - generic [ref=f34e13]:
+          - generic [ref=f34e14]: admin@controlsuite.com
+          - generic [ref=f34e15]: super admin
+      - navigation [ref=f34e16]:
+        - generic [ref=f34e17]:
+          - link "Dashboard" [ref=f34e18] [cursor=pointer]:
+            - /url: /admin/dashboard
+            - img [ref=f34e19]
+            - generic [ref=f34e24]: Dashboard
+          - link "Onboarding" [ref=f34e25] [cursor=pointer]:
+            - /url: /admin/onboarding
+            - img [ref=f34e26]
+            - generic [ref=f34e30]: Onboarding
+          - link "Clientes" [ref=f34e31] [cursor=pointer]:
+            - /url: /admin/clientes
+            - img [ref=f34e32]
+            - generic [ref=f34e37]: Clientes
+          - link "Monitoreo" [ref=f34e38] [cursor=pointer]:
+            - /url: /admin/monitoring
+            - img [ref=f34e39]
+            - generic [ref=f34e41]: Monitoreo
+          - link "Tickets" [ref=f34e42] [cursor=pointer]:
+            - /url: /admin/tickets
+            - img [ref=f34e43]
+            - generic [ref=f34e46]: Tickets
+            - img [ref=f34e47]
+          - link "Auditoría AI" [ref=f34e49] [cursor=pointer]:
+            - /url: /admin/audit
+            - img [ref=f34e50]
+            - generic [ref=f34e53]: Auditoría AI
+          - link "Usuarios" [ref=f34e54] [cursor=pointer]:
+            - /url: /admin/usuarios
+            - img [ref=f34e55]
+            - generic [ref=f34e59]: Usuarios
+      - button "Sign out" [ref=f34e61] [cursor=pointer]
+    - generic [ref=f34e62]:
+      - banner [ref=f34e63]:
+        - heading "Tickets" [level=1] [ref=f34e64]
+        - generic [ref=f34e65]:
+          - button [ref=f34e66] [cursor=pointer]:
+            - img [ref=f34e67]
+          - generic [ref=f34e71]: AD
+          - button "Sign out" [ref=f34e72] [cursor=pointer]:
+            - img [ref=f34e73]
+            - text: Sign out
+      - main [ref=f34e76]:
+        - generic [ref=f34e77]:
+          - generic [ref=f34e78]:
+            - generic [ref=f34e79]:
+              - heading "Tickets de Soporte" [level=1] [ref=f34e80]
+              - paragraph [ref=f34e81]: Solicitudes de soporte de clientes
+            - generic [ref=f34e82]:
+              - button "Todos" [ref=f34e83] [cursor=pointer]
+              - button "abierto" [ref=f34e84] [cursor=pointer]
+              - button "en_proceso" [ref=f34e85] [cursor=pointer]
+              - button "cerrado" [ref=f34e86] [cursor=pointer]
+          - table [ref=f34e88]:
+            - rowgroup [ref=f34e89]:
+              - row "# Cliente Tipo Prioridad Estado Fecha Accion" [ref=f34e90]:
+                - columnheader "#" [ref=f34e91]
+                - columnheader "Cliente" [ref=f34e92]
+                - columnheader "Tipo" [ref=f34e93]
+                - columnheader "Prioridad" [ref=f34e94]
+                - columnheader "Estado" [ref=f34e95]
+                - columnheader "Fecha" [ref=f34e96]
+                - columnheader "Accion" [ref=f34e97]
+            - rowgroup [ref=f34e98]:
+              - row "Cargando..." [ref=f34e99]:
+                - cell "Cargando..." [ref=f34e100]
+  - alert [ref=f34e101]

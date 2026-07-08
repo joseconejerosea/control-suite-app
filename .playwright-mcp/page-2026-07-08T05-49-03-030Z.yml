@@ -1,0 +1,167 @@
+- generic [active] [ref=f17e1]:
+  - generic [ref=f17e2]:
+    - complementary [ref=f17e3]:
+      - generic [ref=f17e4]:
+        - img [ref=f17e6]
+        - generic [ref=f17e8]:
+          - generic [ref=f17e9]: Control Suite
+          - generic [ref=f17e10]: Operations Platform
+      - generic [ref=f17e12]:
+        - button "Administrador" [ref=f17e13] [cursor=pointer]
+        - button "Cliente" [ref=f17e14] [cursor=pointer]
+      - generic [ref=f17e15]:
+        - generic [ref=f17e16]: A
+        - generic [ref=f17e17]:
+          - generic [ref=f17e18]: admincliente.demo@controlsuite.com
+          - generic [ref=f17e19]: admin cliente
+      - navigation [ref=f17e20]:
+        - generic [ref=f17e21]:
+          - generic [ref=f17e22]: General
+          - link "Dashboard" [ref=f17e23] [cursor=pointer]:
+            - /url: /client/dashboard
+            - img [ref=f17e24]
+            - generic [ref=f17e29]: Dashboard
+        - generic [ref=f17e30]:
+          - generic [ref=f17e31]: Operación
+          - link "Reportes Internos" [ref=f17e32] [cursor=pointer]:
+            - /url: /client/reportes
+            - img [ref=f17e33]
+            - generic [ref=f17e36]: Reportes Internos
+            - img [ref=f17e37]
+          - link "Documentos por revisar" [ref=f17e39] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+            - img [ref=f17e40]
+            - generic [ref=f17e42]: Documentos por revisar
+          - link "Inventario POP" [ref=f17e43] [cursor=pointer]:
+            - /url: /client/inventario
+            - img [ref=f17e44]
+            - generic [ref=f17e48]: Inventario POP
+          - link "Rendiciones" [ref=f17e49] [cursor=pointer]:
+            - /url: /client/rendiciones
+            - img [ref=f17e50]
+            - generic [ref=f17e53]: Rendiciones
+          - link "Terreno" [ref=f17e54] [cursor=pointer]:
+            - /url: /client/terreno
+            - img [ref=f17e55]
+            - generic [ref=f17e61]: Terreno
+          - link "Calendario" [ref=f17e62] [cursor=pointer]:
+            - /url: /client/calendario
+            - img [ref=f17e63]
+            - generic [ref=f17e65]: Calendario
+          - link "Proyectos" [ref=f17e66] [cursor=pointer]:
+            - /url: /client/projects
+            - img [ref=f17e67]
+            - generic [ref=f17e69]: Proyectos
+          - link "Campañas" [ref=f17e70] [cursor=pointer]:
+            - /url: /client/campaigns
+            - img [ref=f17e71]
+            - generic [ref=f17e74]: Campañas
+          - link "Ubicaciones" [ref=f17e75] [cursor=pointer]:
+            - /url: /client/locations
+            - img [ref=f17e76]
+            - generic [ref=f17e79]: Ubicaciones
+          - link "Promotores" [ref=f17e80] [cursor=pointer]:
+            - /url: /client/promoters
+            - img [ref=f17e81]
+            - generic [ref=f17e86]: Promotores
+          - link "Documentos" [ref=f17e87] [cursor=pointer]:
+            - /url: /client/documents
+            - img [ref=f17e88]
+            - generic [ref=f17e91]: Documentos
+          - link "Colaboradores" [ref=f17e92] [cursor=pointer]:
+            - /url: /client/collaborators
+            - img [ref=f17e93]
+            - generic [ref=f17e97]: Colaboradores
+        - generic [ref=f17e98]:
+          - generic [ref=f17e99]: Configuración
+          - link "Configuración" [ref=f17e100] [cursor=pointer]:
+            - /url: /client/config
+            - img [ref=f17e101]
+            - generic [ref=f17e104]: Configuración
+          - link "Equivalencias OCR" [ref=f17e105] [cursor=pointer]:
+            - /url: /client/equivalencias
+            - img [ref=f17e106]
+            - generic [ref=f17e111]: Equivalencias OCR
+        - generic [ref=f17e112]:
+          - generic [ref=f17e113]: IA
+          - link "Control Mind" [ref=f17e114] [cursor=pointer]:
+            - /url: /client/mind
+            - img [ref=f17e115]
+            - generic [ref=f17e123]: Control Mind
+      - button "Sign out" [ref=f17e125] [cursor=pointer]
+    - generic [ref=f17e126]:
+      - banner [ref=f17e127]:
+        - heading "Reportes Internos" [level=1] [ref=f17e128]
+        - generic [ref=f17e129]:
+          - button [ref=f17e130] [cursor=pointer]:
+            - img [ref=f17e131]
+          - generic [ref=f17e135]: AD
+          - button "Sign out" [ref=f17e136] [cursor=pointer]:
+            - img [ref=f17e137]
+            - text: Sign out
+      - main [ref=f17e140]:
+        - generic [ref=f17e141]:
+          - generic [ref=f17e142]:
+            - generic [ref=f17e143]:
+              - heading "Reportes Internos" [level=1] [ref=f17e144]
+              - paragraph [ref=f17e145]: Documentos ingresados por WhatsApp, email o manual
+            - button "Actualizar" [ref=f17e146] [cursor=pointer]:
+              - img [ref=f17e147]
+              - text: Actualizar
+          - generic [ref=f17e152]:
+            - button "gastos" [ref=f17e153] [cursor=pointer]
+            - button "ventas" [ref=f17e154] [cursor=pointer]
+            - button "costos" [ref=f17e155] [cursor=pointer]
+          - generic [ref=f17e156]:
+            - generic [ref=f17e157]:
+              - generic [ref=f17e158]:
+                - generic [ref=f17e159]: —
+                - generic [ref=f17e160]: Total gastos
+              - generic [ref=f17e161]:
+                - generic [ref=f17e162]: "0"
+                - generic [ref=f17e163]: Registros
+              - generic [ref=f17e164]:
+                - generic [ref=f17e165]: —
+                - generic [ref=f17e166]: Confianza IA
+            - generic [ref=f17e167]:
+              - button "Subir doc IA" [ref=f17e168] [cursor=pointer]:
+                - img [ref=f17e169]
+                - text: Subir doc IA
+              - button "Manual" [ref=f17e172] [cursor=pointer]:
+                - img [ref=f17e173]
+                - text: Manual
+              - button "Exportar" [ref=f17e174] [cursor=pointer]:
+                - img [ref=f17e175]
+                - text: Exportar
+            - table [ref=f17e179]:
+              - rowgroup [ref=f17e180]:
+                - row "Fecha Descripcion Proveedor Monto Origen Confianza" [ref=f17e181]:
+                  - columnheader "Fecha" [ref=f17e182]
+                  - columnheader "Descripcion" [ref=f17e183]
+                  - columnheader "Proveedor" [ref=f17e184]
+                  - columnheader "Monto" [ref=f17e185]
+                  - columnheader "Origen" [ref=f17e186]
+                  - columnheader "Confianza" [ref=f17e187]
+              - rowgroup [ref=f17e188]:
+                - row "Sin registros. Sube un documento o agrega manualmente." [ref=f17e189]:
+                  - cell "Sin registros. Sube un documento o agrega manualmente." [ref=f17e190]
+            - generic [ref=f17e191]:
+              - generic [ref=f17e192]:
+                - generic [ref=f17e193]: Por fuente
+                - generic [ref=f17e194]:
+                  - generic [ref=f17e196]:
+                    - generic [ref=f17e197]: email
+                    - generic [ref=f17e198]: "0"
+                  - generic [ref=f17e201]:
+                    - generic [ref=f17e202]: whatsapp
+                    - generic [ref=f17e203]: "0"
+                  - generic [ref=f17e206]:
+                    - generic [ref=f17e207]: manual
+                    - generic [ref=f17e208]: "0"
+              - generic [ref=f17e210]:
+                - generic [ref=f17e211]: Total
+                - generic [ref=f17e212]: —
+              - generic [ref=f17e213]:
+                - generic [ref=f17e214]: Alertas IA
+                - generic [ref=f17e215]: Documentos con confianza baja apareceran aqui para revision.
+  - alert [ref=f17e216]
