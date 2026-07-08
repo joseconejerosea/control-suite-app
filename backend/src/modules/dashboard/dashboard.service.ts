@@ -30,11 +30,22 @@ export class DashboardService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   private resolvePeriod(filters: DashboardFiltersDto): { from: string; to: string } {
-    const to = filters.to ?? new Date().toISOString().slice(0, 10);
-    const defaultFromDate = new Date();
-    defaultFromDate.setDate(defaultFromDate.getDate() - 30);
-    const from = filters.from ?? defaultFromDate.toISOString().slice(0, 10);
-    return { from, to };
+    const today = new Date();
+    const to = filters.to ?? today.toISOString().slice(0, 10);
+
+    // `from` explícito manda. Si no, se deriva del período semántico (day/week/
+    // month/year). Default: últimos 30 días (equivale a 'month').
+    if (filters.from) return { from: filters.from, to };
+
+    const start = new Date(today);
+    switch (filters.period) {
+      case 'day':   break;                              // hoy → from = to
+      case 'week':  start.setDate(today.getDate() - 7); break;
+      case 'year':  start.setDate(today.getDate() - 365); break;
+      case 'month':
+      default:      start.setDate(today.getDate() - 30); break;
+    }
+    return { from: start.toISOString().slice(0, 10), to };
   }
 
   async overview(clientId: string, filters: DashboardFiltersDto): Promise<DashboardOverview> {

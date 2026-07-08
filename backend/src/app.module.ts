@@ -50,6 +50,7 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { ProjectResolverModule } from './modules/project-resolver/project-resolver.module';
 import { F1ReviewModule } from './modules/f1-review/f1-review.module';
 import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module';
+import { SupportModule } from './modules/support/support.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module
     ProjectResolverModule,
     F1ReviewModule,
     ProjectInboxModule,
+    SupportModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

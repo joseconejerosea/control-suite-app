@@ -99,12 +99,14 @@ export class AuditController {
   @Get('admin/audit/actions')
   @Roles(UserRole.SUPERADMIN)
   async getActionLog() {
+    // Log de ACCIONES CRÍTICAS = audit_logs (lo que escribe el AuditInterceptor),
+    // no eventos_crudos. El front lee action / entity / user_email / created_at.
     return this.ds.query(
-      `SELECT e.id, e.canal, e.processing_status, e.created_at,
-         c.nombre AS client_nombre
-       FROM eventos_crudos e
-       LEFT JOIN clients c ON c.id = e.client_id
-       ORDER BY e.created_at DESC
+      `SELECT al.action, al.entity, al.entity_id, al.created_at,
+         u.email AS user_email
+       FROM audit_logs al
+       LEFT JOIN users u ON u.id = al.user_id
+       ORDER BY al.created_at DESC
        LIMIT 100`,
     ).catch(() => []);
   }

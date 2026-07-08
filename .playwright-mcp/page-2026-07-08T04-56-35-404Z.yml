@@ -1,0 +1,95 @@
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - complementary [ref=f6e3]:
+      - generic [ref=f6e4]:
+        - img [ref=f6e6]
+        - generic [ref=f6e8]:
+          - generic [ref=f6e9]: Control Suite
+          - generic [ref=f6e10]: Operations Platform
+      - generic [ref=f6e141]:
+        - generic [ref=f6e142]: A
+        - generic [ref=f6e143]:
+          - generic [ref=f6e144]: admin@controlsuite.com
+          - generic [ref=f6e145]: super admin
+      - navigation [ref=f6e11]:
+        - generic [ref=f6e146]:
+          - link "Dashboard" [ref=f6e147] [cursor=pointer]:
+            - /url: /admin/dashboard
+            - img [ref=f6e148]
+            - generic [ref=f6e153]: Dashboard
+          - link "Onboarding" [ref=f6e154] [cursor=pointer]:
+            - /url: /admin/onboarding
+            - img [ref=f6e155]
+            - generic [ref=f6e159]: Onboarding
+          - link "Clientes" [ref=f6e160] [cursor=pointer]:
+            - /url: /admin/clientes
+            - img [ref=f6e161]
+            - generic [ref=f6e166]: Clientes
+          - link "Monitoreo" [ref=f6e167] [cursor=pointer]:
+            - /url: /admin/monitoring
+            - img [ref=f6e168]
+            - generic [ref=f6e170]: Monitoreo
+          - link "Tickets" [ref=f6e171] [cursor=pointer]:
+            - /url: /admin/tickets
+            - img [ref=f6e172]
+            - generic [ref=f6e175]: Tickets
+          - link "Auditoría AI" [ref=f6e176] [cursor=pointer]:
+            - /url: /admin/audit
+            - img [ref=f6e177]
+            - generic [ref=f6e180]: Auditoría AI
+          - link "Usuarios" [ref=f6e181] [cursor=pointer]:
+            - /url: /admin/usuarios
+            - img [ref=f6e182]
+            - generic [ref=f6e186]: Usuarios
+            - img [ref=f6e187]
+      - button "Sign out" [ref=f6e114] [cursor=pointer]
+    - generic [ref=f6e115]:
+      - banner [ref=f6e116]:
+        - heading "Usuarios por Cliente" [level=1] [ref=f6e117]
+        - generic [ref=f6e118]:
+          - button [ref=f6e119] [cursor=pointer]:
+            - img [ref=f6e120]
+          - generic [ref=f6e124]: AD
+          - button "Sign out" [ref=f6e125] [cursor=pointer]:
+            - img [ref=f6e126]
+            - text: Sign out
+      - main [ref=f6e129]:
+        - generic [ref=f6e130]:
+          - generic [ref=f6e132]:
+            - heading "Usuarios por Tenant" [level=1] [ref=f6e133]
+            - paragraph [ref=f6e134]: Gestión de usuarios de cada cliente
+          - generic [ref=f6e135]:
+            - combobox [ref=f6e136]:
+              - option "Seleccionar cliente..."
+              - option "AAA (onboarding)"
+              - option "AAA (onboarding)"
+              - option "Control Suite Demo (active)" [selected]
+            - button "+ Crear usuario" [ref=f6e189] [cursor=pointer]
+          - generic [ref=f6e190]:
+            - generic [ref=f6e191]:
+              - generic [ref=f6e192]: "0"
+              - generic [ref=f6e193]: Total
+            - generic [ref=f6e194]:
+              - generic [ref=f6e195]: "0"
+              - generic [ref=f6e196]: Activos
+            - generic [ref=f6e197]:
+              - generic [ref=f6e198]: "0"
+              - generic [ref=f6e199]: Admins
+            - generic [ref=f6e200]:
+              - generic [ref=f6e201]: "0"
+              - generic [ref=f6e202]: Inactivos
+          - textbox "Buscar por email o nombre..." [ref=f6e204]
+          - table [ref=f6e206]:
+            - rowgroup [ref=f6e207]:
+              - row "Email Nombre Teléfono Rol Estado Creado Acciones" [ref=f6e208]:
+                - columnheader "Email" [ref=f6e209]
+                - columnheader "Nombre" [ref=f6e210]
+                - columnheader "Teléfono" [ref=f6e211]
+                - columnheader "Rol" [ref=f6e212]
+                - columnheader "Estado" [ref=f6e213]
+                - columnheader "Creado" [ref=f6e214]
+                - columnheader "Acciones" [ref=f6e215]
+            - rowgroup [ref=f6e216]:
+              - row "Cargando..." [ref=f6e217]:
+                - cell "Cargando..." [ref=f6e218]
+  - alert [ref=f6e140]

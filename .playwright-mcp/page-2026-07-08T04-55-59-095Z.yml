@@ -1,0 +1,103 @@
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - complementary [ref=f6e3]:
+      - generic [ref=f6e4]:
+        - img [ref=f6e6]
+        - generic [ref=f6e8]:
+          - generic [ref=f6e9]: Control Suite
+          - generic [ref=f6e10]: Operations Platform
+      - navigation [ref=f6e11]:
+        - generic [ref=f6e12]:
+          - generic [ref=f6e13]: General
+          - link "Dashboard" [ref=f6e14] [cursor=pointer]:
+            - /url: /client/dashboard
+            - img [ref=f6e15]
+            - generic [ref=f6e20]: Dashboard
+        - generic [ref=f6e21]:
+          - generic [ref=f6e22]: Operación
+          - link "Reportes Internos" [ref=f6e23] [cursor=pointer]:
+            - /url: /client/reportes
+            - img [ref=f6e24]
+            - generic [ref=f6e27]: Reportes Internos
+          - link "Documentos por revisar" [ref=f6e28] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+            - img [ref=f6e29]
+            - generic [ref=f6e31]: Documentos por revisar
+          - link "Inventario POP" [ref=f6e32] [cursor=pointer]:
+            - /url: /client/inventario
+            - img [ref=f6e33]
+            - generic [ref=f6e37]: Inventario POP
+          - link "Rendiciones" [ref=f6e38] [cursor=pointer]:
+            - /url: /client/rendiciones
+            - img [ref=f6e39]
+            - generic [ref=f6e42]: Rendiciones
+          - link "Terreno" [ref=f6e43] [cursor=pointer]:
+            - /url: /client/terreno
+            - img [ref=f6e44]
+            - generic [ref=f6e50]: Terreno
+          - link "Calendario" [ref=f6e51] [cursor=pointer]:
+            - /url: /client/calendario
+            - img [ref=f6e52]
+            - generic [ref=f6e54]: Calendario
+          - link "Proyectos" [ref=f6e55] [cursor=pointer]:
+            - /url: /client/projects
+            - img [ref=f6e56]
+            - generic [ref=f6e58]: Proyectos
+          - link "Campañas" [ref=f6e59] [cursor=pointer]:
+            - /url: /client/campaigns
+            - img [ref=f6e60]
+            - generic [ref=f6e63]: Campañas
+          - link "Ubicaciones" [ref=f6e64] [cursor=pointer]:
+            - /url: /client/locations
+            - img [ref=f6e65]
+            - generic [ref=f6e68]: Ubicaciones
+          - link "Promotores" [ref=f6e69] [cursor=pointer]:
+            - /url: /client/promoters
+            - img [ref=f6e70]
+            - generic [ref=f6e75]: Promotores
+          - link "Documentos" [ref=f6e76] [cursor=pointer]:
+            - /url: /client/documents
+            - img [ref=f6e77]
+            - generic [ref=f6e80]: Documentos
+          - link "Colaboradores" [ref=f6e81] [cursor=pointer]:
+            - /url: /client/collaborators
+            - img [ref=f6e82]
+            - generic [ref=f6e86]: Colaboradores
+        - generic [ref=f6e87]:
+          - generic [ref=f6e88]: Configuración
+          - link "Configuración" [ref=f6e89] [cursor=pointer]:
+            - /url: /client/config
+            - img [ref=f6e90]
+            - generic [ref=f6e93]: Configuración
+          - link "Equivalencias OCR" [ref=f6e94] [cursor=pointer]:
+            - /url: /client/equivalencias
+            - img [ref=f6e95]
+            - generic [ref=f6e100]: Equivalencias OCR
+        - generic [ref=f6e101]:
+          - generic [ref=f6e102]: IA
+          - link "Control Mind" [ref=f6e103] [cursor=pointer]:
+            - /url: /client/mind
+            - img [ref=f6e104]
+            - generic [ref=f6e112]: Control Mind
+      - button "Sign out" [ref=f6e114] [cursor=pointer]
+    - generic [ref=f6e115]:
+      - banner [ref=f6e116]:
+        - heading "Usuarios por Cliente" [level=1] [ref=f6e117]
+        - generic [ref=f6e118]:
+          - button [ref=f6e119] [cursor=pointer]:
+            - img [ref=f6e120]
+          - generic [ref=f6e124]: CS
+          - button "Sign out" [ref=f6e125] [cursor=pointer]:
+            - img [ref=f6e126]
+            - text: Sign out
+      - main [ref=f6e129]:
+        - generic [ref=f6e130]:
+          - generic [ref=f6e132]:
+            - heading "Usuarios por Tenant" [level=1] [ref=f6e133]
+            - paragraph [ref=f6e134]: Gestión de usuarios de cada cliente
+          - combobox [ref=f6e136]:
+            - option "Seleccionar cliente..." [selected]
+          - generic [ref=f6e137]:
+            - generic [ref=f6e138]: 👥
+            - paragraph [ref=f6e139]: Selecciona un cliente para ver sus usuarios
+  - alert [ref=f6e140]
