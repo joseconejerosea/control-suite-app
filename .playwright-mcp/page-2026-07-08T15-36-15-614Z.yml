@@ -1,0 +1,154 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - complementary [ref=f3e3]:
+      - generic [ref=f3e4]:
+        - img [ref=f3e6]
+        - generic [ref=f3e8]:
+          - generic [ref=f3e9]: Control Suite
+          - generic [ref=f3e10]: Operations Platform
+      - generic [ref=f3e12]:
+        - button "Administrador" [ref=f3e13] [cursor=pointer]
+        - button "Cliente" [ref=f3e14] [cursor=pointer]
+      - generic [ref=f3e15]:
+        - generic [ref=f3e16]: A
+        - generic [ref=f3e17]:
+          - generic [ref=f3e18]: admincliente.demo@controlsuite.com
+          - generic [ref=f3e19]: admin cliente
+      - navigation [ref=f3e20]:
+        - generic [ref=f3e21]:
+          - generic [ref=f3e22]: General
+          - link "Dashboard" [ref=f3e23] [cursor=pointer]:
+            - /url: /client/dashboard
+            - img [ref=f3e24]
+            - generic [ref=f3e29]: Dashboard
+        - generic [ref=f3e30]:
+          - generic [ref=f3e31]: Operación
+          - link "Reportes Internos" [ref=f3e32] [cursor=pointer]:
+            - /url: /client/reportes
+            - img [ref=f3e33]
+            - generic [ref=f3e36]: Reportes Internos
+          - link "Documentos por revisar" [ref=f3e37] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+            - img [ref=f3e38]
+            - generic [ref=f3e40]: Documentos por revisar
+          - link "Inventario POP" [ref=f3e41] [cursor=pointer]:
+            - /url: /client/inventario
+            - img [ref=f3e42]
+            - generic [ref=f3e46]: Inventario POP
+          - link "Rendiciones" [ref=f3e47] [cursor=pointer]:
+            - /url: /client/rendiciones
+            - img [ref=f3e48]
+            - generic [ref=f3e51]: Rendiciones
+          - link "Terreno" [ref=f3e52] [cursor=pointer]:
+            - /url: /client/terreno
+            - img [ref=f3e53]
+            - generic [ref=f3e59]: Terreno
+          - link "Calendario" [ref=f3e60] [cursor=pointer]:
+            - /url: /client/calendario
+            - img [ref=f3e61]
+            - generic [ref=f3e63]: Calendario
+          - link "Proyectos" [ref=f3e64] [cursor=pointer]:
+            - /url: /client/projects
+            - img [ref=f3e65]
+            - generic [ref=f3e67]: Proyectos
+          - link "Campañas" [ref=f3e68] [cursor=pointer]:
+            - /url: /client/campaigns
+            - img [ref=f3e69]
+            - generic [ref=f3e72]: Campañas
+          - link "Ubicaciones" [ref=f3e73] [cursor=pointer]:
+            - /url: /client/locations
+            - img [ref=f3e74]
+            - generic [ref=f3e77]: Ubicaciones
+          - link "Promotores" [ref=f3e78] [cursor=pointer]:
+            - /url: /client/promoters
+            - img [ref=f3e79]
+            - generic [ref=f3e84]: Promotores
+            - img [ref=f3e85]
+          - link "Documentos" [ref=f3e87] [cursor=pointer]:
+            - /url: /client/documents
+            - img [ref=f3e88]
+            - generic [ref=f3e91]: Documentos
+          - link "Colaboradores" [ref=f3e92] [cursor=pointer]:
+            - /url: /client/collaborators
+            - img [ref=f3e93]
+            - generic [ref=f3e97]: Colaboradores
+        - generic [ref=f3e98]:
+          - generic [ref=f3e99]: Configuración
+          - link "Configuración" [ref=f3e100] [cursor=pointer]:
+            - /url: /client/config
+            - img [ref=f3e101]
+            - generic [ref=f3e104]: Configuración
+          - link "Equivalencias OCR" [ref=f3e105] [cursor=pointer]:
+            - /url: /client/equivalencias
+            - img [ref=f3e106]
+            - generic [ref=f3e111]: Equivalencias OCR
+        - generic [ref=f3e112]:
+          - generic [ref=f3e113]: IA
+          - link "Control Mind" [ref=f3e114] [cursor=pointer]:
+            - /url: /client/mind
+            - img [ref=f3e115]
+            - generic [ref=f3e123]: Control Mind
+      - button "Sign out" [ref=f3e125] [cursor=pointer]
+    - generic [ref=f3e126]:
+      - banner [ref=f3e127]:
+        - heading "Promotores" [level=1] [ref=f3e128]
+        - generic [ref=f3e129]:
+          - button [ref=f3e130] [cursor=pointer]:
+            - img [ref=f3e131]
+          - generic [ref=f3e135]: AD
+          - button "Sign out" [ref=f3e136] [cursor=pointer]:
+            - img [ref=f3e137]
+            - text: Sign out
+      - main [ref=f3e140]:
+        - generic [ref=f3e141]:
+          - generic [ref=f3e247]: HTTP 500
+          - generic [ref=f3e142]:
+            - generic [ref=f3e143]:
+              - heading "Promoters" [level=1] [ref=f3e144]
+              - paragraph [ref=f3e145]: Field staff assigned to activations
+            - button "New Promoter" [ref=f3e146] [cursor=pointer]:
+              - img [ref=f3e147]
+              - text: New Promoter
+          - generic [ref=f3e148]:
+            - img [ref=f3e149]
+            - textbox "Search promoters…" [ref=f3e152]
+          - table [ref=f3e155]:
+            - rowgroup [ref=f3e156]:
+              - row "First Name Last Name Email Phone Status Actions" [ref=f3e157]:
+                - columnheader "First Name" [ref=f3e158]
+                - columnheader "Last Name" [ref=f3e159]
+                - columnheader "Email" [ref=f3e160]
+                - columnheader "Phone" [ref=f3e161]
+                - columnheader "Status" [ref=f3e162]
+                - columnheader "Actions" [ref=f3e163]
+            - rowgroup [ref=f3e164]:
+              - row "No promoters found." [ref=f3e218]:
+                - cell "No promoters found." [ref=f3e219]
+          - generic [ref=f3e221]:
+            - generic [ref=f3e222]:
+              - heading "New Promoter" [level=3] [ref=f3e223]
+              - button [ref=f3e224] [cursor=pointer]:
+                - img [ref=f3e225]
+            - generic [ref=f3e228]:
+              - generic [ref=f3e229]:
+                - generic [ref=f3e230]: First Name *
+                - textbox "María" [ref=f3e231]: Thomas
+              - generic [ref=f3e232]:
+                - generic [ref=f3e233]: Last Name *
+                - textbox "González" [ref=f3e234]: Test
+              - generic [ref=f3e235]:
+                - generic [ref=f3e236]: Email
+                - textbox "maria@example.com" [ref=f3e237]: thomas.test@example.com
+              - generic [ref=f3e238]:
+                - generic [ref=f3e239]: Phone
+                - textbox "+56 9 1234 5678" [ref=f3e240]: +56 9 8765 4321
+              - generic [ref=f3e241]:
+                - generic [ref=f3e242]: Status
+                - combobox [ref=f3e243]:
+                  - option "Select…"
+                  - option "Active" [selected]
+                  - option "Inactive"
+            - generic [ref=f3e244]:
+              - button "Cancel" [ref=f3e245] [cursor=pointer]
+              - button "Save" [ref=f3e246] [cursor=pointer]
+  - alert [ref=f3e217]
