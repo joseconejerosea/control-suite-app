@@ -7,30 +7,30 @@ export default function CollaboratorsPage() {
   return (
     <AppShell>
       <CrudTable
-        title="Collaborators"
-        subtitle="External stakeholders linked to projects — supervisors, brand managers, coordinators"
+        title="Colaboradores"
+        subtitle="Terceros vinculados a proyectos — supervisores, brand managers, coordinadores"
         endpoint="/collaborators"
         defaultForm={{ full_name: "", email: "", phone: "", role_label: "observer" }}
         columns={[
-          { key: "full_name",  label: "Name" },
+          { key: "full_name",  label: "Nombre" },
           { key: "email",      label: "Email" },
-          { key: "phone",      label: "Phone" },
-          { key: "role_label", label: "Role",   render: StatusBadge },
-          { key: "is_active",  label: "Active",
+          { key: "phone",      label: "Teléfono" },
+          { key: "role_label", label: "Rol",   render: StatusBadge },
+          { key: "is_active",  label: "Activo",
             render: (v) => <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
               style={{ background: v ? "var(--green-dim)" : "var(--secondary)", color: v ? "var(--green-light)" : "var(--muted-foreground)" }}>
-              {v ? "Yes" : "No"}
+              {v ? "Sí" : "No"}
             </span> },
         ]}
         fields={[
-          { key: "full_name",  label: "Full Name", required: true, placeholder: "Carlos Reyes" },
-          { key: "email",      label: "Email",     type: "email",  placeholder: "carlos@brand.com" },
-          { key: "phone",      label: "Phone",     type: "tel",    placeholder: "+56 9 8765 4321" },
-          { key: "role_label", label: "Role",      type: "select",
+          { key: "full_name",  label: "Nombre completo", required: true, placeholder: "Carlos Reyes" },
+          { key: "email",      label: "Email",           type: "email",  placeholder: "carlos@brand.com" },
+          { key: "phone",      label: "Teléfono",        type: "tel",    placeholder: "+56 9 8765 4321" },
+          { key: "role_label", label: "Rol",             type: "select",
             options: [
-              { value: "observer",      label: "Observer" },
+              { value: "observer",      label: "Observador" },
               { value: "supervisor",    label: "Supervisor" },
-              { value: "coordinator",   label: "Coordinator" },
+              { value: "coordinator",   label: "Coordinador" },
               { value: "brand_manager", label: "Brand Manager" },
             ]},
         ]}

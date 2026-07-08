@@ -1,0 +1,114 @@
+- generic [active] [ref=f19e1]:
+  - generic [ref=f19e2]:
+    - complementary [ref=f19e3]:
+      - generic [ref=f19e4]:
+        - img [ref=f19e6]
+        - generic [ref=f19e8]:
+          - generic [ref=f19e9]: Control Suite
+          - generic [ref=f19e10]: Operations Platform
+      - generic [ref=f19e12]:
+        - button "Administrador" [ref=f19e13] [cursor=pointer]
+        - button "Cliente" [ref=f19e14] [cursor=pointer]
+      - generic [ref=f19e15]:
+        - generic [ref=f19e16]: A
+        - generic [ref=f19e17]:
+          - generic [ref=f19e18]: admincliente.demo@controlsuite.com
+          - generic [ref=f19e19]: admin cliente
+      - navigation [ref=f19e20]:
+        - generic [ref=f19e21]:
+          - generic [ref=f19e22]: General
+          - link "Dashboard" [ref=f19e23] [cursor=pointer]:
+            - /url: /client/dashboard
+            - img [ref=f19e24]
+            - generic [ref=f19e29]: Dashboard
+        - generic [ref=f19e30]:
+          - generic [ref=f19e31]: Operación
+          - link "Reportes Internos" [ref=f19e32] [cursor=pointer]:
+            - /url: /client/reportes
+            - img [ref=f19e33]
+            - generic [ref=f19e36]: Reportes Internos
+          - link "Documentos por revisar" [ref=f19e37] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+            - img [ref=f19e38]
+            - generic [ref=f19e40]: Documentos por revisar
+            - img [ref=f19e41]
+          - link "Inventario POP" [ref=f19e43] [cursor=pointer]:
+            - /url: /client/inventario
+            - img [ref=f19e44]
+            - generic [ref=f19e48]: Inventario POP
+          - link "Rendiciones" [ref=f19e49] [cursor=pointer]:
+            - /url: /client/rendiciones
+            - img [ref=f19e50]
+            - generic [ref=f19e53]: Rendiciones
+          - link "Terreno" [ref=f19e54] [cursor=pointer]:
+            - /url: /client/terreno
+            - img [ref=f19e55]
+            - generic [ref=f19e61]: Terreno
+          - link "Calendario" [ref=f19e62] [cursor=pointer]:
+            - /url: /client/calendario
+            - img [ref=f19e63]
+            - generic [ref=f19e65]: Calendario
+          - link "Proyectos" [ref=f19e66] [cursor=pointer]:
+            - /url: /client/projects
+            - img [ref=f19e67]
+            - generic [ref=f19e69]: Proyectos
+          - link "Campañas" [ref=f19e70] [cursor=pointer]:
+            - /url: /client/campaigns
+            - img [ref=f19e71]
+            - generic [ref=f19e74]: Campañas
+          - link "Ubicaciones" [ref=f19e75] [cursor=pointer]:
+            - /url: /client/locations
+            - img [ref=f19e76]
+            - generic [ref=f19e79]: Ubicaciones
+          - link "Promotores" [ref=f19e80] [cursor=pointer]:
+            - /url: /client/promoters
+            - img [ref=f19e81]
+            - generic [ref=f19e86]: Promotores
+          - link "Documentos" [ref=f19e87] [cursor=pointer]:
+            - /url: /client/documents
+            - img [ref=f19e88]
+            - generic [ref=f19e91]: Documentos
+          - link "Colaboradores" [ref=f19e92] [cursor=pointer]:
+            - /url: /client/collaborators
+            - img [ref=f19e93]
+            - generic [ref=f19e97]: Colaboradores
+        - generic [ref=f19e98]:
+          - generic [ref=f19e99]: Configuración
+          - link "Configuración" [ref=f19e100] [cursor=pointer]:
+            - /url: /client/config
+            - img [ref=f19e101]
+            - generic [ref=f19e104]: Configuración
+          - link "Equivalencias OCR" [ref=f19e105] [cursor=pointer]:
+            - /url: /client/equivalencias
+            - img [ref=f19e106]
+            - generic [ref=f19e111]: Equivalencias OCR
+        - generic [ref=f19e112]:
+          - generic [ref=f19e113]: IA
+          - link "Control Mind" [ref=f19e114] [cursor=pointer]:
+            - /url: /client/mind
+            - img [ref=f19e115]
+            - generic [ref=f19e123]: Control Mind
+      - button "Sign out" [ref=f19e125] [cursor=pointer]
+    - generic [ref=f19e126]:
+      - banner [ref=f19e127]:
+        - heading "Control Suite" [level=1] [ref=f19e128]
+        - generic [ref=f19e129]:
+          - button [ref=f19e130] [cursor=pointer]:
+            - img [ref=f19e131]
+          - generic [ref=f19e135]: AD
+          - button "Sign out" [ref=f19e136] [cursor=pointer]:
+            - img [ref=f19e137]
+            - text: Sign out
+      - main [ref=f19e140]:
+        - generic [ref=f19e142]:
+          - generic [ref=f19e143]:
+            - heading "Documentos F1" [level=1] [ref=f19e144]
+            - paragraph [ref=f19e145]: Documentos procesados por IA — revisar, aprobar o rechazar
+          - generic [ref=f19e146]:
+            - button "Filtros" [ref=f19e147] [cursor=pointer]:
+              - img [ref=f19e148]
+              - text: Filtros
+            - button "Actualizar" [ref=f19e150] [cursor=pointer]:
+              - img [ref=f19e151]
+              - text: Actualizar
+  - alert [ref=f19e170]

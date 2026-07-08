@@ -47,14 +47,17 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
       fd.append("target_table", target);
 
       const token = localStorage.getItem("cs_token");
-      const res = await fetch("http://localhost:3001/api/documents/upload", {
+      // Base desde env (NO hardcodear localhost). El helper api.* no sirve acá porque
+      // es multipart/form-data; construimos la URL con la misma base + /api.
+      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+      const res = await fetch(`${base}/api/documents/upload`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message ?? "Upload failed"); }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message ?? "Error al subir"); }
       onDone(); onClose();
-    } catch (e: unknown) { setErr(e instanceof Error ? e.message : "Upload failed"); }
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : "Error al subir"); }
     finally { setLoad(false); }
   };
 
@@ -65,7 +68,7 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
       <div className="w-full max-w-md rounded-2xl p-6 border animate-fade-up"
         style={{ background: "var(--card)", borderColor: "var(--border)" }}>
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold">Upload Document</h3>
+          <h3 className="font-semibold">Subir documento</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--muted-foreground)", cursor: "pointer" }}><X size={16} /></button>
         </div>
 
@@ -83,19 +86,25 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
           ) : (
             <div>
               <Upload size={28} className="mx-auto mb-2" style={{ color: "var(--muted-foreground)" }} />
-              <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>Click to select file</div>
+              <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>Click para seleccionar archivo</div>
               <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)", opacity: 0.7 }}>PDF, CSV, XLSX · max 10MB</div>
             </div>
           )}
         </div>
 
         <div className="flex flex-col gap-1.5 mb-4">
-          <label className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>Target Table</label>
+          <label className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>Tabla destino</label>
           <select value={target} onChange={(e) => setTarget(e.target.value)}
             className="w-full px-3 py-2 rounded-lg text-sm outline-none"
             style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
-            {["promoters","locations","campaigns","activations","collaborators"].map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {[
+              { v: "promoters",     l: "Staff" },
+              { v: "locations",     l: "Ubicaciones" },
+              { v: "campaigns",     l: "Campañas" },
+              { v: "activations",   l: "Activaciones" },
+              { v: "collaborators", l: "Colaboradores" },
+            ].map((t) => (
+              <option key={t.v} value={t.v}>{t.l}</option>
             ))}
           </select>
         </div>
@@ -103,11 +112,11 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
         {err && <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "var(--red-dim)", color: "var(--red-light)" }}>{err}</div>}
 
         <div className="flex gap-3">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Cancelar</button>
           <button onClick={submit} disabled={loading || !file}
             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
             style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
-            {loading ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} /> : <><Upload size={13} /> Upload</>}
+            {loading ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} /> : <><Upload size={13} /> Subir</>}
           </button>
         </div>
       </div>
@@ -129,7 +138,7 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
   const populate = async () => {
     setPop(true); setErr("");
     try { await api.post(`/documents/${doc.id}/populate`, {}); onDone(); onClose(); }
-    catch (e: unknown) { setErr(e instanceof Error ? e.message : "Population failed"); }
+    catch (e: unknown) { setErr(e instanceof Error ? e.message : "Error al poblar"); }
     finally { setPop(false); }
   };
 
@@ -145,8 +154,8 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
         style={{ background: "var(--card)", borderColor: "var(--border)", maxHeight: "90vh", overflowY: "auto" }}>
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h3 className="font-semibold">Preview — {doc.original_name}</h3>
-            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Target: {doc.target_table}</p>
+            <h3 className="font-semibold">Vista previa — {doc.original_name}</h3>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Destino: {doc.target_table}</p>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--muted-foreground)", cursor: "pointer" }}><X size={16} /></button>
         </div>
@@ -158,13 +167,13 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
         ) : !preview ? (
           <div className="text-center py-12 text-sm" style={{ color: "var(--muted-foreground)" }}>
             <AlertCircle size={24} className="mx-auto mb-2 opacity-40" />
-            Run POST /parse first to extract data from this document.
+            Ejecutá el parseo primero para extraer los datos de este documento.
           </div>
         ) : (
           <>
             {Object.keys(mapping).length > 0 && (
               <div className="mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--muted-foreground)" }}>Column Mapping</div>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--muted-foreground)" }}>Mapeo de columnas</div>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(mapping).map(([src, tgt]) => (
                     <span key={src} className="px-2.5 py-1 rounded-full text-xs border"
@@ -179,7 +188,7 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
             {rows.length > 0 && (
               <div className="mb-4">
                 <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--muted-foreground)" }}>
-                  Sample Rows ({rows.length} total)
+                  Filas de muestra ({rows.length} total)
                 </div>
                 <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)", maxHeight: 220, overflowY: "auto" }}>
                   <table className="w-full border-collapse text-xs">
@@ -204,18 +213,18 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
 
             {conf != null && (
               <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>
-                AI confidence: <span style={{ color: "var(--green-light)", fontWeight: 600 }}>{Math.round(conf * 100)}%</span>
+                Confianza IA: <span style={{ color: "var(--green-light)", fontWeight: 600 }}>{Math.round(conf * 100)}%</span>
               </div>
             )}
 
             {err && <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "var(--red-dim)", color: "var(--red-light)" }}>{err}</div>}
 
             <div className="flex gap-3">
-              <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Close</button>
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Cerrar</button>
               <button onClick={populate} disabled={popping}
                 className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
                 style={{ background: "var(--green)", color: "#fff", border: "none", cursor: "pointer" }}>
-                {popping ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} /> : <><Database size={13} /> Confirm & Populate</>}
+                {popping ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} /> : <><Database size={13} /> Confirmar y poblar</>}
               </button>
             </div>
           </>
@@ -249,9 +258,9 @@ export default function DocumentsPage() {
     setParsing((p) => ({ ...p, [doc.id]: true }));
     try {
       await api.post(`/documents/${doc.id}/parse`, {});
-      showToast("Parsing started — refresh in a moment", true);
+      showToast("Parseo iniciado — actualizá en un momento", true);
       setTimeout(load, 2500);
-    } catch (e: unknown) { showToast(e instanceof Error ? e.message : "Parse failed", false); }
+    } catch (e: unknown) { showToast(e instanceof Error ? e.message : "Error al parsear", false); }
     finally { setParsing((p) => ({ ...p, [doc.id]: false })); }
   };
 
@@ -267,13 +276,13 @@ export default function DocumentsPage() {
       <div className="animate-fade-up">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold">Documents</h1>
-            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Upload CSV, Excel, or PDF — AI extracts and populates your database</p>
+            <h1 className="text-xl font-bold">Documentos</h1>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Sube CSV, Excel o PDF — la IA extrae y puebla tu base de datos</p>
           </div>
           <button onClick={() => setUpload(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium"
             style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(200,32,44,0.3)" }}>
-            <Upload size={14} /> Upload File
+            <Upload size={14} /> Subir archivo
           </button>
         </div>
 
@@ -281,7 +290,7 @@ export default function DocumentsPage() {
           <table className="w-full border-collapse">
             <thead style={{ background: "var(--secondary)" }}>
               <tr>
-                {["File Name", "Type", "Target", "Status", "Rows", "Uploaded", "Actions"].map((h) => (
+                {["Archivo", "Tipo", "Destino", "Estado", "Filas", "Subido", "Acciones"].map((h) => (
                   <th key={h} className="px-4 py-3 text-left" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{h}</th>
                 ))}
               </tr>
@@ -299,8 +308,8 @@ export default function DocumentsPage() {
                 <tr>
                   <td colSpan={7} className="px-4 py-16 text-center">
                     <FileText size={32} className="mx-auto mb-3 opacity-20" />
-                    <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>No documents uploaded yet.</p>
-                    <button onClick={() => setUpload(true)} className="mt-3 px-4 py-2 rounded-lg text-xs" style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>Upload your first file</button>
+                    <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>Aún no hay documentos.</p>
+                    <button onClick={() => setUpload(true)} className="mt-3 px-4 py-2 rounded-lg text-xs" style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>Sube tu primer archivo</button>
                   </td>
                 </tr>
               ) : (
@@ -323,7 +332,7 @@ export default function DocumentsPage() {
                       {doc.rows_inserted != null ? (
                         <span>
                           <span style={{ color: "var(--green-light)", fontWeight: 600 }}>{doc.rows_inserted}</span>
-                          {(doc.rows_failed ?? 0) > 0 && <span style={{ color: "var(--red-light)" }}> / {doc.rows_failed} failed</span>}
+                          {(doc.rows_failed ?? 0) > 0 && <span style={{ color: "var(--red-light)" }}> / {doc.rows_failed} fallidas</span>}
                         </span>
                       ) : "—"}
                     </td>
@@ -336,19 +345,19 @@ export default function DocumentsPage() {
                           <button onClick={() => parse(doc)} disabled={parsing[doc.id]}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs disabled:opacity-50"
                             style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
-                            {parsing[doc.id] ? <span className="w-3 h-3 border rounded-full animate-spin" style={{ borderColor: "var(--border)", borderTopColor: "var(--foreground)" }} /> : <><RefreshCw size={11} /> Parse</>}
+                            {parsing[doc.id] ? <span className="w-3 h-3 border rounded-full animate-spin" style={{ borderColor: "var(--border)", borderTopColor: "var(--foreground)" }} /> : <><RefreshCw size={11} /> Parsear</>}
                           </button>
                         )}
                         {doc.status === "parsed" && (
                           <button onClick={() => setPreview(doc)}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs"
                             style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
-                            <Eye size={11} /> Preview
+                            <Eye size={11} /> Vista previa
                           </button>
                         )}
                         {doc.status === "populated" && (
                           <span className="flex items-center gap-1 text-xs" style={{ color: "var(--green-light)" }}>
-                            <CheckCircle size={12} /> Done
+                            <CheckCircle size={12} /> Listo
                           </span>
                         )}
                       </div>

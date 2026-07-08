@@ -1,0 +1,152 @@
+- generic [active] [ref=f16e1]:
+  - generic [ref=f16e2]:
+    - complementary [ref=f16e3]:
+      - generic [ref=f16e4]:
+        - img [ref=f16e6]
+        - generic [ref=f16e8]:
+          - generic [ref=f16e9]: Control Suite
+          - generic [ref=f16e10]: Operations Platform
+      - generic [ref=f16e12]:
+        - button "Administrador" [ref=f16e13] [cursor=pointer]
+        - button "Cliente" [ref=f16e14] [cursor=pointer]
+      - generic [ref=f16e15]:
+        - generic [ref=f16e16]: A
+        - generic [ref=f16e17]:
+          - generic [ref=f16e18]: admincliente.demo@controlsuite.com
+          - generic [ref=f16e19]: admin cliente
+      - navigation [ref=f16e20]:
+        - generic [ref=f16e21]:
+          - generic [ref=f16e22]: General
+          - link "Dashboard" [ref=f16e23] [cursor=pointer]:
+            - /url: /client/dashboard
+            - img [ref=f16e24]
+            - generic [ref=f16e29]: Dashboard
+        - generic [ref=f16e30]:
+          - generic [ref=f16e31]: Operación
+          - link "Reportes Internos" [ref=f16e32] [cursor=pointer]:
+            - /url: /client/reportes
+            - img [ref=f16e33]
+            - generic [ref=f16e36]: Reportes Internos
+          - link "Documentos por revisar" [ref=f16e37] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+            - img [ref=f16e38]
+            - generic [ref=f16e40]: Documentos por revisar
+          - link "Inventario POP" [ref=f16e41] [cursor=pointer]:
+            - /url: /client/inventario
+            - img [ref=f16e42]
+            - generic [ref=f16e46]: Inventario POP
+          - link "Rendiciones" [ref=f16e47] [cursor=pointer]:
+            - /url: /client/rendiciones
+            - img [ref=f16e48]
+            - generic [ref=f16e51]: Rendiciones
+          - link "Terreno" [ref=f16e52] [cursor=pointer]:
+            - /url: /client/terreno
+            - img [ref=f16e53]
+            - generic [ref=f16e59]: Terreno
+          - link "Calendario" [ref=f16e60] [cursor=pointer]:
+            - /url: /client/calendario
+            - img [ref=f16e61]
+            - generic [ref=f16e63]: Calendario
+          - link "Proyectos" [ref=f16e64] [cursor=pointer]:
+            - /url: /client/projects
+            - img [ref=f16e65]
+            - generic [ref=f16e67]: Proyectos
+          - link "Campañas" [ref=f16e68] [cursor=pointer]:
+            - /url: /client/campaigns
+            - img [ref=f16e69]
+            - generic [ref=f16e72]: Campañas
+            - img [ref=f16e73]
+          - link "Ubicaciones" [ref=f16e75] [cursor=pointer]:
+            - /url: /client/locations
+            - img [ref=f16e76]
+            - generic [ref=f16e79]: Ubicaciones
+          - link "Promotores" [ref=f16e80] [cursor=pointer]:
+            - /url: /client/promoters
+            - img [ref=f16e81]
+            - generic [ref=f16e86]: Promotores
+          - link "Documentos" [ref=f16e87] [cursor=pointer]:
+            - /url: /client/documents
+            - img [ref=f16e88]
+            - generic [ref=f16e91]: Documentos
+          - link "Colaboradores" [ref=f16e92] [cursor=pointer]:
+            - /url: /client/collaborators
+            - img [ref=f16e93]
+            - generic [ref=f16e97]: Colaboradores
+        - generic [ref=f16e98]:
+          - generic [ref=f16e99]: Configuración
+          - link "Configuración" [ref=f16e100] [cursor=pointer]:
+            - /url: /client/config
+            - img [ref=f16e101]
+            - generic [ref=f16e104]: Configuración
+          - link "Equivalencias OCR" [ref=f16e105] [cursor=pointer]:
+            - /url: /client/equivalencias
+            - img [ref=f16e106]
+            - generic [ref=f16e111]: Equivalencias OCR
+        - generic [ref=f16e112]:
+          - generic [ref=f16e113]: IA
+          - link "Control Mind" [ref=f16e114] [cursor=pointer]:
+            - /url: /client/mind
+            - img [ref=f16e115]
+            - generic [ref=f16e123]: Control Mind
+      - button "Sign out" [ref=f16e125] [cursor=pointer]
+    - generic [ref=f16e126]:
+      - banner [ref=f16e127]:
+        - heading "Campañas" [level=1] [ref=f16e128]
+        - generic [ref=f16e129]:
+          - button [ref=f16e130] [cursor=pointer]:
+            - img [ref=f16e131]
+          - generic [ref=f16e135]: AD
+          - button "Sign out" [ref=f16e136] [cursor=pointer]:
+            - img [ref=f16e137]
+            - text: Sign out
+      - main [ref=f16e140]:
+        - generic [ref=f16e141]:
+          - generic [ref=f16e142]:
+            - generic [ref=f16e143]:
+              - heading "Campaigns" [level=1] [ref=f16e144]
+              - paragraph [ref=f16e145]: Marketing campaigns with budgets, dates, and status tracking
+            - button "New Campaign" [ref=f16e146] [cursor=pointer]:
+              - img [ref=f16e147]
+              - text: New Campaign
+          - generic [ref=f16e148]:
+            - img [ref=f16e149]
+            - textbox "Search campaigns…" [ref=f16e152]
+          - table [ref=f16e155]:
+            - rowgroup [ref=f16e156]:
+              - row "Name Status Start Date End Date Budget Actions" [ref=f16e157]:
+                - columnheader "Name" [ref=f16e158]
+                - columnheader "Status" [ref=f16e159]
+                - columnheader "Start Date" [ref=f16e160]
+                - columnheader "End Date" [ref=f16e161]
+                - columnheader "Budget" [ref=f16e162]
+                - columnheader "Actions" [ref=f16e163]
+            - rowgroup [ref=f16e164]:
+              - row [ref=f16e165]:
+                - cell [ref=f16e166]
+                - cell [ref=f16e168]
+                - cell [ref=f16e170]
+                - cell [ref=f16e172]
+                - cell [ref=f16e174]
+                - cell [ref=f16e176]
+              - row [ref=f16e178]:
+                - cell [ref=f16e179]
+                - cell [ref=f16e181]
+                - cell [ref=f16e183]
+                - cell [ref=f16e185]
+                - cell [ref=f16e187]
+                - cell [ref=f16e189]
+              - row [ref=f16e191]:
+                - cell [ref=f16e192]
+                - cell [ref=f16e194]
+                - cell [ref=f16e196]
+                - cell [ref=f16e198]
+                - cell [ref=f16e200]
+                - cell [ref=f16e202]
+              - row [ref=f16e204]:
+                - cell [ref=f16e205]
+                - cell [ref=f16e207]
+                - cell [ref=f16e209]
+                - cell [ref=f16e211]
+                - cell [ref=f16e213]
+                - cell [ref=f16e215]
+  - alert [ref=f16e217]

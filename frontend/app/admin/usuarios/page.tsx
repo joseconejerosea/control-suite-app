@@ -4,10 +4,15 @@ import { useEffect, useState } from "react";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 
+// Labels alineados al modelo de 6 roles (ver lib/roles.ts). Los VALUES (keys) son los
+// strings persistidos en user.role; solo cambian los labels visibles.
 const ROLE_STYLE: Record<string, { background: string; color: string; label: string }> = {
-  admin_cliente: { background: "rgba(99,102,241,0.12)", color: "#818cf8", label: "Admin" },
-  user:          { background: "rgba(100,116,139,0.12)", color: "#94a3b8", label: "Usuario" },
   super_admin:   { background: "rgba(245,158,11,0.12)", color: "#f59e0b", label: "Super Admin" },
+  service_lead:  { background: "rgba(14,165,233,0.12)", color: "#38bdf8", label: "Líder de Servicio" },
+  admin_cliente: { background: "rgba(99,102,241,0.12)", color: "#818cf8", label: "Manager" },
+  user:          { background: "rgba(100,116,139,0.12)", color: "#94a3b8", label: "Operador" },
+  supervisor:    { background: "rgba(52,211,153,0.12)", color: "#34d399", label: "Supervisor" },
+  staff:         { background: "rgba(168,85,247,0.12)", color: "#c084fc", label: "Staff" },
 };
 
 export default function AdminUsuariosPage() {
@@ -152,7 +157,7 @@ export default function AdminUsuariosPage() {
               {[
                 { label: "Total", value: users.length, color: "var(--foreground)" },
                 { label: "Activos", value: users.filter((u: any) => u.is_active).length, color: "#34b96e" },
-                { label: "Admins", value: users.filter((u: any) => u.role === "admin_cliente").length, color: "#818cf8" },
+                { label: "Managers", value: users.filter((u: any) => u.role === "admin_cliente").length, color: "#818cf8" },
                 { label: "Inactivos", value: users.filter((u: any) => !u.is_active).length, color: "#e8353f" },
               ].map((kpi) => (
                 <div key={kpi.label} className="rounded-xl p-4 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -258,8 +263,8 @@ export default function AdminUsuariosPage() {
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
                   className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                   style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
-                  <option value="user">Usuario</option>
-                  <option value="admin_cliente">Admin Cliente</option>
+                  <option value="user">Operador</option>
+                  <option value="admin_cliente">Manager</option>
                 </select>
               </div>
               <div className="flex gap-2 mt-4">
@@ -293,8 +298,8 @@ export default function AdminUsuariosPage() {
                 <select value={editUser.role} onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
                   className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                   style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
-                  <option value="user">Usuario</option>
-                  <option value="admin_cliente">Admin Cliente</option>
+                  <option value="user">Operador</option>
+                  <option value="admin_cliente">Manager</option>
                 </select>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={editUser.is_active} onChange={(e) => setEditUser({ ...editUser, is_active: e.target.checked })} />
