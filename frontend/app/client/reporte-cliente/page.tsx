@@ -48,7 +48,8 @@ function ReporteClienteContent() {
   }, [id]);
 
   const fmt = (d?: string) => d ? new Date(d).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short" }) : "—";
-  const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString("es-CL", { dateStyle: "long" }) : "—";
+  // activation_date es date-only: timeZone:"UTC" evita el corrimiento de un día en hora local (Chile UTC-4).
+  const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString("es-CL", { dateStyle: "long", timeZone: "UTC" }) : "—";
   const incAbiertas = incidencias.filter(i => i.estado === "abierta" || i.estado === "open");
 
   const buildHtml = () => `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>

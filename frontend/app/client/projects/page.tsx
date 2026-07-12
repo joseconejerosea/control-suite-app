@@ -20,7 +20,9 @@ const STATUS_STYLE: Record<string, { background: string; color: string }> = {
   archived: { background: "rgba(100,116,139,0.15)",color: "#94a3b8" },
 };
 
-const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString("es-CL") : "—";
+// Las fechas de proyecto son date-only (columnas DATE, medianoche UTC). Sin timeZone:"UTC"
+// se renderizan en hora local (Chile UTC-4) y caen al día anterior. Forzar UTC evita el corrimiento.
+const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString("es-CL", { timeZone: "UTC" }) : "—";
 const fmtMoney = (v?: number) => v ? `$${Number(v).toLocaleString("es-CL")}` : "—";
 
 export default function ProjectsPage() {
