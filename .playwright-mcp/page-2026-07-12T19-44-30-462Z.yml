@@ -1,0 +1,159 @@
+- generic [ref=f4e1]:
+  - generic [ref=f4e2]:
+    - complementary [ref=f4e3]:
+      - generic [ref=f4e8]:
+        - generic [ref=f4e9]: Control Suite
+        - generic [ref=f4e10]: Operations Platform
+      - generic [ref=f4e11]:
+        - generic [ref=f4e12]: A
+        - generic [ref=f4e13]:
+          - generic [ref=f4e14]: admincliente.demo@controlsuite.com
+          - generic [ref=f4e15]: Manager
+      - navigation [ref=f4e16]:
+        - generic [ref=f4e17]:
+          - generic [ref=f4e18]: General
+          - link "Dashboard" [ref=f4e19] [cursor=pointer]:
+            - /url: /client/dashboard
+        - generic [ref=f4e26]:
+          - generic [ref=f4e27]: Operación
+          - link "Reportes Internos" [ref=f4e28] [cursor=pointer]:
+            - /url: /client/reportes
+          - link "Documentos por revisar" [ref=f4e33] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+          - link "Inventario POP" [ref=f4e37] [cursor=pointer]:
+            - /url: /client/inventario
+          - link "Rendiciones" [ref=f4e45] [cursor=pointer]:
+            - /url: /client/rendiciones
+          - link "Terreno" [ref=f4e50] [cursor=pointer]:
+            - /url: /client/terreno
+          - link "Calendario" [ref=f4e58] [cursor=pointer]:
+            - /url: /client/calendario
+          - link "Proyectos" [ref=f4e62] [cursor=pointer]:
+            - /url: /client/projects
+          - link "Campañas" [ref=f4e66] [cursor=pointer]:
+            - /url: /client/campaigns
+          - link "Ubicaciones" [ref=f4e71] [cursor=pointer]:
+            - /url: /client/locations
+          - link "Staff" [ref=f4e76] [cursor=pointer]:
+            - /url: /client/promoters
+          - link "Documentos" [ref=f4e83] [cursor=pointer]:
+            - /url: /client/documents
+          - link "Colaboradores" [ref=f4e88] [cursor=pointer]:
+            - /url: /client/collaborators
+        - generic [ref=f4e94]:
+          - generic [ref=f4e95]: Configuración
+          - link "Configuración" [ref=f4e96] [cursor=pointer]:
+            - /url: /client/config
+          - link "Equivalencias OCR" [ref=f4e101] [cursor=pointer]:
+            - /url: /client/equivalencias
+        - generic [ref=f4e108]:
+          - generic [ref=f4e109]: IA
+          - link "Control Mind" [ref=f4e110] [cursor=pointer]:
+            - /url: /client/mind
+      - button "Sign out" [ref=f4e121] [cursor=pointer]
+    - generic [ref=f4e122]:
+      - banner [ref=f4e123]:
+        - heading "Inventario POP" [level=1] [ref=f4e124]
+        - generic [ref=f4e125]:
+          - button [ref=f4e126] [cursor=pointer]
+          - generic [ref=f4e131]: AD
+          - button "Sign out" [ref=f4e132] [cursor=pointer]
+      - main [ref=f4e136]:
+        - generic [ref=f4e492]:
+          - generic [ref=f4e493]:
+            - generic [ref=f4e494]: Registrar Movimiento
+            - button [ref=f4e498] [cursor=pointer]
+          - generic [ref=f4e502]:
+            - generic [ref=f4e503]:
+              - generic [ref=f4e504]: SKU / Material *
+              - combobox [ref=f4e505]:
+                - option "Selecciona un SKU..."
+                - option "Afiche A3 (MAT-001)"
+                - option "Afiche A4 (MAT-002)" [selected]
+            - generic [ref=f4e506]:
+              - generic [ref=f4e507]: Tipo de movimiento
+              - combobox [ref=f4e508]:
+                - option "Entrada" [selected]
+                - option "Salida"
+                - option "Devolución"
+                - option "Consumo"
+                - option "Merma"
+                - option "Traslado"
+                - option "Ajuste"
+            - generic [ref=f4e509]:
+              - generic [ref=f4e510]: Proyecto destino
+              - combobox [ref=f4e511]:
+                - option "Ninguno" [selected]
+                - option "Proyecto Test F2 - Beta"
+                - option "Proyecto Test F2 - Alpha"
+            - generic [ref=f4e512]:
+              - generic [ref=f4e513]:
+                - generic [ref=f4e514]: Bodega origen
+                - combobox [ref=f4e515]:
+                  - option "Ninguna" [selected]
+                  - option "Bodega Central"
+                  - option "Bodega Norte"
+              - generic [ref=f4e516]:
+                - generic [ref=f4e517]: Bodega destino
+                - combobox [ref=f4e518]:
+                  - option "Ninguna" [selected]
+                  - option "Bodega Central"
+                  - option "Bodega Norte"
+            - generic [ref=f4e519]:
+              - generic [ref=f4e520]: Cantidad *
+              - spinbutton "0" [ref=f4e521]
+            - generic [ref=f4e522]:
+              - generic [ref=f4e523]: Observacion
+              - textbox "Motivo del movimiento..." [ref=f4e524]
+          - generic [ref=f4e525]:
+            - button "Cancelar" [ref=f4e526] [cursor=pointer]
+            - button "Registrar movimiento" [disabled] [ref=f4e527] [cursor=pointer]
+        - generic [ref=f4e137]:
+          - generic [ref=f4e138]:
+            - generic [ref=f4e139]:
+              - heading "Inventario POP" [level=1] [ref=f4e140]
+              - paragraph [ref=f4e141]: Materiales y stock de punto de venta
+            - generic [ref=f4e142]:
+              - textbox "Buscar por SKU, marca, bodega..." [ref=f4e143]
+              - button "Movimiento" [active] [ref=f4e144] [cursor=pointer]
+              - button "+ SKU" [ref=f4e148] [cursor=pointer]
+              - button "+ Bodega" [ref=f4e153] [cursor=pointer]
+          - generic [ref=f4e157]:
+            - button "Bodega" [ref=f4e158] [cursor=pointer]
+            - button "SKUs" [ref=f4e159] [cursor=pointer]
+            - button "Movimientos" [ref=f4e160] [cursor=pointer]
+            - button "Devoluciones" [ref=f4e161] [cursor=pointer]
+          - table [ref=f4e458]:
+            - rowgroup [ref=f4e459]:
+              - row [ref=f4e460]:
+                - columnheader "SKU" [ref=f4e528]
+                - columnheader "Bodega" [ref=f4e529]
+                - columnheader "Cliente final" [ref=f4e530]
+                - columnheader "Cantidad" [ref=f4e531]
+                - columnheader "Estado" [ref=f4e532]
+            - rowgroup [ref=f4e466]:
+              - row [ref=f4e467]:
+                - cell "Afiche A3" [ref=f4e468]
+                - cell "Bodega Central" [ref=f4e469]
+                - cell "—" [ref=f4e470]
+                - cell "80" [ref=f4e471]
+                - cell "ok" [ref=f4e472]
+              - row [ref=f4e473]:
+                - cell "Afiche A4" [ref=f4e474]
+                - cell "Bodega Central" [ref=f4e475]
+                - cell "—" [ref=f4e476]
+                - cell "50" [ref=f4e477]
+                - cell "ok" [ref=f4e478]
+              - row [ref=f4e479]:
+                - cell "Afiche A3" [ref=f4e480]
+                - cell "Bodega Norte" [ref=f4e481]
+                - cell "—" [ref=f4e482]
+                - cell "20" [ref=f4e483]
+                - cell "ok" [ref=f4e484]
+              - row [ref=f4e485]:
+                - cell "Afiche A4" [ref=f4e486]
+                - cell "Bodega Norte" [ref=f4e487]
+                - cell "—" [ref=f4e488]
+                - cell "20" [ref=f4e489]
+                - cell "ok" [ref=f4e490]
+  - alert [ref=f4e163]
