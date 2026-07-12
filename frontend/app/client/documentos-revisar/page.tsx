@@ -123,8 +123,11 @@ export default function DocumentosRevisarPage() {
     setSelected(doc);
     setDetailLoading(true);
     try {
-      const detail = await api.get<F1Doc>(`/app/f1-documents/${doc.id}`);
-      setSelected(detail);
+      // El interceptor global envuelve la respuesta en { data, timestamp, path }.
+      // Sin desenvolver, `selected.id` queda undefined y el detalle crashea
+      // (selected.id.slice(...)). Fallback a `res` por si algún endpoint no viene envuelto.
+      const res = await api.get<{ data?: F1Doc }>(`/app/f1-documents/${doc.id}`);
+      setSelected((res?.data ?? (res as unknown as F1Doc)));
     } catch { /* keep the list version */ }
     finally { setDetailLoading(false); }
   };

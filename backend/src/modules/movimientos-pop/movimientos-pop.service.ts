@@ -238,9 +238,13 @@ export class MovimientosPopService {
 
   /** Calcula merma para un SKU después de una devolución */
   async calcularMermaProyecto(clientId: string, skuId: string, proyectoId: string): Promise<void> {
+    // Excluir la pata 'transfer_out' de los traslados: se graba como tipo='salida' pero
+    // NO es una salida real al proyecto (el material se movió entre bodegas), así que
+    // no debe inflar la merma del proyecto.
     const salidas = await this.ds.query(
       `SELECT COALESCE(SUM(cantidad),0) as total FROM movimientos_pop
-       WHERE client_id=$1 AND sku_id=$2 AND proyecto_destino_id=$3 AND tipo='salida'`,
+       WHERE client_id=$1 AND sku_id=$2 AND proyecto_destino_id=$3 AND tipo='salida'
+         AND estado <> 'transfer_out'`,
       [clientId, skuId, proyectoId],
     );
     const devoluciones = await this.ds.query(
@@ -282,13 +286,15 @@ export class MovimientosPopService {
   /** Banner IA: análisis de merma últimos 30 días */
   async analisisMerma30Dias(clientId: string) {
     return this.ds.query(
+      // Las patas 'transfer_out' se graban como tipo='salida' pero son movimientos entre
+      // bodegas, no salidas reales — se excluyen para no inflar total_salidas ni deflactar pct_merma.
       `SELECT s.nombre as sku_nombre, s.codigo,
-              SUM(m.cantidad) FILTER (WHERE m.tipo='salida') as total_salidas,
+              SUM(m.cantidad) FILTER (WHERE m.tipo='salida' AND m.estado <> 'transfer_out') as total_salidas,
               SUM(m.cantidad) FILTER (WHERE m.tipo='devolucion') as total_devoluciones,
               SUM(m.cantidad) FILTER (WHERE m.tipo='merma') as total_merma,
               ROUND(
                 SUM(m.cantidad) FILTER (WHERE m.tipo='merma')::numeric /
-                NULLIF(SUM(m.cantidad) FILTER (WHERE m.tipo='salida'), 0) * 100,
+                NULLIF(SUM(m.cantidad) FILTER (WHERE m.tipo='salida' AND m.estado <> 'transfer_out'), 0) * 100,
               2) as pct_merma,
               SUM(m.cantidad) FILTER (WHERE m.tipo='merma') * s.valor_unitario::numeric as valor_merma_clp
        FROM movimientos_pop m

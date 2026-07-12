@@ -196,7 +196,7 @@ export default function ConfigPage() {
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
                 <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{m.email} · {m.phone}</div>
               </div>
-              {badge(m.role ?? "Promotor")}
+              {badge(m.role ?? "Staff")}
             </div>
           ))
         }

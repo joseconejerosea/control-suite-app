@@ -7,21 +7,21 @@ export default function LocationsPage() {
   return (
     <AppShell>
       <CrudTable
-        title="Locations"
-        subtitle="Physical locations where activations take place"
+        title="Ubicaciones"
+        subtitle="Ubicaciones físicas donde se realizan las activaciones"
         endpoint="/locations"
         defaultForm={{ name: "", address: "", city: "", region: "" }}
         columns={[
-          { key: "name",    label: "Name" },
-          { key: "city",    label: "City" },
-          { key: "region",  label: "Region" },
-          { key: "address", label: "Address" },
+          { key: "name",    label: "Nombre" },
+          { key: "city",    label: "Ciudad" },
+          { key: "region",  label: "Región" },
+          { key: "address", label: "Dirección" },
         ]}
         fields={[
-          { key: "name",    label: "Location Name", required: true, placeholder: "Mall Costanera Centro" },
-          { key: "address", label: "Address",                       placeholder: "Av. Andrés Bello 2447" },
-          { key: "city",    label: "City",                          placeholder: "Santiago" },
-          { key: "region",  label: "Region",                        placeholder: "Región Metropolitana" },
+          { key: "name",    label: "Nombre de la ubicación", required: true, placeholder: "Mall Costanera Centro" },
+          { key: "address", label: "Dirección",                              placeholder: "Av. Andrés Bello 2447" },
+          { key: "city",    label: "Ciudad",                                 placeholder: "Santiago" },
+          { key: "region",  label: "Región",                                 placeholder: "Región Metropolitana" },
         ]}
       />
     </AppShell>

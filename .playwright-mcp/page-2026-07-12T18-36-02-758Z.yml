@@ -1,0 +1,95 @@
+- generic [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - complementary [ref=f2e3]:
+      - generic [ref=f2e8]:
+        - generic [ref=f2e9]: Control Suite
+        - generic [ref=f2e10]: Operations Platform
+      - generic [ref=f2e12]:
+        - button "Administrador" [ref=f2e13] [cursor=pointer]
+        - button "Cliente" [ref=f2e14] [cursor=pointer]
+      - generic [ref=f2e15]:
+        - generic [ref=f2e16]: A
+        - generic [ref=f2e17]:
+          - generic [ref=f2e18]: admincliente.demo@controlsuite.com
+          - generic [ref=f2e19]: admin cliente
+      - navigation [ref=f2e20]:
+        - generic [ref=f2e21]:
+          - generic [ref=f2e22]: General
+          - link "Dashboard" [ref=f2e23] [cursor=pointer]:
+            - /url: /client/dashboard
+        - generic [ref=f2e30]:
+          - generic [ref=f2e31]: Operación
+          - link "Reportes Internos" [ref=f2e32] [cursor=pointer]:
+            - /url: /client/reportes
+          - link "Documentos por revisar" [ref=f2e37] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+          - link "Inventario POP" [ref=f2e41] [cursor=pointer]:
+            - /url: /client/inventario
+          - link "Rendiciones" [ref=f2e49] [cursor=pointer]:
+            - /url: /client/rendiciones
+          - link "Terreno" [ref=f2e54] [cursor=pointer]:
+            - /url: /client/terreno
+          - link "Calendario" [ref=f2e62] [cursor=pointer]:
+            - /url: /client/calendario
+          - link "Proyectos" [ref=f2e66] [cursor=pointer]:
+            - /url: /client/projects
+          - link "Campañas" [ref=f2e70] [cursor=pointer]:
+            - /url: /client/campaigns
+          - link "Ubicaciones" [ref=f2e75] [cursor=pointer]:
+            - /url: /client/locations
+          - link "Promotores" [ref=f2e80] [cursor=pointer]:
+            - /url: /client/promoters
+          - link "Documentos" [ref=f2e87] [cursor=pointer]:
+            - /url: /client/documents
+          - link "Colaboradores" [ref=f2e92] [cursor=pointer]:
+            - /url: /client/collaborators
+        - generic [ref=f2e98]:
+          - generic [ref=f2e99]: Configuración
+          - link "Configuración" [ref=f2e100] [cursor=pointer]:
+            - /url: /client/config
+          - link "Equivalencias OCR" [ref=f2e105] [cursor=pointer]:
+            - /url: /client/equivalencias
+        - generic [ref=f2e112]:
+          - generic [ref=f2e113]: IA
+          - link "Control Mind" [ref=f2e114] [cursor=pointer]:
+            - /url: /client/mind
+      - button "Sign out" [ref=f2e125] [cursor=pointer]
+    - generic [ref=f2e126]:
+      - banner [ref=f2e127]:
+        - heading "Inventario POP" [level=1] [ref=f2e128]
+        - generic [ref=f2e129]:
+          - button [ref=f2e130] [cursor=pointer]
+          - generic [ref=f2e135]: AD
+          - button "Sign out" [ref=f2e136] [cursor=pointer]
+      - main [ref=f2e140]:
+        - generic [ref=f2e141]:
+          - generic [ref=f2e142]:
+            - generic [ref=f2e143]:
+              - heading "Inventario POP" [level=1] [ref=f2e144]
+              - paragraph [ref=f2e145]: Materiales y stock de punto de venta
+            - generic [ref=f2e146]:
+              - textbox "Buscar por SKU, marca, bodega..." [ref=f2e147]
+              - button "Movimiento" [ref=f2e148] [cursor=pointer]
+              - button "+ SKU" [ref=f2e152] [cursor=pointer]
+              - button "+ Bodega" [ref=f2e157] [cursor=pointer]
+          - generic [ref=f2e161]:
+            - button "Bodega" [active] [ref=f2e162] [cursor=pointer]
+            - button "SKUs" [ref=f2e163] [cursor=pointer]
+            - button "Movimientos" [ref=f2e164] [cursor=pointer]
+            - button "Devoluciones" [ref=f2e165] [cursor=pointer]
+          - table [ref=f2e359]:
+            - rowgroup [ref=f2e360]:
+              - row [ref=f2e361]:
+                - columnheader "SKU" [ref=f2e362]
+                - columnheader "Bodega" [ref=f2e363]
+                - columnheader "Cliente final" [ref=f2e364]
+                - columnheader "Cantidad" [ref=f2e365]
+                - columnheader "Estado" [ref=f2e366]
+            - rowgroup [ref=f2e367]:
+              - row [ref=f2e368]:
+                - cell "—" [ref=f2e369]
+                - cell "Bodega Central" [ref=f2e370]
+                - cell "—" [ref=f2e371]
+                - cell "70" [ref=f2e372]
+                - cell "ok" [ref=f2e373]
+  - alert [ref=f2e167]

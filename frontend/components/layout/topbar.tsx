@@ -19,7 +19,7 @@ const TITLES: Record<string, string> = {
   "/client/projects":      "Proyectos",
   "/client/campaigns":     "Campañas",
   "/client/locations":     "Ubicaciones",
-  "/client/promoters":     "Promotores",
+  "/client/promoters":     "Staff",
   "/client/documents":     "Documentos",
   "/client/collaborators": "Colaboradores",
   "/client/reportes":      "Reportes Internos",

@@ -146,11 +146,11 @@ export default function ProjectsPage() {
       <div className="animate-fade-up">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold">Projects</h1>
-            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Group campaigns and activations under a logical container</p>
+            <h1 className="text-xl font-bold">Proyectos</h1>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Agrupa campañas y activaciones bajo un contenedor lógico</p>
           </div>
           <div className="flex gap-2">
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects..."
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar proyectos..."
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", width: 200 }} />
             <button onClick={() => { setShowAI(true); setAiResult(null); setAiFile(null); setAiInboxId(null); }}
               style={{ padding: "9px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
@@ -158,7 +158,7 @@ export default function ProjectsPage() {
             </button>
             <button onClick={() => { setShowForm(true); setSelected(null); setForm({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" }); }}
               style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-              + New Project
+              + Nuevo proyecto
             </button>
           </div>
         </div>
@@ -168,16 +168,16 @@ export default function ProjectsPage() {
           <table className="w-full border-collapse">
             <thead style={{ background: "var(--secondary)" }}>
               <tr>
-                {["Name", "Status", "Start Date", "End Date", "Budget", "Actions"].map(h => (
+                {["Nombre", "Estado", "Inicio", "Fin", "Presupuesto", "Acciones"].map(h => (
                   <th key={h} className="px-4 py-3 text-left" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Loading...</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Cargando...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>No projects found.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>No hay proyectos.</td></tr>
               ) : filtered.map(p => (
                 <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}
                   onMouseEnter={e => (e.currentTarget.style.background = "var(--secondary)")}
@@ -191,7 +191,7 @@ export default function ProjectsPage() {
                   <td className="px-4 py-3 text-sm font-semibold">{fmtMoney(p.budget)}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => openEdit(p)} className="text-xs px-2 py-1 rounded"
-                      style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Edit</button>
+                      style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Editar</button>
                   </td>
                 </tr>
               ))}
@@ -204,24 +204,24 @@ export default function ProjectsPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setShowForm(false)}>
             <div className="rounded-2xl border p-6 w-full max-w-md" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-lg">{selected ? "Edit Project" : "New Project"}</h3>
+                <h3 className="font-bold text-lg">{selected ? "Editar proyecto" : "Nuevo proyecto"}</h3>
                 <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20 }}>✕</button>
               </div>
               <div className="space-y-3">
-                {inp("name", "Project Name *", "text", { placeholder: "Q3 BTL Campaign" })}
-                {inp("description", "Description", "textarea", { placeholder: "Optional description" })}
-                {inp("status", "Status", "select", { options: [{ value: "active", label: "Active" }, { value: "paused", label: "Paused" }, { value: "archived", label: "Archived" }] })}
+                {inp("name", "Nombre del proyecto *", "text", { placeholder: "Q3 BTL Campaign" })}
+                {inp("description", "Descripción", "textarea", { placeholder: "Descripción opcional" })}
+                {inp("status", "Estado", "select", { options: [{ value: "active", label: "Activo" }, { value: "paused", label: "Pausado" }, { value: "archived", label: "Archivado" }] })}
                 <div className="grid grid-cols-2 gap-3">
-                  {inp("start_date", "Start Date", "date")}
-                  {inp("end_date", "End Date", "date")}
+                  {inp("start_date", "Fecha inicio", "date")}
+                  {inp("end_date", "Fecha fin", "date")}
                 </div>
-                {inp("budget", "Budget (CLP)", "number", { placeholder: "5000000" })}
+                {inp("budget", "Presupuesto (CLP)", "number", { placeholder: "5000000" })}
               </div>
               <div className="flex gap-2 mt-5">
-                <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancel</button>
+                <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
                 <button onClick={save} disabled={saving || !form.name.trim()}
                   style={{ flex: 2, padding: "10px", borderRadius: 8, border: "none", background: form.name.trim() ? "var(--red)" : "var(--secondary)", color: form.name.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
-                  {saving ? "Saving..." : selected ? "Save Changes" : "Create Project"}
+                  {saving ? "Guardando..." : selected ? "Guardar cambios" : "Crear proyecto"}
                 </button>
               </div>
             </div>

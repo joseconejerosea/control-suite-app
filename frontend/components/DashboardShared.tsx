@@ -190,14 +190,14 @@ export default function DashboardShared() {
   const actData    = (overview?.trends?.activations_by_week ?? []).map((e) => ({ label: e.week, count: e.count }));
 
   const kpis: KPI[] = [
-    { key: "total_projects",        label: "Total Projects",    value: k.total_projects,        color: "var(--red)",   icon: LayoutDashboard, ...KPI_META.total_projects },
-    { key: "active_campaigns",      label: "Active Campaigns",  value: k.active_campaigns,      color: "#3b82f6",      icon: Megaphone,       ...KPI_META.active_campaigns },
-    { key: "total_activations",     label: "Total Activations", value: k.total_activations,     color: "var(--green)", icon: Activity,        ...KPI_META.total_activations },
-    { key: "activations_completed", label: "Completed",         value: k.activations_completed, color: "var(--green)", icon: TrendingUp,      ...KPI_META.activations_completed },
-    { key: "active_promoters",      label: "Active Promoters",  value: k.active_promoters,      color: "#f59e0b",      icon: Users,           ...KPI_META.active_promoters },
-    { key: "total_locations",       label: "Locations",         value: k.total_locations,       color: "#8b5cf6",      icon: MapPin,          ...KPI_META.total_locations },
-    { key: "events_received_24h",   label: "Events (24h)",      value: k.events_received_24h,   color: "#06b6d4",      icon: Clock,           sub: `${k.events_processed_24h ?? 0} processed`, ...KPI_META.events_received_24h },
-    { key: "documents_populated",   label: "Docs Populated",    value: k.documents_populated,   color: "#f59e0b",      icon: FileText,        sub: `of ${k.documents_uploaded ?? 0} uploaded`, ...KPI_META.documents_populated },
+    { key: "total_projects",        label: "Proyectos",         value: k.total_projects,        color: "var(--red)",   icon: LayoutDashboard, ...KPI_META.total_projects },
+    { key: "active_campaigns",      label: "Campañas activas",  value: k.active_campaigns,      color: "#3b82f6",      icon: Megaphone,       ...KPI_META.active_campaigns },
+    { key: "total_activations",     label: "Activaciones",      value: k.total_activations,     color: "var(--green)", icon: Activity,        ...KPI_META.total_activations },
+    { key: "activations_completed", label: "Completadas",       value: k.activations_completed, color: "var(--green)", icon: TrendingUp,      ...KPI_META.activations_completed },
+    { key: "active_promoters",      label: "Staff activo",      value: k.active_promoters,      color: "#f59e0b",      icon: Users,           ...KPI_META.active_promoters },
+    { key: "total_locations",       label: "Ubicaciones",       value: k.total_locations,       color: "#8b5cf6",      icon: MapPin,          ...KPI_META.total_locations },
+    { key: "events_received_24h",   label: "Eventos (24h)",     value: k.events_received_24h,   color: "#06b6d4",      icon: Clock,           sub: `${k.events_processed_24h ?? 0} procesados`, ...KPI_META.events_received_24h },
+    { key: "documents_populated",   label: "Docs poblados",     value: k.documents_populated,   color: "#f59e0b",      icon: FileText,        sub: `de ${k.documents_uploaded ?? 0} subidos`, ...KPI_META.documents_populated },
   ];
 
   const selectStyle = {
@@ -228,7 +228,7 @@ export default function DashboardShared() {
           )}
           <button onClick={load} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-colors"
             style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
-            <RefreshCw size={12} /> Refresh
+            <RefreshCw size={12} /> Actualizar
           </button>
         </div>
       </div>
@@ -241,14 +241,14 @@ export default function DashboardShared() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <div className="rounded-xl p-5 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-          <div className="text-sm font-semibold mb-1">Events Received</div>
+          <div className="text-sm font-semibold mb-1">Eventos recibidos</div>
           <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>
             {period === "day" ? "Últimas 24h" : period === "week" ? "Esta semana" : period === "month" ? "Últimos 30 días" : "Este año"}
           </div>
           <SimpleBarChart data={eventsData} color="var(--red)" />
         </div>
         <div className="rounded-xl p-5 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-          <div className="text-sm font-semibold mb-1">Activations per Week</div>
+          <div className="text-sm font-semibold mb-1">Activaciones por semana</div>
           <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>Últimas 12 semanas</div>
           <SimpleBarChart data={actData} color="var(--green)" />
         </div>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import { roleLabel } from "@/lib/roles";
 import {
   LayoutDashboard, FolderOpen, MapPin, Users, Megaphone,
   FileText, UserCircle, Zap, Building2, ChevronRight,
@@ -23,7 +24,7 @@ const CLIENT_SECTIONS = [
     { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
     { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
     { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
-    { label: "Promotores", icon: Users, href: "/client/promoters" },
+    { label: "Staff", icon: Users, href: "/client/promoters" },
     { label: "Documentos", icon: FileText, href: "/client/documents" },
     { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
   ]},
@@ -72,7 +73,11 @@ export default function Sidebar() {
   }, []);
 
   const isSuperAdmin = user?.role === "super_admin";
-  const isAdmin = isSuperAdmin || user?.role === "admin_cliente";
+  // El toggle "Administrador" expone ADMIN_SECTIONS = secciones de PLATAFORMA (Clientes/tenants,
+  // Facturación, Auditoría AI, Monitoreo global) — territorio de SUPERADMIN / SERVICE_LEAD, NO del
+  // admin_cliente, que es admin del TENANT (MANAGER) y solo debe ver las secciones de Cliente.
+  // Se reserva para SERVICE_LEAD cuando ese rol exista en el front (migración a 6 roles).
+  const showPlatformToggle = false; // TODO(roles-6): user?.role === "service_lead"
   const sections = isSuperAdmin
     ? [{ label: "", items: SUPER_ADMIN_ITEMS.map(i => ({ ...i, badge: undefined })) }]
     : role === "admin" ? ADMIN_SECTIONS : CLIENT_SECTIONS;
@@ -89,7 +94,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {!isSuperAdmin && isAdmin && (
+      {showPlatformToggle && (
         <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border)" }}>
           <div className="flex rounded-lg p-0.5 text-xs" style={{ background: "var(--secondary)" }}>
             <button onClick={() => setRole("admin")} className="flex-1 py-1.5 rounded-md font-medium"
@@ -111,7 +116,7 @@ export default function Sidebar() {
           </div>
           <div className="overflow-hidden">
             <div className="text-xs truncate" style={{ color: "var(--foreground)" }}>{user.email}</div>
-            <div className="text-xs" style={{ color: "var(--muted-foreground)", textTransform: "uppercase", fontSize: "10px" }}>{user.role?.replace("_", " ")}</div>
+            <div className="text-xs" style={{ color: "var(--muted-foreground)", textTransform: "uppercase", fontSize: "10px" }}>{roleLabel(user.role)}</div>
           </div>
         </div>
       )}
