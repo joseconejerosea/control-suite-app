@@ -27,11 +27,13 @@ async function request<T>(
 
   if (res.status === 401 && path.includes("/auth/login")) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data?.message ?? "Invalid credentials");
+    throw new Error(data?.error?.message ?? data?.message ?? "Invalid credentials");
   }
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.message ?? `HTTP ${res.status}`);
+  // El backend envuelve los errores como { success: false, error: { message, statusCode } }.
+  // Leer error.message primero; data.message queda como fallback para respuestas sin envolver.
+  if (!res.ok) throw new Error(data?.error?.message ?? data?.message ?? `HTTP ${res.status}`);
   return data as T;
 }
 

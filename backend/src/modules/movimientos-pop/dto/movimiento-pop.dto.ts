@@ -4,8 +4,9 @@ export class CreateMovimientoDto {
   @IsUUID() sku_id: string;
   @IsOptional() @IsUUID() persona_id?: string;
   @IsOptional() @IsUUID() bodega_origen_id?: string;
-  /** Requerido para tipo salida, consumo o transfer; opcional para los demás */
-  @ValidateIf(o => ['salida', 'consumo', 'transfer'].includes(o.tipo))
+  /** Requerido para tipo salida o consumo; opcional para los demás.
+   * El traslado NO lo lleva: es un movimiento bodega↔bodega, sin proyecto. */
+  @ValidateIf(o => ['salida', 'consumo'].includes(o.tipo))
   @IsUUID() proyecto_destino_id?: string;
   @IsOptional() @IsUUID() bodega_destino_id?: string;
   @IsIn(['salida','entrada','devolucion','consumo','merma','transfer','adjustment']) tipo: string;

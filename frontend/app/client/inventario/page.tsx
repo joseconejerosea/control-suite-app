@@ -101,8 +101,9 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
   );
 }
 
-// tipos que requieren proyecto_destino_id
-const TIPOS_CON_PROYECTO = new Set(["salida", "consumo", "transfer"]);
+// tipos que requieren proyecto_destino_id. El traslado NO lo lleva: es un movimiento
+// entre bodegas, sin proyecto. Marcarlo como requerido contaminaba la merma del proyecto.
+const TIPOS_CON_PROYECTO = new Set(["salida", "consumo"]);
 
 // ─── MOVIMIENTO MODAL ────────────────────────────────────────────────────
 function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose: () => void; onDone: () => void; bodegas: any[]; skus: any[]; projects: any[] }) {
@@ -111,7 +112,11 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
   const [error, setError] = useState("");
 
   const requiereProyecto = TIPOS_CON_PROYECTO.has(form.tipo);
-  const canSave = !!form.sku_id && !!form.cantidad && (!requiereProyecto || !!form.proyecto_destino_id);
+  // El traslado exige ambas bodegas (origen y destino); el backend las requiere.
+  const esTraslado = form.tipo === "transfer";
+  const canSave = !!form.sku_id && !!form.cantidad
+    && (!requiereProyecto || !!form.proyecto_destino_id)
+    && (!esTraslado || (!!form.bodega_origen_id && !!form.bodega_destino_id));
 
   const save = async () => {
     if (!canSave) return;
@@ -312,7 +317,7 @@ export default function InventarioPage() {
                       <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}
                         onMouseEnter={e => (e.currentTarget.style.background = "var(--secondary)")}
                         onMouseLeave={e => (e.currentTarget.style.background = "")}>
-                        <td style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500 }}>{item.sku_nombre ?? item.sku_codigo ?? "—"}</td>
+                        <td style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500 }}>{item.sku_nombre ?? item.nombre ?? item.sku_codigo ?? item.codigo ?? "—"}</td>
                         <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{item.bodega_nombre ?? "—"}</td>
                         <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{item.cliente_final ?? "—"}</td>
                         <td style={{ padding: "10px 16px", fontSize: 14, fontWeight: 700 }}>{item.cantidad ?? 0}</td>
@@ -379,8 +384,8 @@ export default function InventarioPage() {
                       <td style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500 }}>{m.sku_nombre ?? "—"}</td>
                       <td style={{ padding: "10px 16px", fontSize: 13, textTransform: "capitalize", color: "var(--muted-foreground)" }}>{m.tipo ?? "—"}</td>
                       <td style={{ padding: "10px 16px", fontSize: 14, fontWeight: 700 }}>{m.cantidad ?? 0}</td>
-                      <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{m.bodega_origen ?? "—"}</td>
-                      <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{m.bodega_destino ?? "—"}</td>
+                      <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{m.bodega_nombre ?? m.bodega_origen ?? "—"}</td>
+                      <td style={{ padding: "10px 16px", fontSize: 13, color: "var(--muted-foreground)" }}>{m.proyecto_nombre ?? m.bodega_destino ?? "—"}</td>
                       <td style={{ padding: "10px 16px", fontSize: 12, color: "var(--muted-foreground)" }}>
                         {m.created_at ? new Date(m.created_at).toLocaleDateString("es-CL") : "—"}
                       </td>

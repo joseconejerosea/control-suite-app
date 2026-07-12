@@ -19,17 +19,19 @@ export class StockReturnsService {
 
   async triggerReturnRequests(clientId: string, projectId: string): Promise<void> {
     const pending = await this.ds.query(
+      // Las patas 'transfer_out' se graban como tipo='salida' pero son movimientos bodega↔bodega,
+      // no salidas al proyecto: se excluyen para no pedir devoluciones de material nunca enviado.
       `SELECT m.persona_id, m.sku_id, s.nombre as sku_nombre, s.codigo,
-              SUM(m.cantidad) FILTER (WHERE m.tipo = 'salida') as salidas,
+              SUM(m.cantidad) FILTER (WHERE m.tipo = 'salida' AND m.estado <> 'transfer_out') as salidas,
               COALESCE(SUM(m.cantidad) FILTER (WHERE m.tipo IN ('devolucion','entrada')), 0) as devueltos,
-              SUM(m.cantidad) FILTER (WHERE m.tipo = 'salida')
+              SUM(m.cantidad) FILTER (WHERE m.tipo = 'salida' AND m.estado <> 'transfer_out')
                 - COALESCE(SUM(m.cantidad) FILTER (WHERE m.tipo IN ('devolucion','entrada')), 0)
                 - COALESCE(SUM(m.cantidad) FILTER (WHERE m.tipo = 'consumo'), 0) as pendiente
        FROM movimientos_pop m
        JOIN skus s ON s.id = m.sku_id
        WHERE m.client_id = $1 AND m.proyecto_destino_id = $2
        GROUP BY m.persona_id, m.sku_id, s.nombre, s.codigo
-       HAVING SUM(m.cantidad) FILTER (WHERE m.tipo = 'salida')
+       HAVING SUM(m.cantidad) FILTER (WHERE m.tipo = 'salida' AND m.estado <> 'transfer_out')
               - COALESCE(SUM(m.cantidad) FILTER (WHERE m.tipo IN ('devolucion','entrada')), 0)
               - COALESCE(SUM(m.cantidad) FILTER (WHERE m.tipo = 'consumo'), 0) > 0`,
       [clientId, projectId],

@@ -1,0 +1,23 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: Control Suite
+      - heading "Operations. Unified." [level=1] [ref=e10]: Operations.Unified.
+      - paragraph [ref=e11]: Complete platform for campaigns, activations, promoters, and AI-powered field operations.
+      - generic [ref=e12]: Client isolation & role-based access
+      - generic [ref=e14]: AI-powered document ingestion
+      - generic [ref=e16]: Real-time KPI dashboard
+    - generic [ref=e19]:
+      - heading "Sign in" [level=2] [ref=e20]
+      - paragraph [ref=e21]: Enter your credentials to continue
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]: Email
+          - textbox "you@company.com" [ref=e25]
+        - generic [ref=e26]:
+          - generic [ref=e27]: Password
+          - generic [ref=e28]:
+            - textbox "••••••••" [ref=e29]
+            - button [ref=e30] [cursor=pointer]
+        - button "Sign in" [ref=e34] [cursor=pointer]
+  - alert [ref=e37]
