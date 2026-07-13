@@ -18,6 +18,7 @@ import { UserRole } from '../../common/enums/user-role.enum';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
+const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
 
 // F4 Fase 3 (alta urgente): dedup de la notificación al operador por número
 // desconocido. Module-level (vida del proceso) para no re-avisar en cada mensaje
@@ -37,6 +38,7 @@ export class WhatsAppWebhookController {
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
     @InjectQueue(QUEUE_CONVOCATORIA_CLASSIFY) private readonly convocatoriaQueue: Queue,
+    @InjectQueue(QUEUE_STOCK_RETURN_PHOTO) private readonly returnPhotoQueue: Queue,
     private readonly shield: PromptShieldService,
   ) {}
 
@@ -266,6 +268,29 @@ export class WhatsAppWebhookController {
     }
 
     try {
+      // ── F3 devoluciones ──────────────────────────────────────────────────
+      // Si el emisor tiene una devolución pendiente esperando foto, la imagen es
+      // la evidencia de la devolución (no un documento F1). Se rutea a receivePhoto
+      // vía cola (la clasificación con IA no debe bloquear la respuesta a Meta).
+      const returnRequestId = await this.devolucionPendienteFor(from, clientId);
+      if (returnRequestId) {
+        const ret = await this.media.downloadAndStore(imageId, clientId, 'evidence');
+        await this.persistEvent({
+          clientId, canalId, messageId, from, type: 'image', flow: 'F3_RETURN',
+          payload: {
+            storage_path: ret.storagePath,
+            mime_type: ret.mimeType,
+            return_request_id: returnRequestId,
+          },
+        });
+        await this.returnPhotoQueue.add('stock-return-photo', {
+          client_id: clientId, return_request_id: returnRequestId, storage_path: ret.storagePath,
+        }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
+        await this.wa.sendText(from, 'Recibí la foto de tu devolución. La estamos revisando, te confirmamos en breve.');
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const result = await this.media.downloadAndStore(imageId, clientId, 'documents');
 
       // Use ProjectResolverService for smart project assignment
@@ -613,6 +638,33 @@ export class WhatsAppWebhookController {
       [clientId, from],
     ).catch(() => []);
     return rows.length > 0;
+  }
+
+  // ── Return photo (F3 devoluciones) ────────────────────────────────────────
+
+  /**
+   * ¿El emisor tiene una devolución pendiente esperando foto? Devuelve el id del
+   * stock_return_request más reciente sin foto, o null. Se compara por DÍGITOS
+   * del teléfono (igual que el gate isAuthorizedSender): el `from` de Meta llega
+   * 549... y el phone guardado tiene '+', espacios, etc.
+   */
+  private async devolucionPendienteFor(from: string, clientId: string): Promise<string | null> {
+    const digits = normalizePhone(from);
+    const rows = await this.ds.query(
+      `SELECT srr.id FROM stock_return_requests srr
+        WHERE srr.client_id = $1
+          AND srr.status = 'pending'
+          AND srr.photo_key IS NULL
+          AND srr.persona_id IN (
+            SELECT id FROM promoters    WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2
+            UNION
+            SELECT id FROM collaborators WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2
+          )
+        ORDER BY srr.requested_at DESC
+        LIMIT 1`,
+      [clientId, digits],
+    ).catch(() => []);
+    return rows?.[0]?.id ?? null;
   }
 
   /**

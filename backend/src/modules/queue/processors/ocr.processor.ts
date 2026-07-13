@@ -126,6 +126,13 @@ export class OcrProcessor extends WorkerHost {
     base64: string,
     mimeType: string,
   ): Promise<{ text: string; usage: { input_tokens: number; output_tokens: number } | null }> {
+    // Los bloques `image` de Claude solo aceptan imágenes (JPG/PNG/WEBP/GIF). Un PDF
+    // debe ir como bloque `document`; sin esto, las facturas/boletas en PDF fallaban
+    // el OCR. Se rutea por mime: PDF → document, resto → image.
+    const fileBlock = mimeType === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image',    source: { type: 'base64', media_type: mimeType,          data: base64 } };
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -139,8 +146,8 @@ export class OcrProcessor extends WorkerHost {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
-            { type: 'text', text: 'Extract ALL text from this document image. Output only the raw text, preserving structure. No explanations.' },
+            fileBlock,
+            { type: 'text', text: 'Extract ALL text from this document. Output only the raw text, preserving structure. No explanations.' },
           ],
         }],
       }),

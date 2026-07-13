@@ -19,9 +19,9 @@ import { TargetTable } from './document-upload.entity';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — debe coincidir con el límite del plugin multipart (main.ts)
 
-// Allow-list de MIME aceptados en el upload de documentos estructurados
-// (decisión 2026-06-23: PDF, imágenes, Excel/CSV, Word). Excluye PPT/video
-// a propósito; si se requieren, agregar acá Y en el parse() del service.
+// Allow-list de MIME aceptados en el upload de documentos estructurados.
+// Alineado con lo que parse() del service ya interpreta (PDF, imágenes,
+// Excel/CSV, Word, PPT y video), según el brief §F4.
 const ALLOWED_MIME = new Set<string>([
   'application/pdf',
   'image/jpeg',
@@ -31,6 +31,11 @@ const ALLOWED_MIME = new Set<string>([
   'text/csv',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
   'application/msword', // .doc
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'application/vnd.ms-powerpoint', // .ppt
+  'video/mp4',        // .mp4
+  'video/quicktime',  // .mov
+  'video/x-msvideo',  // .avi
 ]);
 
 const ALLOWED_TARGET_TABLES: ReadonlySet<TargetTable> = new Set<TargetTable>([
@@ -75,7 +80,7 @@ export class DocumentIngestionController {
     // 1) MIME allow-list (disponible antes de consumir el stream)
     if (!ALLOWED_MIME.has(data.mimetype)) {
       throw new UnsupportedMediaTypeException(
-        `Tipo de archivo no permitido: ${data.mimetype}. Permitidos: PDF, imagen (JPG/PNG), Excel/CSV, Word.`,
+        `Tipo de archivo no permitido: ${data.mimetype}. Permitidos: PDF, imagen (JPG/PNG), Excel/CSV, Word, PPT, video (MP4/MOV/AVI).`,
       );
     }
 

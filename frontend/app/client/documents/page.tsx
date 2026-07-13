@@ -75,7 +75,7 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
         <div onClick={() => inputRef.current?.click()}
           className="rounded-xl p-8 text-center cursor-pointer transition-colors mb-4"
           style={{ border: `2px dashed ${file ? "var(--green)" : "var(--border)"}`, background: file ? "var(--green-dim)" : "var(--secondary)" }}>
-          <input ref={inputRef} type="file" accept=".csv,.xlsx,.pdf" className="hidden"
+          <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.docx,.doc,.pptx,.ppt,.mp4,.mov,.avi" className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           {file ? (
             <div>

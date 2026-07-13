@@ -10,12 +10,14 @@ import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
+const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
 
 @Module({
   imports: [
     BullModule.registerQueue(
       { name: QUEUE_OCR },
       { name: QUEUE_CONVOCATORIA_CLASSIFY },
+      { name: QUEUE_STOCK_RETURN_PHOTO },
     ),
   ],
   controllers: [WhatsAppWebhookController],
