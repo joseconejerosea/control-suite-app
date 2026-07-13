@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: controlsuite-backend-${ENV:-dev}
     env_file: ./backend/.env
+    depends_on:
+      - redis
     ports:
       - "${PORT:-3001}:${PORT:-3001}"
     restart: always
@@ -19,3 +21,17 @@ services:
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     restart: always
+
+  # Redis local para BullMQ (colas) + locks de idempotencia. Reemplaza a Upstash,
+  # que reventaba el límite de 500k requests del plan free porque BullMQ pollea
+  # Redis constantemente. Self-hosted no tiene ese tope.
+  redis:
+    image: redis:7-alpine
+    container_name: controlsuite-redis-${ENV:-dev}
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    restart: always
+
+volumes:
+  redis-data:
