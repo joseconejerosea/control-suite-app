@@ -16,7 +16,9 @@ import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, Valida
 import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
-  user: { id: string; client_id: string; role: string };
+  // El AuthGuard puebla req.user con el JWT decodificado, cuyo id de usuario es el
+  // claim `sub` (no `id`). Tipar `id` acá compilaba pero devolvía undefined en runtime.
+  user: { sub: string; client_id: string; role: string };
 }
 
 // ── DTOs inline (small, project-specific) ────────────────────────────────────
@@ -130,7 +132,7 @@ export class ProjectsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AprobarProyectoDto,
   ) {
-    return this.service.aprobarProyecto(req.user.client_id, id, req.user.id, dto.comentario);
+    return this.service.aprobarProyecto(req.user.client_id, id, req.user.sub, dto.comentario);
   }
 
   // ── F4: Shift calendar — persona × día ───────────────────────────────────

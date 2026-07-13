@@ -17,12 +17,17 @@ import {
   ProjectInboxExtractProcessor,
   QUEUE_PROJECT_INBOX_EXTRACT,
 } from './processors/project-inbox-extract.processor';
+import {
+  StockReturnPhotoProcessor,
+  QUEUE_STOCK_RETURN_PHOTO,
+} from './processors/stock-return-photo.processor';
 import { MetricsModule } from '../metrics/metrics.module';
 import { SheetsModule } from '../sheets/sheets.module';
 import { MindModule } from '../mind/mind.module';
 import { RendicionesModule } from '../rendiciones/rendiciones.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { MovimientosPopModule } from '../movimientos-pop/movimientos-pop.module';
 
 const QUEUE_OCR            = 'ocr';
 const QUEUE_CLASSIFY       = 'classify';
@@ -50,6 +55,7 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
       { name: QUEUE_MIND_PROACTIVE },
       { name: QUEUE_CONVOCATORIA_CLASSIFY },
       { name: QUEUE_PROJECT_INBOX_EXTRACT },
+      { name: QUEUE_STOCK_RETURN_PHOTO },
       { name: 'report-gen' },
     ),
     MetricsModule,
@@ -58,6 +64,7 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
     RendicionesModule,
     WhatsAppModule,
     ProjectsModule,
+    MovimientosPopModule,
   ],
   providers: [
     EventProducer,
@@ -70,6 +77,7 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
     ReportProcessor,
     ConvocatoriaClassifyProcessor,
     ProjectInboxExtractProcessor,
+    StockReturnPhotoProcessor,
   ],
   exports: [BullModule, EventProducer],
 })

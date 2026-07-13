@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../metrics/metrics.service';
 import { ProjectResolverService } from '../../project-resolver/project-resolver.service';
 import { ClarificationService } from '../../project-resolver/clarification.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
 
 const QUEUE_F1_PERSIST   = 'persist';
@@ -26,6 +27,7 @@ export class ClassifyProcessor extends WorkerHost {
     private readonly metrics: MetricsService,
     private readonly projectResolver: ProjectResolverService,
     private readonly clarificationService: ClarificationService,
+    private readonly wa: WhatsAppService,
   ) {
     super();
   }
@@ -208,11 +210,24 @@ export class ClassifyProcessor extends WorkerHost {
       }
     }
 
-    if (classification.tipo !== 'no_clasificable') {
-      await this.persistQueue.add('persist', {
-        evento_crudo_id, client_id, classification, processing_status: processingStatus,
-      }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 } });
+    // no_clasificable: el archivo ya quedó guardado (Storage + evento 'unclassified'),
+    // pero NO se persiste como factura. Avisar al remitente por WhatsApp para no
+    // dejarlo colgado en "procesando..." tras el "Documento recibido" inicial.
+    if (classification.tipo === 'no_clasificable') {
+      const phoneNumber = payload?.from as string;
+      if (phoneNumber && canal === 'whatsapp') {
+        const userLang = await this.getUserLanguage(phoneNumber, client_id);
+        const msg = userLang === 'en'
+          ? 'File saved ✓. I could not recognize it as an invoice or receipt, so it was archived without processing.'
+          : 'Archivo guardado ✓. No lo reconocí como factura o boleta, así que quedó archivado sin procesar.';
+        await this.wa.sendText(phoneNumber, msg).catch(() => {});
+      }
+      return;
     }
+
+    await this.persistQueue.add('persist', {
+      evento_crudo_id, client_id, classification, processing_status: processingStatus,
+    }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 } });
   }
 
   // Campos críticos para crear la factura (persist.processor): monto, fecha y proveedor.
