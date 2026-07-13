@@ -1,0 +1,78 @@
+- generic [active] [ref=f10e1]:
+  - generic [ref=f10e2]:
+    - complementary [ref=f10e3]:
+      - generic [ref=f10e8]:
+        - generic [ref=f10e9]: Control Suite
+        - generic [ref=f10e10]: Operations Platform
+      - generic [ref=f10e11]:
+        - generic [ref=f10e12]: A
+        - generic [ref=f10e13]:
+          - generic [ref=f10e14]: admincliente.demo@controlsuite.com
+          - generic [ref=f10e15]: Manager
+      - navigation [ref=f10e16]:
+        - generic [ref=f10e17]:
+          - generic [ref=f10e18]: General
+          - link "Dashboard" [ref=f10e19] [cursor=pointer]:
+            - /url: /client/dashboard
+        - generic [ref=f10e26]:
+          - generic [ref=f10e27]: Operación
+          - link "Reportes Internos" [ref=f10e28] [cursor=pointer]:
+            - /url: /client/reportes
+          - link "Documentos por revisar" [ref=f10e33] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+          - link "Inventario POP" [ref=f10e37] [cursor=pointer]:
+            - /url: /client/inventario
+          - link "Rendiciones" [ref=f10e45] [cursor=pointer]:
+            - /url: /client/rendiciones
+          - link "Terreno" [ref=f10e50] [cursor=pointer]:
+            - /url: /client/terreno
+          - link "Calendario" [ref=f10e58] [cursor=pointer]:
+            - /url: /client/calendario
+          - link "Proyectos" [ref=f10e62] [cursor=pointer]:
+            - /url: /client/projects
+          - link "Campañas" [ref=f10e66] [cursor=pointer]:
+            - /url: /client/campaigns
+          - link "Ubicaciones" [ref=f10e71] [cursor=pointer]:
+            - /url: /client/locations
+          - link "Staff" [ref=f10e76] [cursor=pointer]:
+            - /url: /client/promoters
+          - link "Documentos" [ref=f10e83] [cursor=pointer]:
+            - /url: /client/documents
+          - link "Colaboradores" [ref=f10e88] [cursor=pointer]:
+            - /url: /client/collaborators
+        - generic [ref=f10e94]:
+          - generic [ref=f10e95]: Configuración
+          - link "Configuración" [ref=f10e96] [cursor=pointer]:
+            - /url: /client/config
+          - link "Equivalencias OCR" [ref=f10e101] [cursor=pointer]:
+            - /url: /client/equivalencias
+        - generic [ref=f10e108]:
+          - generic [ref=f10e109]: IA
+          - link "Control Mind" [ref=f10e110] [cursor=pointer]:
+            - /url: /client/mind
+      - button "Sign out" [ref=f10e121] [cursor=pointer]
+    - generic [ref=f10e122]:
+      - banner [ref=f10e123]:
+        - heading "Inventario POP" [level=1] [ref=f10e124]
+        - generic [ref=f10e125]:
+          - button [ref=f10e126] [cursor=pointer]
+          - generic [ref=f10e131]: AD
+          - button "Sign out" [ref=f10e132] [cursor=pointer]
+      - main [ref=f10e136]:
+        - generic [ref=f10e137]:
+          - generic [ref=f10e138]:
+            - generic [ref=f10e139]:
+              - heading "Inventario POP" [level=1] [ref=f10e140]
+              - paragraph [ref=f10e141]: Materiales y stock de punto de venta
+            - generic [ref=f10e142]:
+              - textbox "Buscar por SKU, marca, bodega..." [ref=f10e143]
+              - button "Movimiento" [ref=f10e144] [cursor=pointer]
+              - button "+ SKU" [ref=f10e148] [cursor=pointer]
+              - button "+ Bodega" [ref=f10e153] [cursor=pointer]
+          - generic [ref=f10e157]:
+            - button "Bodega" [ref=f10e158] [cursor=pointer]
+            - button "SKUs" [ref=f10e159] [cursor=pointer]
+            - button "Movimientos" [ref=f10e160] [cursor=pointer]
+            - button "Devoluciones" [ref=f10e161] [cursor=pointer]
+          - generic [ref=f10e191]: Cargando...
+  - alert [ref=f10e163]

@@ -66,6 +66,16 @@ export class StockReturnsService {
     const projectName = projRows[0]?.name ?? '';
 
     for (const [personaId, items] of grouped) {
+      // Idempotencia: si ya hay una devolución PENDIENTE (sin resolver) para este
+      // proyecto+persona, no re-enviar ni duplicar el pedido — p.ej. si el proyecto
+      // se re-cierra o el trigger se repite. Una sola devolución abierta a la vez.
+      const yaAbierta = await this.ds.query(
+        `SELECT 1 FROM stock_return_requests
+          WHERE client_id=$1 AND project_id=$2 AND persona_id=$3 AND status='pending' LIMIT 1`,
+        [clientId, projectId, personaId],
+      ).catch(() => []);
+      if (yaAbierta.length) continue;
+
       const phone = await this.resolvePhone(personaId, clientId);
       if (!phone) continue;
 
