@@ -40,6 +40,7 @@ import { InventarioModule } from './modules/inventario/inventario.module';
 import { MindModule } from './modules/mind/mind.module';
 import { EquivalenciasModule } from './modules/equivalencias/equivalencias.module';
 import { F5Module } from './modules/f5/f5.module';
+import { F5ViewsModule } from './modules/f5-views/f5-views.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { CronModule } from './modules/cron/cron.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
@@ -96,6 +97,7 @@ import { SupportModule } from './modules/support/support.module';
 
     EquivalenciasModule,
     F5Module,
+    F5ViewsModule,
     WhatsAppModule,
     CronModule,
     MonitoringModule,
