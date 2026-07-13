@@ -9,11 +9,15 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
+import { OperatorNotifierService } from '../whatsapp/operator-notifier.service';
 
 @UseGuards(AuthGuard, ClientIsolationGuard, ClientActiveGuard, RolesGuard)
 @Controller('f5')
 export class F5ViewController {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly notifier: OperatorNotifierService,
+  ) {}
 
   // ── Checkins ────────────────────────────────────────────────────────────
   @Get('activaciones/:id/checkins')
@@ -62,7 +66,15 @@ export class F5ViewController {
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [user.client_id, id, user.sub, body.descripcion, body.severidad ?? 'media', body.categoria],
     );
-    return rows[0];
+    const incidencia = rows[0];
+
+    // F5 Fase 3: novedad crítica → avisar al operador (process map: "notifica en
+    // cada novedad"). Misma regla que F5Controller: sólo severidad alta dispara.
+    if ((body.severidad ?? 'media') === 'alta') {
+      const msg = `🔴 Incidencia ALTA en activación ${id}: ${body.descripcion}`;
+      await this.notifier.notificar(user.client_id, msg, `f5-incidencia:${incidencia.id}`).catch(() => {});
+    }
+    return incidencia;
   }
 
   @Patch('incidencias/:id/resolver')

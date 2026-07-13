@@ -198,6 +198,11 @@ export class WhatsAppWebhookController {
   private async isAuthorizedSender(from: string, clientId: string): Promise<boolean> {
     const digits = normalizePhone(from);
     try {
+      // Actores autorizados a usar el bot por WhatsApp:
+      //  - Staff (tabla promoters) y colaboradores → personas de terreno.
+      //  - Usuarios con rol Manager/Operador/Supervisor (spec de roles): también
+      //    registran documentos/boletas/material/novedades por WhatsApp. Super Admin
+      //    y Service Lead son plataforma → NO usan el bot.
       const rows = await this.ds.query(
         `SELECT 1
          FROM promoters
@@ -209,6 +214,14 @@ export class WhatsAppWebhookController {
          FROM collaborators
          WHERE client_id = $1
            AND is_active = true
+           AND regexp_replace(phone, '\\D', '', 'g') = $2
+         UNION
+         SELECT 1
+         FROM users
+         WHERE client_id = $1
+           AND is_active = true
+           AND role IN ('${UserRole.MANAGER}','${UserRole.OPERATOR}','${UserRole.SUPERVISOR}')
+           AND phone IS NOT NULL
            AND regexp_replace(phone, '\\D', '', 'g') = $2
          LIMIT 1`,
         [clientId, digits],
