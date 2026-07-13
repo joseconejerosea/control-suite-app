@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { AuditService } from '../audit/audit.service';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { runWithTenant } from '../../common/tenant/tenant-context';
 
 @Injectable()
 export class StockReturnsService {
@@ -18,6 +19,15 @@ export class StockReturnsService {
   ) {}
 
   async triggerReturnRequests(clientId: string, projectId: string): Promise<void> {
+    // Se invoca fire-and-forget desde projects.service.update, FUERA de la transacción
+    // del request (que setea el tenant GUC transaction-local). Sin abrir nuestro propio
+    // contexto, estas queries corren sin GUC y RLS filtra todo: movimientos_pop y
+    // stock_return_requests tienen RLS → la lectura de pendientes daba 0 y no se
+    // creaba la devolución ni salía el WhatsApp.
+    await runWithTenant(this.ds, clientId, () => this.doTriggerReturnRequests(clientId, projectId));
+  }
+
+  private async doTriggerReturnRequests(clientId: string, projectId: string): Promise<void> {
     const pending = await this.ds.query(
       // Las patas 'transfer_out' se graban como tipo='salida' pero son movimientos bodega↔bodega,
       // no salidas al proyecto: se excluyen para no pedir devoluciones de material nunca enviado.
