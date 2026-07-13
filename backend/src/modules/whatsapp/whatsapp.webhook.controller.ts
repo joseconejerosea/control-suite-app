@@ -15,6 +15,7 @@ import { constantTimeEqual } from '../../common/utils/constant-time';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { runWithTenant } from '../../common/tenant/tenant-context';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
@@ -650,7 +651,9 @@ export class WhatsAppWebhookController {
    */
   private async devolucionPendienteFor(from: string, clientId: string): Promise<string | null> {
     const digits = normalizePhone(from);
-    const rows = await this.ds.query(
+    // stock_return_requests tiene RLS y el webhook es @Public (sin contexto de tenant):
+    // sin runWithTenant, RLS filtra la fila y la devolución nunca se detecta.
+    const rows = await runWithTenant(this.ds, clientId, () => this.ds.query(
       `SELECT srr.id FROM stock_return_requests srr
         WHERE srr.client_id = $1
           AND srr.status = 'pending'
@@ -663,7 +666,7 @@ export class WhatsAppWebhookController {
         ORDER BY srr.requested_at DESC
         LIMIT 1`,
       [clientId, digits],
-    ).catch(() => []);
+    )).catch(() => []);
     return rows?.[0]?.id ?? null;
   }
 
