@@ -91,7 +91,9 @@ export class WhatsAppService {
     local: string;
     direccion: string;
   }): Promise<boolean> {
-    const msg = `Hola ${opts.nombrePromotor} 👋
+    // El promotor puede no tener nombre cargado; evitar "Hola null 👋".
+    const saludo = opts.nombrePromotor?.trim() ? `Hola ${opts.nombrePromotor.trim()} 👋` : 'Hola 👋';
+    const msg = `${saludo}
 
 Te convocamos para la activación *${opts.proyecto}*:
 

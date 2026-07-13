@@ -628,16 +628,20 @@ export class WhatsAppWebhookController {
    * debe rutearse al clasificador F4 (Fase 2) en vez del handler genérico.
    */
   private async tieneConvocatoriaAbierta(from: string, clientId: string): Promise<boolean> {
-    const rows = await this.ds.query(
+    const digits = normalizePhone(from);
+    // convocatorias tiene RLS y el webhook es @Public (sin contexto de tenant): sin
+    // runWithTenant la query no ve la fila. Y el teléfono debe matchear por DÍGITOS
+    // (el `from` de Meta llega 549... y el phone guardado tiene '+', espacios).
+    const rows = await runWithTenant(this.ds, clientId, () => this.ds.query(
       `SELECT 1 FROM convocatorias c
         WHERE c.client_id=$1
           AND c.estado IN ('enviada','pendiente')
           AND c.persona_id IN (
-            SELECT id FROM promoters WHERE phone=$2 AND client_id=$1 LIMIT 1
+            SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1
           )
         LIMIT 1`,
-      [clientId, from],
-    ).catch(() => []);
+      [clientId, digits],
+    )).catch(() => []);
     return rows.length > 0;
   }
 
