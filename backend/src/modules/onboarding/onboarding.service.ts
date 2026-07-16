@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  GatewayTimeoutException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,6 +21,9 @@ import { ProvisionWhatsAppDto } from './dto/provision-whatsapp.dto';
 import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
 import { tenantManager } from '../../common/tenant/tenant-context';
 import { UserRole } from '../../common/enums/user-role.enum';
+
+const META_API = 'https://graph.facebook.com/v19.0';
+const META_TIMEOUT_MS = 15_000;
 
 const STEP_ORDER = [
   'client_created',
@@ -92,14 +97,19 @@ export class OnboardingService {
   }
 
   // ── Step 2b: Provision WhatsApp ───────────────────────────────────────────
-  // Uses existing registered test number from env.
-  // Meta test mode does not allow registering new numbers via API.
+  // Registers a new number against the Meta WhatsApp Cloud API (WABA) and
+  // triggers the OTP. The number stays inactive until the OTP is verified.
 
   async provisionWhatsApp(
     clientId: string,
     canalEntradaId: string,
     dto: ProvisionWhatsAppDto,
   ): Promise<{ phone_number_id: string; message: string }> {
+    // R3-008/R4-006 — fail-fast on server misconfiguration before touching Meta,
+    // otherwise we would POST to a malformed URL (empty WABA id) or send
+    // `Bearer undefined`.
+    this.assertMetaConfig();
+
     const client = await this.loadActiveClient(clientId);
     this.requireStep(client, 'channel_configured');
 
@@ -108,41 +118,94 @@ export class OnboardingService {
     if (canal.client_id !== clientId) throw new BadRequestException('Channel does not belong to this client.');
     if (canal.tipo !== 'whatsapp') throw new BadRequestException(`Channel tipo must be 'whatsapp'.`);
 
-    // Use existing registered test number from env
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID ?? '1118041604727374';
+    // R3-014 — idempotency: if this channel already carries a phone_number_id we
+    // must NOT create a second number at Meta (that would orphan a registration
+    // and burn the number). Re-request the OTP on the existing id instead so the
+    // flow is safely resumable (e.g. the user lost the first code).
+    const existingPhoneNumberId = canal.config?.phone_number_id as string | undefined;
+    if (existingPhoneNumberId) {
+      await this.metaPost(`${existingPhoneNumberId}/request_code`, {
+        code_method: dto.code_method,
+        language:    'es',
+      });
+      const existingDisplay =
+        (canal.config?.display_phone_number as string | undefined) ??
+        `+${dto.cc}${dto.phone_number}`;
+      this.logger.log(
+        `[OnboardingService] WA OTP re-requested on existing number [clientId=${clientId}, phone_number_id=${existingPhoneNumberId}]`,
+      );
+      return {
+        phone_number_id: existingPhoneNumberId,
+        message:         `OTP re-sent via ${dto.code_method} to ${existingDisplay}. Verify it to finish registration.`,
+      };
+    }
 
+    // 1) Register the phone number under the WABA. Meta returns the real id.
+    const created = await this.metaPost(`${this.wabaId}/phone_numbers`, {
+      cc:            dto.cc,
+      phone_number:  dto.phone_number,
+      verified_name: dto.verified_name,
+    });
+    const phoneNumberId = created?.id as string | undefined;
+    if (!phoneNumberId) {
+      this.logger.error(`[OnboardingService] Meta phone_numbers returned no id: ${JSON.stringify(created)}`);
+      throw new BadRequestException('Meta did not return a phone_number_id.');
+    }
+
+    // 2) Request the OTP for the freshly created number.
+    await this.metaPost(`${phoneNumberId}/request_code`, {
+      code_method: dto.code_method,
+      language:    'es',
+    });
+
+    const displayPhoneNumber = `+${dto.cc}${dto.phone_number}`;
     await this.canalRepoCtx.update({ id: canal.id }, {
       config: {
         ...(canal.config ?? {}),
         phone_number_id:      phoneNumberId,
-        display_phone_number: `+${dto.cc}${dto.phone_number}`,
+        display_phone_number: displayPhoneNumber,
         verified_name:        dto.verified_name,
         waba_id:              this.wabaId,
         cc:                   dto.cc,
         raw_phone_number:     dto.phone_number,
       },
-      is_active: true,
+      is_active: false, // Not active until the OTP is verified.
     });
 
-    if (stepIndex(client.onboarding_step) < stepIndex('wa_number_verified')) {
-      await this.clientRepo.update(clientId, { onboarding_step: 'wa_number_verified' });
+    if (stepIndex(client.onboarding_step) < stepIndex('wa_number_requested')) {
+      await this.clientRepo.update(clientId, { onboarding_step: 'wa_number_requested' });
     }
 
-    this.logger.log(`[OnboardingService] WA channel configured [clientId=${clientId}, phone_number_id=${phoneNumberId}]`);
+    this.logger.log(`[OnboardingService] WA number requested [clientId=${clientId}, phone_number_id=${phoneNumberId}]`);
     return {
       phone_number_id: phoneNumberId,
-      message:         `WhatsApp channel configured. Number +${dto.cc}${dto.phone_number} linked.`,
+      message:         `OTP sent via ${dto.code_method} to ${displayPhoneNumber}. Verify it to finish registration.`,
     };
   }
 
   // ── Step 2c: Verify OTP ───────────────────────────────────────────────────
-  // Number already active — just confirm and advance step.
+  // Confirms the OTP with Meta and completes the Cloud API two-step
+  // registration, then activates the channel.
 
   async verifyWhatsAppOtp(
     clientId: string,
     canalEntradaId: string,
     dto: VerifyWhatsAppOtpDto,
   ): Promise<{ verified: boolean; phone_number_id: string; display_phone_number: string }> {
+    // R3-008/R4-006 — fail-fast on server misconfiguration before touching Meta.
+    this.assertMetaConfig();
+
+    // R1-004/R4-007 — fail-closed PIN: resolve it BEFORE any Meta call so a
+    // missing/empty WHATSAPP_REGISTER_PIN aborts the whole flow. We must never
+    // fall back to a default PIN (that would register the number with a
+    // guessable two-step PIN) and we must not even verify the OTP if we cannot
+    // finish registration afterwards.
+    const pin = process.env.WHATSAPP_REGISTER_PIN?.trim();
+    if (!pin) {
+      this.logger.error('[OnboardingService] WHATSAPP_REGISTER_PIN not configured — refusing to register.');
+      throw new InternalServerErrorException('WHATSAPP_REGISTER_PIN not configured.');
+    }
+
     const client = await this.loadActiveClient(clientId);
     this.requireStep(client, 'wa_number_requested');
 
@@ -150,18 +213,104 @@ export class OnboardingService {
     if (!canal) throw new NotFoundException(`Channel ${canalEntradaId} not found`);
     if (canal.client_id !== clientId) throw new BadRequestException('Channel does not belong to this client.');
 
-    const phoneNumberId = (canal.config?.phone_number_id as string | undefined)
-      ?? process.env.WHATSAPP_PHONE_NUMBER_ID ?? '1118041604727374';
+    const phoneNumberId = canal.config?.phone_number_id as string | undefined;
+    if (!phoneNumberId) {
+      throw new BadRequestException('Number not provisioned — call provision-whatsapp first.');
+    }
     const displayNumber = (canal.config?.display_phone_number as string | undefined) ?? phoneNumberId;
 
-    await this.canalRepoCtx.update({ id: canal.id }, { is_active: true });
+    // 1) Verify the OTP code with Meta.
+    await this.metaPost(`${phoneNumberId}/verify_code`, { code: dto.code });
+
+    // 2) Complete the Cloud API two-step registration with the PIN, then activate
+    // the channel. R3-007/R4-005 — from here on the OTP is already consumed at
+    // Meta; if register OR the local activation fails we cannot roll Meta back, so
+    // we emit an explicit greppable recovery signal (WA_PARTIAL_REGISTRATION) and
+    // rethrow. The number may be registered at Meta but inactive locally and needs
+    // manual reconciliation.
+    try {
+      await this.metaPost(`${phoneNumberId}/register`, {
+        messaging_product: 'whatsapp',
+        pin,
+      });
+
+      await this.canalRepoCtx.update({ id: canal.id }, { is_active: true });
+    } catch (err: any) {
+      this.logger.error(
+        `[OnboardingService] WA_PARTIAL_REGISTRATION — OTP verified but registration/activation failed ` +
+          `[clientId=${clientId}, phone_number_id=${phoneNumberId}]. The number may be registered at Meta ` +
+          `but is NOT active locally; manual recovery required. Cause: ${err?.message ?? err}`,
+      );
+      throw err;
+    }
 
     if (stepIndex(client.onboarding_step) < stepIndex('wa_number_verified')) {
       await this.clientRepo.update(clientId, { onboarding_step: 'wa_number_verified' });
     }
 
-    this.logger.log(`[OnboardingService] WA channel active [clientId=${clientId}, phone_number_id=${phoneNumberId}]`);
+    this.logger.log(`[OnboardingService] WA number verified [clientId=${clientId}, phone_number_id=${phoneNumberId}]`);
     return { verified: true, phone_number_id: phoneNumberId, display_phone_number: displayNumber };
+  }
+
+  /**
+   * R3-008/R4-006 — assert the server-side Meta configuration is present before
+   * issuing any Graph API call, so we never send a malformed URL (empty WABA id)
+   * nor an `Authorization: Bearer undefined` header. This is a server
+   * misconfiguration, hence a 500-class error.
+   */
+  private assertMetaConfig(): void {
+    if (!this.wabaId) {
+      this.logger.error('[OnboardingService] WABA id not configured (META_WABA_ID / WHATSAPP_BUSINESS_ACCOUNT_ID).');
+      throw new InternalServerErrorException('WhatsApp WABA id not configured.');
+    }
+    if (!process.env.WHATSAPP_ACCESS_TOKEN?.trim()) {
+      this.logger.error('[OnboardingService] WHATSAPP_ACCESS_TOKEN not configured.');
+      throw new InternalServerErrorException('WHATSAPP_ACCESS_TOKEN not configured.');
+    }
+  }
+
+  /**
+   * POST to the Meta Graph API with the permanent System User token.
+   * Returns the parsed JSON body on success; throws BadRequestException with
+   * Meta's error message on any non-ok response.
+   *
+   * R4-004 — native fetch has no timeout; a hung Meta connection would stall the
+   * request indefinitely. Bound each call with an AbortController and surface an
+   * abort as an explicit GatewayTimeout.
+   */
+  private async metaPost(path: string, body: Record<string, unknown>): Promise<any> {
+    const token = process.env.WHATSAPP_ACCESS_TOKEN;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), META_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${META_API}/${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization:  `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body:   JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || controller.signal.aborted) {
+        this.logger.error(`[OnboardingService] Meta request timed out after ${META_TIMEOUT_MS}ms [${path}]`);
+        throw new GatewayTimeoutException(`Meta request timed out after ${META_TIMEOUT_MS}ms.`);
+      }
+      this.logger.error(`[OnboardingService] Meta request failed [${path}]: ${err?.message}`);
+      throw new BadRequestException(`Meta request failed: ${err?.message ?? 'network error'}`);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const metaMessage = data?.error?.message ?? JSON.stringify(data);
+      this.logger.error(`[OnboardingService] Meta error [${path}]: ${JSON.stringify(data)}`);
+      throw new BadRequestException(`Meta API error: ${metaMessage}`);
+    }
+    return data;
   }
 
   // ── Step 3: Verify non-WA channels ───────────────────────────────────────

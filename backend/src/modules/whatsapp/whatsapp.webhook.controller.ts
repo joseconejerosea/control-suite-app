@@ -16,6 +16,7 @@ import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant } from '../../common/tenant/tenant-context';
+import { runWithWaFrom } from './whatsapp-send-context';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
@@ -87,6 +88,21 @@ export class WhatsAppWebhookController {
       const { clientId, canalId } = await this.resolveChannel(value);
       if (!clientId) return 'ok';
 
+      // WhatsApp gap 2 (multi-tenant) — el número DESDE el cual hay que responder
+      // es el mismo por el que entró el mensaje. Se propaga por un AsyncLocalStorage
+      // dedicado (whatsapp-send-context), NO por el tenant store: así todo sendText
+      // de este procesamiento (respuesta al emisor no registrado y sub-handlers)
+      // sale desde el número del cliente sin abrir ninguna transacción de DB. El
+      // ALS se propaga solo a través de los runWithTenant anidados de los sub-services.
+      const waFrom = value?.metadata?.phone_number_id as string | undefined;
+      if (!waFrom) {
+        // Sin número entrante no podemos responder desde el número del cliente;
+        // getWaFrom() caerá al global de env dentro de sendText.
+        this.logger.warn(
+          `[WhatsApp] Missing metadata.phone_number_id — replies will fall back to the global env number (clientId=${clientId})`,
+        );
+      }
+
       const messages = value?.messages;
       if (!messages?.length) return 'ok';
 
@@ -105,54 +121,60 @@ export class WhatsAppWebhookController {
           continue;
         }
 
-        // ── Sender gate (Req 7 — togglable via env) ──────────────────────────
-        if (process.env.WHATSAPP_SENDER_GATE !== 'off') {
-          let authorized: boolean;
-          if (senderAuthCache.has(from)) {
-            authorized = senderAuthCache.get(from)!;
-          } else {
-            authorized = await this.isAuthorizedSender(from, clientId);
-            senderAuthCache.set(from, authorized);
-          }
-
-          if (!authorized) {
-            this.logger.warn(`[WhatsApp] Unauthorized sender from=${from} clientId=${clientId}`);
-            if (!notifiedSenders.has(from)) {
-              notifiedSenders.add(from);
-              await this.wa.sendText(from, 'No estás registrado, contactá a tu coordinador.');
+        // Cada mensaje se procesa dentro del contexto de número saliente (waFrom),
+        // un ALS liviano SIN transacción de DB: los sub-handlers siguen abriendo
+        // sus propios runWithTenant como antes, y el ALS se propaga a través de
+        // ellos para que cada sendText salga desde el número del cliente.
+        await runWithWaFrom(waFrom, async () => {
+          // ── Sender gate (Req 7 — togglable via env) ──────────────────────────
+          if (process.env.WHATSAPP_SENDER_GATE !== 'off') {
+            let authorized: boolean;
+            if (senderAuthCache.has(from)) {
+              authorized = senderAuthCache.get(from)!;
+            } else {
+              authorized = await this.isAuthorizedSender(from, clientId);
+              senderAuthCache.set(from, authorized);
             }
-            // F4 Fase 3 (alta urgente): en vez de sólo descartar, avisar al operador
-            // que un número desconocido intenta contactar, para darlo de alta.
-            await this.notificarAltaUrgente(from, clientId);
-            continue;
+
+            if (!authorized) {
+              this.logger.warn(`[WhatsApp] Unauthorized sender from=${from} clientId=${clientId}`);
+              if (!notifiedSenders.has(from)) {
+                notifiedSenders.add(from);
+                await this.wa.sendText(from, 'No estás registrado, contactá a tu coordinador.');
+              }
+              // F4 Fase 3 (alta urgente): en vez de sólo descartar, avisar al operador
+              // que un número desconocido intenta contactar, para darlo de alta.
+              await this.notificarAltaUrgente(from, clientId);
+              return;
+            }
           }
-        }
-        // ─────────────────────────────────────────────────────────────────────
+          // ───────────────────────────────────────────────────────────────────
 
-        this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${messageId}`);
+          this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${messageId}`);
 
-        switch (msgType) {
-          case 'image':
-            await this.handleImage(from, msg, clientId, canalId, messageId);
-            break;
-          case 'audio':
-            await this.handleAudio(from, msg, clientId, canalId, messageId);
-            break;
-          case 'video':
-            await this.handleVideo(from, msg, clientId, canalId, messageId);
-            break;
-          case 'document':
-            await this.handleDocument(from, msg, clientId, canalId, messageId);
-            break;
-          case 'location':
-            await this.handleLocation(from, msg, clientId, canalId, messageId);
-            break;
-          case 'text':
-            await this.handleText(from, msg, clientId, canalId, messageId);
-            break;
-          default:
-            this.logger.warn(`[WhatsApp] Unsupported message type: ${msgType}`);
-        }
+          switch (msgType) {
+            case 'image':
+              await this.handleImage(from, msg, clientId, canalId, messageId);
+              break;
+            case 'audio':
+              await this.handleAudio(from, msg, clientId, canalId, messageId);
+              break;
+            case 'video':
+              await this.handleVideo(from, msg, clientId, canalId, messageId);
+              break;
+            case 'document':
+              await this.handleDocument(from, msg, clientId, canalId, messageId);
+              break;
+            case 'location':
+              await this.handleLocation(from, msg, clientId, canalId, messageId);
+              break;
+            case 'text':
+              await this.handleText(from, msg, clientId, canalId, messageId);
+              break;
+            default:
+              this.logger.warn(`[WhatsApp] Unsupported message type: ${msgType}`);
+          }
+        });
       }
     } catch (err: any) {
       this.logger.error('[WhatsApp] Webhook error:', err.message);
@@ -220,11 +242,11 @@ export class WhatsAppWebhookController {
          FROM users
          WHERE client_id = $1
            AND is_active = true
-           AND role IN ('${UserRole.MANAGER}','${UserRole.OPERATOR}','${UserRole.SUPERVISOR}')
+           AND role IN ($3, $4, $5)
            AND phone IS NOT NULL
            AND regexp_replace(phone, '\\D', '', 'g') = $2
          LIMIT 1`,
-        [clientId, digits],
+        [clientId, digits, UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERVISOR],
       );
       return rows.length > 0;
     } catch (err: any) {
