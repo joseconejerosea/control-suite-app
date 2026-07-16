@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { getWaFrom } from './whatsapp-send-context';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -19,9 +20,36 @@ export class WhatsAppService {
     return digits.startsWith('549') ? '54' + digits.slice(3) : digits;
   }
 
-  async sendText(to: string, message: string): Promise<boolean> {
+  /**
+   * WhatsApp gap 2 — multi-tenant: resuelve el phone_number_id DESDE el cual sale
+   * el mensaje. Orden: (a) el explícito pasado por el caller; (b) el del contexto
+   * de tenant (seteado por el webhook con el número entrante); (c) el global de
+   * env como fallback (comportamiento previo intacto).
+   */
+  private resolveFrom(fromPhoneNumberId?: string): string | undefined {
+    return fromPhoneNumberId ?? getWaFrom() ?? this.phoneNumberId;
+  }
+
+  /**
+   * R1-002 (SSRF defense) — the resolved phone_number_id is interpolated into
+   * the Graph API URL, so it MUST be a plain numeric id. Anything else (a
+   * spoofed value, an undefined fallback, path/host injection) would let a
+   * caller redirect the request. Reject non-numeric / missing ids fail-closed.
+   */
+  private validFrom(from: string | undefined): string | null {
+    return from && /^\d+$/.test(from) ? from : null;
+  }
+
+  async sendText(to: string, message: string, fromPhoneNumberId?: string): Promise<boolean> {
+    const from = this.validFrom(this.resolveFrom(fromPhoneNumberId));
+    if (!from) {
+      this.logger.error(
+        `[WhatsApp] Refusing sendText: invalid phone_number_id=${this.resolveFrom(fromPhoneNumberId)}`,
+      );
+      return false;
+    }
     try {
-      const res = await fetch(`${API}/${this.phoneNumberId}/messages`, {
+      const res = await fetch(`${API}/${from}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.token}`,
@@ -48,9 +76,21 @@ export class WhatsAppService {
     }
   }
 
-  async sendTemplate(to: string, templateName: string, params: string[]): Promise<boolean> {
+  async sendTemplate(
+    to: string,
+    templateName: string,
+    params: string[],
+    fromPhoneNumberId?: string,
+  ): Promise<boolean> {
+    const from = this.validFrom(this.resolveFrom(fromPhoneNumberId));
+    if (!from) {
+      this.logger.error(
+        `[WhatsApp] Refusing sendTemplate: invalid phone_number_id=${this.resolveFrom(fromPhoneNumberId)}`,
+      );
+      return false;
+    }
     try {
-      const res = await fetch(`${API}/${this.phoneNumberId}/messages`, {
+      const res = await fetch(`${API}/${from}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.token}`,
