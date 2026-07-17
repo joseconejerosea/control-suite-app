@@ -173,6 +173,61 @@ describe('HttpExceptionFilter', () => {
       expect(payload).toHaveProperty('timestamp');
       expect(payload).toHaveProperty('path', '/my/endpoint');
     });
+
+    it('object response without a message → safe fallback, never "[object Object]"', () => {
+      const reply = buildMockReply();
+      // Object form with no `message` key (e.g. hand-rolled { statusCode, error })
+      const exception = new HttpException(
+        { statusCode: 422, error: 'Unprocessable Entity' },
+        422,
+      );
+      filter.catch(exception, buildHost(reply));
+
+      const payload = reply._lastPayload();
+      expect(payload.error.message).toBe(SAFE_MESSAGES.UNEXPECTED);
+      expect(payload.error.message).not.toBe('[object Object]');
+    });
+
+    it('object response with empty-string message → safe fallback, not "[object Object]"', () => {
+      const reply = buildMockReply();
+      const exception = new HttpException(
+        { message: '', statusCode: 422, error: 'Unprocessable Entity' },
+        422,
+      );
+      filter.catch(exception, buildHost(reply));
+
+      const payload = reply._lastPayload();
+      expect(payload.error.message).toBe(SAFE_MESSAGES.UNEXPECTED);
+      expect(payload.error.message).not.toBe('[object Object]');
+    });
+
+    it('object response with a scalar string message → preserved verbatim', () => {
+      const reply = buildMockReply();
+      const exception = new HttpException(
+        { message: 'bad input', statusCode: 400, error: 'Bad Request' },
+        400,
+      );
+      filter.catch(exception, buildHost(reply));
+
+      const payload = reply._lastPayload();
+      expect(payload.error.message).toBe('bad input');
+    });
+
+    it('object response with a non-string/non-array message → safe fallback', () => {
+      const reply = buildMockReply();
+      const exception = new HttpException(
+        { message: { nested: 'evil' }, statusCode: 400 } as unknown as Record<
+          string,
+          unknown
+        >,
+        400,
+      );
+      filter.catch(exception, buildHost(reply));
+
+      const payload = reply._lastPayload();
+      expect(payload.error.message).toBe(SAFE_MESSAGES.UNEXPECTED);
+      expect(payload.error.message).not.toBe('[object Object]');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -335,6 +390,45 @@ describe('HttpExceptionFilter', () => {
       expect(() =>
         filter.catch(new Error('boom'), host),
       ).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Last-resort resilience: the filter must NEVER throw, even when an exotic
+  // exception's getStatus()/getResponse()/toString() throws. A throwing global
+  // filter makes Nest fall back to its default handler and leak the raw body.
+  // -------------------------------------------------------------------------
+
+  describe('Last-resort — filter never throws on hostile exceptions', () => {
+    it('does NOT throw when getResponse() throws; sends safe 500, never the raw cause', () => {
+      const reply = buildMockReply();
+      // instanceof HttpException so branch B is taken, but getResponse() explodes.
+      const hostile = Object.create(HttpException.prototype) as HttpException;
+      hostile.getStatus = () => 500;
+      hostile.getResponse = () => {
+        throw new Error('boom');
+      };
+
+      expect(() => filter.catch(hostile, buildHost(reply))).not.toThrow();
+
+      const payload = reply._lastPayload();
+      expect(payload.success).toBe(false);
+      expect(payload.error.message).toBe(SAFE_MESSAGES.UNEXPECTED);
+      expect(payload.error.statusCode).toBe(500);
+      expect(JSON.stringify(payload)).not.toContain('boom');
+    });
+
+    it('does NOT throw for a thrown Object.create(null) (String() of it throws)', () => {
+      const reply = buildMockReply();
+      // Object.create(null) has no prototype → String()/toString() throws.
+      const nullProto = Object.create(null) as unknown;
+
+      expect(() => filter.catch(nullProto, buildHost(reply))).not.toThrow();
+
+      const payload = reply._lastPayload();
+      expect(payload.success).toBe(false);
+      expect(payload.error.message).toBe(SAFE_MESSAGES.UNEXPECTED);
+      expect(payload.error.statusCode).toBe(500);
     });
   });
 });

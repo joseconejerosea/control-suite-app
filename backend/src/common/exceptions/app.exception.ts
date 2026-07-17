@@ -23,6 +23,7 @@ export class AppException extends HttpException {
   /**
    * Integration/upstream failure (Meta, AI, external network error).
    * Default status: 400. Override when a cleaner HTTP semantic applies (e.g. 502).
+   * @param technicalDetail RAW cause — LOGGED server-side only, NEVER shown to users. Do NOT pass a user-facing/business message here.
    */
   static integration(technicalDetail: string, status = 400): AppException {
     return new AppException(
@@ -35,6 +36,7 @@ export class AppException extends HttpException {
   /**
    * Missing or invalid server-side configuration (env vars, secrets).
    * Default status: 500.
+   * @param technicalDetail RAW cause — LOGGED server-side only, NEVER shown to users. Do NOT pass a user-facing/business message here.
    */
   static config(technicalDetail: string, status = 500): AppException {
     return new AppException(
@@ -47,6 +49,7 @@ export class AppException extends HttpException {
   /**
    * Outbound request timeout to an external service.
    * Default status: 504.
+   * @param technicalDetail RAW cause — LOGGED server-side only, NEVER shown to users. Do NOT pass a user-facing/business message here.
    */
   static timeout(technicalDetail: string, status = 504): AppException {
     return new AppException(SAFE_MESSAGES.TIMEOUT, technicalDetail, status);
