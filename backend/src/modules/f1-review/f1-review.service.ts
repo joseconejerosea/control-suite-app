@@ -49,6 +49,11 @@ export class F1ReviewService {
     if (filters.status) {
       conditions.push(`ec.status = $${paramIdx++}`);
       params.push(filters.status);
+    } else {
+      // "Documentos por revisar" is a review QUEUE: by default only pending docs
+      // show, so approving/rejecting removes the doc from the list (and the count).
+      // Handled docs stay reachable by explicitly filtering status=approved/rejected.
+      conditions.push(`ec.status NOT IN ('approved', 'rejected')`);
     }
     if (filters.confidence_min != null) {
       conditions.push(`ec.confidence_score >= $${paramIdx++}`);

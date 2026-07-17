@@ -18,7 +18,9 @@ import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { F1ReviewService } from './f1-review.service';
 
 interface AuthedRequest extends Request {
-  user: { id: string; client_id: string; role: string };
+  // The JWT payload uses `sub` for the user id (see JwtPayload / auth.guard).
+  // There is no `user.id` — reading it yields undefined.
+  user: { sub: string; client_id: string; role: string };
 }
 
 @Controller('app/f1-documents')
@@ -72,7 +74,7 @@ export class F1ReviewController {
     return this.service.approve(
       req.user.client_id,
       id,
-      req.user.id,
+      req.user.sub,
       req.ip ?? '',
     );
   }
@@ -88,7 +90,7 @@ export class F1ReviewController {
     return this.service.reject(
       req.user.client_id,
       id,
-      req.user.id,
+      req.user.sub,
       reason ?? '',
       req.ip ?? '',
     );
