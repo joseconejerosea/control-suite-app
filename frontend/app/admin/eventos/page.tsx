@@ -164,6 +164,9 @@ export default function EventosPage() {
                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                         {new Date(e.created_at).toLocaleString("es-CL")}
                       </td>
+                      {/* error_message is sanitized at the write point (queue processors):
+                          it only ever carries a safe, neutral-Spanish category string,
+                          never raw Supabase/SQL detail. Rendered as-is with a "—" fallback. */}
                       <td className="px-4 py-3 text-xs text-red-500 max-w-[150px] truncate" title={e.error_message ?? ""}>
                         {e.error_message ?? "—"}
                       </td>

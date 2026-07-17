@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { EventoCrudo } from '../../eventos-crudos/evento-crudo.entity';
 import { EventProducer } from '../producers/event.producer';
 import { QUEUE_EVENT_PROCESSING } from '../queue.constants';
+import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 @Processor(QUEUE_EVENT_PROCESSING)
 export class EventProcessor extends WorkerHost {
@@ -66,12 +67,14 @@ export class EventProcessor extends WorkerHost {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown processing error';
 
-      // 5. On failure: update status = 'error', attempts++, publish admin notification
+      // 5. On failure: update status = 'error', attempts++, publish admin notification.
+      // error_message is returned by the API and rendered in the admin UI, so it stores a
+      // safe category string only; the raw cause is preserved in the log below.
       await repo.update(
         { id: eventoCrudoId },
         {
           status: 'error',
-          error_message: errorMessage,
+          error_message: SAFE_MESSAGES.UNEXPECTED,
           attempts,
         },
       );

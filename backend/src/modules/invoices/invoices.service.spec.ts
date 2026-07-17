@@ -72,7 +72,7 @@ describe('InvoicesService — extractFromImage throw-site normalization', () => 
     expect((err as AppException).userMessage).not.toContain('429');
     expect((err as AppException).userMessage).not.toContain('rate limited');
     expect((err as AppException).technicalDetail).toMatch(/429/);
-    expect((err as AppException).getStatus()).toBe(400);
+    expect((err as AppException).getStatus()).toBe(502);
   });
 
   // L376 — catch-all for unexpected errors → AppException.integration (was BadRequestException)
@@ -90,6 +90,6 @@ describe('InvoicesService — extractFromImage throw-site normalization', () => 
     expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.INTEGRATION_FAILURE);
     expect((err as AppException).userMessage).not.toContain('network failure xyz');
     expect((err as AppException).technicalDetail).toContain('network failure xyz');
-    expect((err as AppException).getStatus()).toBe(400);
+    expect((err as AppException).getStatus()).toBe(502);
   });
 });

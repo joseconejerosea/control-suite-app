@@ -306,7 +306,7 @@ export class OnboardingService {
       this.logger.error(`[OnboardingService] Meta request failed [${path}]: ${err?.message}`);
       throw AppException.integration(
         `Meta request failed: ${err?.message ?? 'network error'} [${path}]`,
-        400,
+        502,
       );
     } finally {
       clearTimeout(timer);
@@ -318,7 +318,7 @@ export class OnboardingService {
       this.logger.error(`[OnboardingService] Meta error [${path}]: ${JSON.stringify(data)}`);
       throw AppException.integration(
         `Meta API error: ${metaMessage} [${path}] raw=${JSON.stringify(data)}`,
-        400,
+        502,
       );
     }
     return data;

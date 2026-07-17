@@ -336,7 +336,7 @@ export class InvoicesService {
 
       if (!response.ok) throw AppException.integration(
         `AI image processing failed (Anthropic status ${response.status})`,
-        400,
+        502,
       );
 
       const data = await response.json() as any;
@@ -378,7 +378,7 @@ export class InvoicesService {
     } catch (err) {
       if (err instanceof AppException) throw err;
       const detail = err instanceof Error ? err.message : 'unknown error';
-      throw AppException.integration(`Failed to process image: ${detail}`, 400);
+      throw AppException.integration(`Failed to process image: ${detail}`, 502);
     }
   }
 

@@ -7,6 +7,7 @@ import { SheetsService } from '../../sheets/sheets.service';
 import { RendicionesService } from '../../rendiciones/rendiciones.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
 import { normalizePhone } from '../../../common/utils/normalize-phone';
+import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 @Processor('persist')
 export class PersistProcessor extends WorkerHost {
@@ -26,12 +27,14 @@ export class PersistProcessor extends WorkerHost {
       // Fase 2 — happy path dentro de una tx con app.current_tenant = client_id.
       await runWithTenant(this.dataSource, client_id, () => this.persistEvento(job));
     } catch (err: any) {
-      this.logger.error(`[F1Persist] Error: ${err.message}`);
+      // Raw cause is logged for debugging; the persisted error_message must stay safe
+      // because that column is returned by the API and rendered in the admin UI.
+      this.logger.error(`[F1Persist] Error [evento=${evento_crudo_id}]: ${err.message}`);
       // setStatus de error en tx SEPARADA: persiste pese al rollback del happy path.
       await runWithTenant(this.dataSource, client_id, () =>
         this.dataSource.query(
           `UPDATE eventos_crudos SET processing_status_new='failed_classification', status='failed', error_message=$1 WHERE id=$2`,
-          [err.message, evento_crudo_id],
+          [SAFE_MESSAGES.INTEGRATION_FAILURE, evento_crudo_id],
         ),
       ).catch(() => {});
       throw err;

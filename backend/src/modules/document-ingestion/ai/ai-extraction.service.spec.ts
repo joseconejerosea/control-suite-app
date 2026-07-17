@@ -7,9 +7,23 @@
  * L118 — OpenAI call throws → AppException.integration (was ServiceUnavailableException with raw message)
  */
 import { ConfigService } from '@nestjs/config';
-import { AiExtractionService } from './ai-extraction.service';
 import { AppException } from '../../../common/exceptions';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
+
+// Mock the OpenAI SDK so extract() reaches its real try/catch at the network boundary
+// without making a real API call. The mock constructor is controllable per-test via
+// `openAiCreateMock`, letting us force the client.chat.completions.create() call to throw.
+const openAiCreateMock = jest.fn();
+jest.mock('openai', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({
+    chat: { completions: { create: openAiCreateMock } },
+  })),
+}));
+
+// Import AFTER jest.mock so the service picks up the mocked SDK.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { AiExtractionService } from './ai-extraction.service';
 
 function makeConfig(overrides: Record<string, unknown> = {}): ConfigService {
   const defaults: Record<string, unknown> = {
@@ -27,7 +41,10 @@ function makeConfig(overrides: Record<string, unknown> = {}): ConfigService {
 }
 
 describe('AiExtractionService — throw-site normalization', () => {
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.restoreAllMocks();
+    openAiCreateMock.mockReset();
+  });
 
   const INPUT = { text: 'some text', target_table: 'promoters' as const };
 
@@ -62,44 +79,27 @@ describe('AiExtractionService — throw-site normalization', () => {
     expect((err as AppException).getStatus()).toBe(503);
   });
 
-  // L118 — The catch block in extract() converts any Error to AppException.integration.
-  // We test this by reaching the catch via a broken apiKey that makes OpenAI constructor fail,
-  // or by mocking the private openai create call.
-  // Strategy: supply a valid config so we pass the guard checks, then patch the OpenAI
-  // instance via jest.spyOn on the prototype after the service is constructed.
+  // L118 — The catch block in extract() converts any Error thrown by the OpenAI SDK
+  // into AppException.integration. This exercises the REAL extract() method: config
+  // passes the guards, `new OpenAI(...)` resolves to the mocked SDK, and the mocked
+  // chat.completions.create() rejects — driving the real try/catch at the boundary.
   it('throws AppException.integration (safe message) when the OpenAI call throws', async () => {
     const service = new AiExtractionService(
       makeConfig({ AI_API_KEY: 'sk-test', AI_PROVIDER: 'openai' }),
     );
 
-    // The service creates `new OpenAI(...)` inside extract(); we cannot spy on that call
-    // directly. Instead we trigger the catch by making the extract() method reach the try/catch
-    // with a simulated error — we do this by replacing the private method that constructs the client.
-    // The simplest approach: monkeypatch the service's extract to call through a stubbed internal path.
-    //
-    // Alternative: we rely on the fact that 'sk-test' is an invalid key and OpenAI will throw
-    // at the API call level — this makes the test an integration-style check.
-    // For a pure unit test, inject the failure via the catch path directly:
-    const originalExtract = service.extract.bind(service);
-    jest.spyOn(service, 'extract').mockImplementationOnce(async (input) => {
-      // Simulate the internal try/catch in extract() throwing from the OpenAI call
-      // We throw a plain Error and verify the service would convert it:
-      // (This test exercises the catch block indirectly by checking the conversion contract.)
-      try {
-        throw new Error('Connection error to OpenAI xyz');
-      } catch (err) {
-        if (err instanceof AppException) throw err;
-        const message = err instanceof Error ? err.message : 'Unknown AI error';
-        throw AppException.integration(`AI extraction failed: ${message}`, 503);
-      }
-    });
+    openAiCreateMock.mockRejectedValueOnce(new Error('Connection error to OpenAI xyz'));
 
     const err = await service.extract(INPUT).catch((e) => e);
 
+    // The real create() was invoked (proving we did not stub the method under test).
+    expect(openAiCreateMock).toHaveBeenCalledTimes(1);
     expect(err).toBeInstanceOf(AppException);
     expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.INTEGRATION_FAILURE);
+    // Raw cause must NOT leak into the user-facing message
     expect((err as AppException).userMessage).not.toContain('Connection error');
-    expect((err as AppException).technicalDetail).toContain('Connection error');
+    // Raw cause IS preserved in technicalDetail
+    expect((err as AppException).technicalDetail).toContain('Connection error to OpenAI xyz');
     expect((err as AppException).getStatus()).toBe(503);
   });
 });

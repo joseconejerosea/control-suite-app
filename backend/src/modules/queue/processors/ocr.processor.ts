@@ -7,6 +7,7 @@ import { Queue, Job } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../metrics/metrics.service';
 import { StorageService } from '../../../common/storage/storage.service';
+import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 const QUEUE_F1_CLASSIFY = 'classify';
 const F1_OCR_MAX_CHARS  = 50000;
@@ -160,10 +161,17 @@ export class OcrProcessor extends WorkerHost {
     };
   }
 
-  private async setStatus(id: string, status: string, error: string): Promise<void> {
+  /**
+   * Persists a failure status. The raw technical cause (`rawDetail`) is written to the
+   * application log for debugging but NEVER stored in `error_message`: that column is
+   * returned by the API and rendered in the admin UI, so it must only carry a short,
+   * safe, neutral-Spanish category message.
+   */
+  private async setStatus(id: string, status: string, rawDetail: string): Promise<void> {
+    this.logger.error(`[F1OCR] setStatus ${status} [evento=${id}]: ${rawDetail}`);
     await this.dataSource.query(
       `UPDATE eventos_crudos SET processing_status_new=$1::processing_status_f1, status=$1::text, error_message=$2 WHERE id=$3`,
-      [status, error, id],
+      [status, SAFE_MESSAGES.INTEGRATION_FAILURE, id],
     );
   }
 }

@@ -161,7 +161,7 @@ describe('OnboardingService — WhatsApp number registration', () => {
       expect((err as AppException).userMessage).not.toContain('Invalid verified name');
       // Raw Meta message IS in technicalDetail
       expect((err as AppException).technicalDetail).toContain('Invalid verified name');
-      expect((err as AppException).getStatus()).toBe(400);
+      expect((err as AppException).getStatus()).toBe(502);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(canalRepoCtx.update).not.toHaveBeenCalled();
@@ -302,6 +302,8 @@ describe('OnboardingService — WhatsApp number registration', () => {
       expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.INTEGRATION_FAILURE);
       expect((err as AppException).userMessage).not.toContain('Incorrect code');
       expect((err as AppException).technicalDetail).toContain('Incorrect code');
+      // verify_code failure surfaces via metaPost !res.ok → upstream 502 (Bad Gateway)
+      expect((err as AppException).getStatus()).toBe(502);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(canalRepoCtx.update).not.toHaveBeenCalled();
@@ -334,6 +336,7 @@ describe('OnboardingService — WhatsApp number registration', () => {
       expect(err).toBeInstanceOf(AppException);
       expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.CONFIG_ERROR);
       expect((err as AppException).technicalDetail).toMatch(/WHATSAPP_REGISTER_PIN not configured/i);
+      expect((err as AppException).getStatus()).toBe(500);
 
       const registerCall = fetchMock.mock.calls.find(([u]: [string]) => u.endsWith('/register'));
       expect(registerCall).toBeUndefined();
