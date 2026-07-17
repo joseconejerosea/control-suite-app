@@ -56,4 +56,10 @@
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-up { animation: fadeUp 0.25s ease both; }
+/* No `both`/forwards fill: holding the end keyframe would leave a lingering
+   `transform: translateY(0)` on the element, which creates a containing block
+   for `position: fixed` descendants — clipping every modal rendered inside a
+   scroll container (e.g. app-shell <main>). Reverting to `transform: none` at
+   rest keeps fixed overlays viewport-relative. End state == natural state, so
+   there is no visual difference. */
+.animate-fade-up { animation: fadeUp 0.25s ease; }
