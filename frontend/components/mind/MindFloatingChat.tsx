@@ -1,17 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-// Must match the key used in lib/api.ts — was 'access_token' which caused permanent 401
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('cs_token') : '');
-const apiFetch = async (path: string, opts?: RequestInit) => {
-  const r = await fetch(`${API}${path}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}`, ...opts?.headers },
-  });
-  return r.json();
-};
+import { api } from '@/lib/api';
 
 interface ChatMsg { role: 'user' | 'assistant'; mensaje: string; }
 interface Propuesta { id: string; titulo: string; descripcion: string; severidad: string; }
@@ -28,8 +18,8 @@ export function MindFloatingChat() {
 
   useEffect(() => {
     if (open) {
-      apiFetch('/v1/app/mind/propuestas').then((r) => setPropuestas((r.data ?? r).slice(0, 3)));
-      apiFetch('/v1/app/mind/chat/history?limit=20').then((r) => setMsgs((r.data ?? r).reverse()));
+      api.get<any>('/v1/app/mind/propuestas').then((r) => setPropuestas((r.data ?? r).slice(0, 3))).catch(() => {});
+      api.get<any>('/v1/app/mind/chat/history?limit=20').then((r) => setMsgs((r.data ?? r).reverse())).catch(() => {});
     }
   }, [open]);
 
@@ -44,7 +34,7 @@ export function MindFloatingChat() {
     setSending(true);
     setMsgs((m) => [...m, { role: 'user', mensaje: texto }]);
     try {
-      const res = await apiFetch('/v1/app/mind/chat', { method: 'POST', body: JSON.stringify({ mensaje: texto }) });
+      const res = await api.post<any>('/v1/app/mind/chat', { mensaje: texto });
       setMsgs((m) => [...m, { role: 'assistant', mensaje: res.data?.reply ?? res.reply ?? '...' }]);
     } catch {
       setMsgs((m) => [...m, { role: 'assistant', mensaje: 'Error al conectar con Control Mind.' }]);
@@ -53,7 +43,7 @@ export function MindFloatingChat() {
   };
 
   const aprobar = async (id: string) => {
-    await apiFetch(`/v1/app/mind/propuestas/${id}/aprobar`, { method: 'POST', body: JSON.stringify({}) });
+    await api.post(`/v1/app/mind/propuestas/${id}/aprobar`, {});
     setPropuestas((p) => p.filter((x) => x.id !== id));
   };
 

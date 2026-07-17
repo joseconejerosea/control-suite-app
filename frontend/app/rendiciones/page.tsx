@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 
 interface Rendicion {
   id: string;
@@ -29,19 +30,6 @@ const ESTADO_CONFIG: Record<string, { label: string; color: string }> = {
   rechazada: { label: 'Rechazada', color: 'bg-red-100 text-red-700' },
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
-async function apiFetch(path: string, opts?: RequestInit) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : '';
-  const fullPath = path.startsWith('/api') ? path : `/api${path}`;
-  const res = await fetch(`${API}${fullPath}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...opts?.headers },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
 export default function RendicionesPage() {
   const [rendiciones, setRendiciones] = useState<Rendicion[]>([]);
   const [kpis, setKpis] = useState<Kpis | null>(null);
@@ -56,8 +44,8 @@ export default function RendicionesPage() {
     try {
       const params = filtroEstado ? `?estado=${filtroEstado}` : '';
       const [data, k] = await Promise.all([
-        apiFetch(`/rendiciones${params}`),
-        apiFetch('/rendiciones/kpis'),
+        api.get<any>(`/rendiciones${params}`),
+        api.get<any>('/rendiciones/kpis'),
       ]);
       setRendiciones(data.data ?? data);
       setKpis(k.data ?? k);
@@ -69,15 +57,14 @@ export default function RendicionesPage() {
 
   const openDetalle = async (id: string) => {
     setSelectedId(id);
-    const d = await apiFetch(`/rendiciones/${id}`);
-    console.log('DETALLE RAW:', JSON.stringify(d));
+    const d = await api.get<any>(`/rendiciones/${id}`);
     setDetalle(d.data ?? d);
   };
 
   const cerrar = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/cerrar`, { method: 'PATCH' });
+      await api.patch(`/rendiciones/${id}/cerrar`);
       await fetchData();
     } finally { setActionLoading(null); }
   };
@@ -85,10 +72,10 @@ export default function RendicionesPage() {
   const aprobar = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/aprobar`, { method: 'PATCH' });
+      await api.patch(`/rendiciones/${id}/aprobar`);
       await fetchData();
       if (selectedId === id) {
-        const d = await apiFetch(`/rendiciones/${id}`);
+        const d = await api.get<any>(`/rendiciones/${id}`);
         setDetalle(d.data ?? d);
       }
     } finally { setActionLoading(null); }
@@ -97,7 +84,7 @@ export default function RendicionesPage() {
   const rechazar = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/rechazar`, { method: 'PATCH', body: JSON.stringify({}) });
+      await api.patch(`/rendiciones/${id}/rechazar`, {});
       await fetchData();
       setSelectedId(null);
       setDetalle(null);
@@ -107,7 +94,7 @@ export default function RendicionesPage() {
   const marcarPagada = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/marcar-pagada`, { method: 'PATCH', body: JSON.stringify({}) });
+      await api.patch(`/rendiciones/${id}/marcar-pagada`, {});
       await fetchData();
       setSelectedId(null);
       setDetalle(null);
