@@ -10,6 +10,7 @@ import { ProjectResolverService } from '../../project-resolver/project-resolver.
 import { ClarificationService } from '../../project-resolver/clarification.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 const QUEUE_F1_PERSIST   = 'persist';
 const F1_CONFIDENCE_AUTO = 0.85;
@@ -333,10 +334,16 @@ Responde SOLO con este JSON:
     return rows[0]?.language ?? 'es';
   }
 
-  private async setStatus(id: string, status: string, error: string): Promise<void> {
+  /**
+   * Persists a failure status. The raw cause (`rawDetail`) goes to the application log
+   * only; `error_message` stores a short, safe, neutral-Spanish category message because
+   * that column is surfaced by the API and rendered in the admin UI.
+   */
+  private async setStatus(id: string, status: string, rawDetail: string): Promise<void> {
+    this.logger.error(`[F1Classify] setStatus ${status} [evento=${id}]: ${rawDetail}`);
     await this.dataSource.query(
       `UPDATE eventos_crudos SET processing_status_new=$1::processing_status_f1, status=$2, error_message=$3 WHERE id=$4`,
-      [status, status, error, id],
+      [status, status, SAFE_MESSAGES.INTEGRATION_FAILURE, id],
     );
   }
 }

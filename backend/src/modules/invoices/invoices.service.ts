@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { AppException } from '../../common/exceptions';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -310,7 +311,7 @@ export class InvoicesService {
     mimeType: string,
   ): Promise<{ extracted: AiInvoicePayload | null; invoice: Invoice | null }> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new BadRequestException('AI not configured.');
+    if (!apiKey) throw AppException.config('ANTHROPIC_API_KEY missing — AI image extraction not configured', 500);
 
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -333,7 +334,10 @@ export class InvoicesService {
         }),
       });
 
-      if (!response.ok) throw new BadRequestException('AI image processing failed');
+      if (!response.ok) throw AppException.integration(
+        `AI image processing failed (Anthropic status ${response.status})`,
+        502,
+      );
 
       const data = await response.json() as any;
       const rawJson: string = data?.content?.[0]?.text ?? '';
@@ -372,8 +376,9 @@ export class InvoicesService {
       return { extracted: aiResult, invoice };
 
     } catch (err) {
-      if (err instanceof BadRequestException) throw err;
-      throw new BadRequestException('Failed to process image');
+      if (err instanceof AppException) throw err;
+      const detail = err instanceof Error ? err.message : 'unknown error';
+      throw AppException.integration(`Failed to process image: ${detail}`, 502);
     }
   }
 

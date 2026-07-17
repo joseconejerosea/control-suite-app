@@ -13,7 +13,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}`, ...(options?.headers ?? {}) },
   });
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).message ?? `HTTP ${res.status}`); }
+  if (!res.ok) { const json = await res.json().catch(() => ({})); throw new Error((json as any)?.error?.message ?? 'Ocurrió un error. Intente nuevamente.'); }
   return res.json();
 }
 
@@ -164,6 +164,9 @@ export default function EventosPage() {
                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                         {new Date(e.created_at).toLocaleString("es-CL")}
                       </td>
+                      {/* error_message is sanitized at the write point (queue processors):
+                          it only ever carries a safe, neutral-Spanish category string,
+                          never raw Supabase/SQL detail. Rendered as-is with a "—" fallback. */}
                       <td className="px-4 py-3 text-xs text-red-500 max-w-[150px] truncate" title={e.error_message ?? ""}>
                         {e.error_message ?? "—"}
                       </td>

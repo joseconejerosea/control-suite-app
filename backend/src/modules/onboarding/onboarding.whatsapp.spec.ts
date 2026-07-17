@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { OnboardingService } from './onboarding.service';
 import { Client } from '../clients/client.entity';
@@ -7,6 +7,8 @@ import { CanalEntrada } from '../canal-entrada/canal-entrada.entity';
 import { User } from '../users/user.entity';
 import { ProvisionWhatsAppDto } from './dto/provision-whatsapp.dto';
 import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
+import { AppException } from '../../common/exceptions';
+import { SAFE_MESSAGES } from '../../common/exceptions';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -145,20 +147,39 @@ describe('OnboardingService — WhatsApp number registration', () => {
       expect(typeof result.message).toBe('string');
     });
 
-    it('throws BadRequestException and does not request a code when phone_numbers fails', async () => {
+    it('throws AppException.integration (safe message, no raw Meta text) when phone_numbers fails', async () => {
       clientRepo.findOneBy.mockResolvedValue(activeClient('channel_configured'));
       canalRepoCtx.findOneBy.mockResolvedValue(whatsappCanal());
       fetchMock.mockResolvedValueOnce(
         fetchResponse(false, { error: { message: 'Invalid verified name' } }),
       );
 
-      await expect(service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      const err = await service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.INTEGRATION_FAILURE);
+      // Raw Meta message must NOT appear in userMessage
+      expect((err as AppException).userMessage).not.toContain('Invalid verified name');
+      // Raw Meta message IS in technicalDetail
+      expect((err as AppException).technicalDetail).toContain('Invalid verified name');
+      expect((err as AppException).getStatus()).toBe(502);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(canalRepoCtx.update).not.toHaveBeenCalled();
       expect(clientRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('throws AppException.integration (safe message) when Meta returns no phone_number_id', async () => {
+      clientRepo.findOneBy.mockResolvedValue(activeClient('channel_configured'));
+      canalRepoCtx.findOneBy.mockResolvedValue(whatsappCanal());
+      // Meta responds ok but without an id field
+      fetchMock.mockResolvedValueOnce(fetchResponse(true, { success: true }));
+
+      const err = await service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.INTEGRATION_FAILURE);
+      expect((err as AppException).technicalDetail).toMatch(/phone_number_id/i);
+      expect((err as AppException).getStatus()).toBe(400);
+      expect(canalRepoCtx.update).not.toHaveBeenCalled();
     });
 
     // R3-014 — idempotency: a channel already carrying a phone_number_id must NOT
@@ -187,7 +208,7 @@ describe('OnboardingService — WhatsApp number registration', () => {
 
     // R3-008/R4-006 — fail-fast config: an empty WABA id must abort before any
     // network call (never send a malformed `/phone_numbers` URL).
-    it('throws before any fetch when the WABA id is not configured', async () => {
+    it('throws AppException.config (safe message) before any fetch when the WABA id is not configured', async () => {
       delete process.env.META_WABA_ID;
       delete process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
       // Rebuild the service so it picks up the empty wabaId at construction.
@@ -200,23 +221,27 @@ describe('OnboardingService — WhatsApp number registration', () => {
       clientRepo.findOneBy.mockResolvedValue(activeClient('channel_configured'));
       canalRepoCtx.findOneBy.mockResolvedValue(whatsappCanal());
 
-      await expect(service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto)).rejects.toBeInstanceOf(
-        InternalServerErrorException,
-      );
+      const err = await service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.CONFIG_ERROR);
+      expect((err as AppException).technicalDetail).toMatch(/WABA id not configured/i);
+      expect((err as AppException).getStatus()).toBe(500);
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    // R4-004 — metaPost timeout: an aborted fetch must surface as a clear error.
-    it('throws a timeout error when the Meta request aborts', async () => {
+    // R4-004 — metaPost timeout: an aborted fetch must surface as AppException.timeout
+    // with a safe user message and raw detail only in technicalDetail.
+    it('throws AppException.timeout (safe message) when the Meta request aborts', async () => {
       clientRepo.findOneBy.mockResolvedValue(activeClient('channel_configured'));
       canalRepoCtx.findOneBy.mockResolvedValue(whatsappCanal());
       const abortError = new DOMException('The operation was aborted.', 'AbortError');
       fetchMock.mockRejectedValueOnce(abortError);
 
-      await expect(
-        service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto),
-      ).rejects.toMatchObject({ message: expect.stringMatching(/timed out|timeout/i) });
-
+      const err = await service.provisionWhatsApp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.TIMEOUT);
+      expect((err as AppException).technicalDetail).toMatch(/timed out/i);
+      expect((err as AppException).getStatus()).toBe(504);
       expect(canalRepoCtx.update).not.toHaveBeenCalled();
     });
   });
@@ -263,7 +288,7 @@ describe('OnboardingService — WhatsApp number registration', () => {
       });
     });
 
-    it('throws BadRequestException and does not register when verify_code fails', async () => {
+    it('throws AppException.integration (safe message) and does not register when verify_code fails', async () => {
       clientRepo.findOneBy.mockResolvedValue(activeClient('wa_number_requested'));
       canalRepoCtx.findOneBy.mockResolvedValue(
         whatsappCanal({ phone_number_id: 'REAL-PN-999', display_phone_number: '+56912345678' }),
@@ -272,9 +297,13 @@ describe('OnboardingService — WhatsApp number registration', () => {
         fetchResponse(false, { error: { message: 'Incorrect code' } }),
       );
 
-      await expect(service.verifyWhatsAppOtp(CLIENT_ID, CANAL_ID, dto)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      const err = await service.verifyWhatsAppOtp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.INTEGRATION_FAILURE);
+      expect((err as AppException).userMessage).not.toContain('Incorrect code');
+      expect((err as AppException).technicalDetail).toContain('Incorrect code');
+      // verify_code failure surfaces via metaPost !res.ok → upstream 502 (Bad Gateway)
+      expect((err as AppException).getStatus()).toBe(502);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(canalRepoCtx.update).not.toHaveBeenCalled();
@@ -294,7 +323,7 @@ describe('OnboardingService — WhatsApp number registration', () => {
 
     // R1-004/R4-007 — PIN fail-closed: a missing WHATSAPP_REGISTER_PIN must abort
     // before Meta /register so no number is ever registered with a default PIN.
-    it('throws and never calls /register when WHATSAPP_REGISTER_PIN is missing', async () => {
+    it('throws AppException.config (safe message) and never calls /register when WHATSAPP_REGISTER_PIN is missing', async () => {
       delete process.env.WHATSAPP_REGISTER_PIN;
       clientRepo.findOneBy.mockResolvedValue(activeClient('wa_number_requested'));
       canalRepoCtx.findOneBy.mockResolvedValue(
@@ -303,7 +332,11 @@ describe('OnboardingService — WhatsApp number registration', () => {
       // If the guard were missing, verify_code would resolve and /register would run.
       fetchMock.mockResolvedValue(fetchResponse(true, { success: true }));
 
-      await expect(service.verifyWhatsAppOtp(CLIENT_ID, CANAL_ID, dto)).rejects.toBeTruthy();
+      const err = await service.verifyWhatsAppOtp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.CONFIG_ERROR);
+      expect((err as AppException).technicalDetail).toMatch(/WHATSAPP_REGISTER_PIN not configured/i);
+      expect((err as AppException).getStatus()).toBe(500);
 
       const registerCall = fetchMock.mock.calls.find(([u]: [string]) => u.endsWith('/register'));
       expect(registerCall).toBeUndefined();
@@ -338,16 +371,18 @@ describe('OnboardingService — WhatsApp number registration', () => {
     });
 
     // R3-008/R4-006 — fail-fast config on verify too.
-    it('throws before any fetch when the access token is not configured', async () => {
+    it('throws AppException.config (safe message) before any fetch when the access token is not configured', async () => {
       delete process.env.WHATSAPP_ACCESS_TOKEN;
       clientRepo.findOneBy.mockResolvedValue(activeClient('wa_number_requested'));
       canalRepoCtx.findOneBy.mockResolvedValue(
         whatsappCanal({ phone_number_id: 'REAL-PN-999', display_phone_number: '+56912345678' }),
       );
 
-      await expect(service.verifyWhatsAppOtp(CLIENT_ID, CANAL_ID, dto)).rejects.toBeInstanceOf(
-        InternalServerErrorException,
-      );
+      const err = await service.verifyWhatsAppOtp(CLIENT_ID, CANAL_ID, dto).catch((e) => e);
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).userMessage).toBe(SAFE_MESSAGES.CONFIG_ERROR);
+      expect((err as AppException).technicalDetail).toMatch(/WHATSAPP_ACCESS_TOKEN not configured/i);
+      expect((err as AppException).getStatus()).toBe(500);
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });

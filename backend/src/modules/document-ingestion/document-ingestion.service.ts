@@ -1,10 +1,10 @@
 import {
   BadRequestException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AppException } from '../../common/exceptions';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import * as fs from 'fs';
@@ -230,11 +230,12 @@ export class DocumentIngestionService {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown parse error';
       this.logger.error(`Parse failed for document ${id}: ${message}`);
+      // Preserve raw error detail in the DB row (unchanged — required by spec).
       await this.repo.update(clientId, id, {
         status: 'error',
         error_detail: message,
       });
-      throw new InternalServerErrorException(`Parse failed: ${message}`);
+      throw AppException.integration(`Parse failed: ${message}`, 500);
     }
   }
 

@@ -2,10 +2,10 @@ import {
   Controller,
   Get,
   Logger,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { AppException } from './common/exceptions';
 
 @Controller('health')
 export class HealthController {
@@ -34,9 +34,10 @@ export class HealthController {
       this.logger.log('[HealthController] Redis ping OK');
       return { status: 'ok' };
     } catch (err) {
+      if (err instanceof AppException) throw err;
       const msg = err instanceof Error ? err.message : 'Redis unreachable';
       this.logger.error(`[HealthController] Redis health check failed: ${msg}`);
-      throw new ServiceUnavailableException(`Redis unavailable: ${msg}`);
+      throw AppException.integration(`Redis unavailable: ${msg}`, 503);
     } finally {
       client.disconnect();
     }

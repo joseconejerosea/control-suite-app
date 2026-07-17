@@ -1,0 +1,67 @@
+- generic [active] [ref=f3e1]:
+  - alert [ref=f3e89]
+  - generic [ref=f3e90]:
+    - complementary [ref=f3e91]:
+      - generic [ref=f3e96]:
+        - generic [ref=f3e97]: Control Suite
+        - generic [ref=f3e98]: Operations Platform
+      - generic [ref=f3e99]:
+        - generic [ref=f3e100]: A
+        - generic [ref=f3e101]:
+          - generic [ref=f3e102]: admin@controlsuite.com
+          - generic [ref=f3e103]: Super Admin
+      - navigation [ref=f3e104]:
+        - generic [ref=f3e105]:
+          - link "Dashboard" [ref=f3e106] [cursor=pointer]:
+            - /url: /admin/dashboard
+          - link "Onboarding" [ref=f3e113] [cursor=pointer]:
+            - /url: /admin/onboarding
+          - link "Clientes" [ref=f3e121] [cursor=pointer]:
+            - /url: /admin/clientes
+          - link "Monitoreo" [ref=f3e128] [cursor=pointer]:
+            - /url: /admin/monitoring
+          - link "Tickets" [ref=f3e132] [cursor=pointer]:
+            - /url: /admin/tickets
+          - link "Auditoría AI" [ref=f3e137] [cursor=pointer]:
+            - /url: /admin/audit
+          - link "Usuarios" [ref=f3e142] [cursor=pointer]:
+            - /url: /admin/usuarios
+      - button "Sign out" [ref=f3e149] [cursor=pointer]
+    - generic [ref=f3e150]:
+      - banner [ref=f3e151]:
+        - heading "Client Onboarding" [level=1] [ref=f3e152]
+        - generic [ref=f3e153]:
+          - button [ref=f3e154] [cursor=pointer]
+          - generic [ref=f3e159]: AD
+          - button "Sign out" [ref=f3e160] [cursor=pointer]
+      - main [ref=f3e164]:
+        - generic [ref=f3e165]:
+          - generic [ref=f3e166]:
+            - generic [ref=f3e167]: Client
+            - generic [ref=f3e176]: Canal
+            - generic [ref=f3e187]: Verify
+            - generic [ref=f3e195]: Admin
+            - generic [ref=f3e203]: Listo
+          - generic [ref=f3e212]:
+            - generic [ref=f3e213]:
+              - heading "Configurar Canal" [level=2] [ref=f3e237]
+              - paragraph [ref=f3e215]: Canal de entrada y Google Sheet
+            - generic [ref=f3e238]:
+              - generic [ref=f3e239]:
+                - generic [ref=f3e240]: Nombre del canal *
+                - textbox "Canal principal" [ref=f3e241]
+              - generic [ref=f3e242]:
+                - generic [ref=f3e243]: Tipo
+                - combobox [ref=f3e244]:
+                  - option "Email" [selected]
+                  - option "WhatsApp"
+                  - option "Generic"
+              - generic [ref=f3e245]:
+                - generic [ref=f3e246]: Google Sheet (opcional)
+                - generic [ref=f3e250]:
+                  - generic [ref=f3e251]: URL o ID de la hoja
+                  - textbox "https://docs.google.com/spreadsheets/d/..." [ref=f3e252]
+                  - paragraph [ref=f3e253]: Las facturas procesadas se exportaran automaticamente a esta hoja.
+              - generic [ref=f3e254]:
+                - button "Atras" [ref=f3e255] [cursor=pointer]
+                - button "Configurar" [disabled] [ref=f3e258] [cursor=pointer]
