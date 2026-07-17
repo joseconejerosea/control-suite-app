@@ -66,7 +66,7 @@ export class EventosCrudosService {
 
     if (event.status !== 'error') {
       throw new BadRequestException(
-        `Only events with status 'error' can be retried. Current status: ${event.status}`,
+        `Solo se pueden reintentar eventos con estado 'error'. Estado actual: ${event.status}`,
       );
     }
 

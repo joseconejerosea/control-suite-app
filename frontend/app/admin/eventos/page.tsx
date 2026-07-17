@@ -13,7 +13,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}`, ...(options?.headers ?? {}) },
   });
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).message ?? `HTTP ${res.status}`); }
+  if (!res.ok) { const json = await res.json().catch(() => ({})); throw new Error((json as any)?.error?.message ?? 'Ocurrió un error. Intente nuevamente.'); }
   return res.json();
 }
 

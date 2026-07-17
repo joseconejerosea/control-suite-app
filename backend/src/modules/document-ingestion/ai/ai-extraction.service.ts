@@ -1,4 +1,5 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { AppException } from '../../../common/exceptions';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { TargetTable } from '../document-upload.entity';
@@ -60,13 +61,15 @@ export class AiExtractionService {
 
   async extract(input: AiExtractionInput): Promise<AiExtractionOutput> {
     if (!this.apiKey) {
-      throw new ServiceUnavailableException(
-        'AI extraction not configured. Set AI_API_KEY to enable document parsing.',
+      throw AppException.config(
+        'AI extraction not configured (AI_API_KEY missing). Set AI_API_KEY to enable document parsing.',
+        503,
       );
     }
     if (this.provider !== 'openai') {
-      throw new ServiceUnavailableException(
+      throw AppException.config(
         `AI provider "${this.provider}" not supported yet. Use AI_PROVIDER=openai.`,
+        503,
       );
     }
 
@@ -113,9 +116,10 @@ export class AiExtractionService {
         },
       };
     } catch (err) {
+      if (err instanceof AppException) throw err;
       const message = err instanceof Error ? err.message : 'Unknown AI error';
       this.logger.error(`AI extraction failed: ${message}`);
-      throw new ServiceUnavailableException(`AI extraction failed: ${message}`);
+      throw AppException.integration(`AI extraction failed: ${message}`, 503);
     }
   }
 

@@ -1,12 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
-  GatewayTimeoutException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AppException } from '../../common/exceptions';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -149,7 +148,10 @@ export class OnboardingService {
     const phoneNumberId = created?.id as string | undefined;
     if (!phoneNumberId) {
       this.logger.error(`[OnboardingService] Meta phone_numbers returned no id: ${JSON.stringify(created)}`);
-      throw new BadRequestException('Meta did not return a phone_number_id.');
+      throw AppException.integration(
+        `Meta did not return a phone_number_id. Response: ${JSON.stringify(created)}`,
+        400,
+      );
     }
 
     // 2) Request the OTP for the freshly created number.
@@ -203,7 +205,7 @@ export class OnboardingService {
     const pin = process.env.WHATSAPP_REGISTER_PIN?.trim();
     if (!pin) {
       this.logger.error('[OnboardingService] WHATSAPP_REGISTER_PIN not configured — refusing to register.');
-      throw new InternalServerErrorException('WHATSAPP_REGISTER_PIN not configured.');
+      throw AppException.config('WHATSAPP_REGISTER_PIN not configured — refusing to register', 500);
     }
 
     const client = await this.loadActiveClient(clientId);
@@ -261,11 +263,11 @@ export class OnboardingService {
   private assertMetaConfig(): void {
     if (!this.wabaId) {
       this.logger.error('[OnboardingService] WABA id not configured (META_WABA_ID / WHATSAPP_BUSINESS_ACCOUNT_ID).');
-      throw new InternalServerErrorException('WhatsApp WABA id not configured.');
+      throw AppException.config('WhatsApp WABA id not configured (META_WABA_ID / WHATSAPP_BUSINESS_ACCOUNT_ID)', 500);
     }
     if (!process.env.WHATSAPP_ACCESS_TOKEN?.trim()) {
       this.logger.error('[OnboardingService] WHATSAPP_ACCESS_TOKEN not configured.');
-      throw new InternalServerErrorException('WHATSAPP_ACCESS_TOKEN not configured.');
+      throw AppException.config('WHATSAPP_ACCESS_TOKEN not configured', 500);
     }
   }
 
@@ -296,10 +298,16 @@ export class OnboardingService {
     } catch (err: any) {
       if (err?.name === 'AbortError' || controller.signal.aborted) {
         this.logger.error(`[OnboardingService] Meta request timed out after ${META_TIMEOUT_MS}ms [${path}]`);
-        throw new GatewayTimeoutException(`Meta request timed out after ${META_TIMEOUT_MS}ms.`);
+        throw AppException.timeout(
+          `Meta request timed out after ${META_TIMEOUT_MS}ms [${path}]`,
+          504,
+        );
       }
       this.logger.error(`[OnboardingService] Meta request failed [${path}]: ${err?.message}`);
-      throw new BadRequestException(`Meta request failed: ${err?.message ?? 'network error'}`);
+      throw AppException.integration(
+        `Meta request failed: ${err?.message ?? 'network error'} [${path}]`,
+        400,
+      );
     } finally {
       clearTimeout(timer);
     }
@@ -308,7 +316,10 @@ export class OnboardingService {
     if (!res.ok) {
       const metaMessage = data?.error?.message ?? JSON.stringify(data);
       this.logger.error(`[OnboardingService] Meta error [${path}]: ${JSON.stringify(data)}`);
-      throw new BadRequestException(`Meta API error: ${metaMessage}`);
+      throw AppException.integration(
+        `Meta API error: ${metaMessage} [${path}] raw=${JSON.stringify(data)}`,
+        400,
+      );
     }
     return data;
   }
