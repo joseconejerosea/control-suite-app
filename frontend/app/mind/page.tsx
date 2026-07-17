@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { api } from '@/lib/api';
+import { ChatMarkdown } from '@/components/mind/ChatMarkdown';
 
 interface Propuesta {
   id: string;
@@ -202,7 +203,7 @@ export default function MindPage() {
                     ? 'bg-indigo-600 text-white rounded-br-sm'
                     : 'bg-slate-100 text-slate-800 rounded-bl-sm'
                 }`}>
-                  {msg.mensaje}
+                  {msg.role === 'assistant' ? <ChatMarkdown content={msg.mensaje} /> : msg.mensaje}
                 </div>
               </div>
             ))}
