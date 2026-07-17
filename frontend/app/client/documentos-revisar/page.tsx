@@ -277,7 +277,7 @@ export default function DocumentosRevisarPage() {
             <FileText size={40} style={{ color: "var(--muted-foreground)", margin: "0 auto 16px", opacity: 0.3 }} />
             <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Sin documentos</div>
             <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
-              {hasActiveFilters ? "No hay documentos que coincidan con los filtros." : "No hay documentos F1 procesados aun."}
+              {hasActiveFilters ? "No hay documentos que coincidan con los filtros." : "No hay documentos pendientes de revisión."}
             </div>
           </div>
         ) : (
@@ -312,7 +312,9 @@ export default function DocumentosRevisarPage() {
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                         <span style={{ fontSize: 10, background: sc.bg, color: sc.fg, padding: "2px 8px", borderRadius: 8, fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}>
                           {doc.status === "low_confidence" && <AlertTriangle size={9} />}
-                          {conf != null ? `${conf}%` : doc.status.replace(/_/g, " ")}
+                          {doc.status === "approved" ? "aprobado"
+                            : doc.status === "rejected" ? "rechazado"
+                            : conf != null ? `${conf}%` : doc.status.replace(/_/g, " ")}
                         </span>
                         <span style={{ fontSize: 10, color: "var(--muted-foreground)", textTransform: "capitalize" }}>{doc.source}</span>
                       </div>

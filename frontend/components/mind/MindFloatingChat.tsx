@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
+import { ChatMarkdown } from './ChatMarkdown';
 
 interface ChatMsg { role: 'user' | 'assistant'; mensaje: string; }
 interface Propuesta { id: string; titulo: string; descripcion: string; severidad: string; }
@@ -121,7 +122,7 @@ export function MindFloatingChat() {
                 <div className={`max-w-[80%] px-3 py-2 rounded-xl text-sm leading-relaxed ${
                   m.role === 'user' ? 'text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'
                 }`} style={m.role === 'user' ? { background: 'linear-gradient(135deg, #4F46E5, #06B6D4)' } : {}}>
-                  {m.mensaje}
+                  {m.role === 'assistant' ? <ChatMarkdown content={m.mensaje} /> : m.mensaje}
                 </div>
               </div>
             ))}

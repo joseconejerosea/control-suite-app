@@ -38,7 +38,24 @@ export class AuditService {
     try {
       // Si la request ya abrió contexto de tenant, escribe ahí; si no (login,
       // acciones de sistema), por el pool de sistema para no chocar con RLS.
-      await (getTenantStore() ? write() : runAsSystem(write));
+      const store = getTenantStore();
+      if (store) {
+        // El audit corre en la MISMA transacción del request. Sin aislarlo, un
+        // INSERT que falla (p.ej. una columna inválida) aborta toda la tx y
+        // descarta la operación real en silencio. El SAVEPOINT acota el fallo:
+        // sólo se revierte el audit, la operación del caller sobrevive y commitea.
+        const qr = store.queryRunner;
+        await qr.query('SAVEPOINT audit_log');
+        try {
+          await write();
+          await qr.query('RELEASE SAVEPOINT audit_log');
+        } catch (err) {
+          await qr.query('ROLLBACK TO SAVEPOINT audit_log').catch(() => {});
+          throw err;
+        }
+      } else {
+        await runAsSystem(write);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'unknown';
       this.logger.error(`Failed to write audit log: ${msg}`);
