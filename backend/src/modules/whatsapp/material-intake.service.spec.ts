@@ -102,7 +102,54 @@ describe('MaterialIntakeService', () => {
     }));
     expect(wa.confirmarMaterial.mock.calls[0][0].codigo).toMatch(/^MAT-/);
 
+    // Regresión: eventos_crudos.flow es VARCHAR(10). 'F3_MATERIAL' (11) reventaba el
+    // UPDATE, abortaba la tx y (con el .catch que se tragaba el error) hacía rollback
+    // silencioso de TODA el alta. Debe usarse un flow ≤ 10 chars.
+    const eventUpdate = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes('flow='),
+    );
+    expect(eventUpdate).toBeDefined();
+    expect(eventUpdate[0]).toContain("flow='F3_INTAKE'");
+    const flowValue = eventUpdate[0].match(/flow='([^']+)'/)![1];
+    expect(flowValue.length).toBeLessThanOrEqual(10);
+
     // Sesión limpiada al terminar.
+    expect(store[PHONE]).toBeUndefined();
+  });
+
+  it('a bookkeeping failure after commit does NOT roll back the SKU/movement nor block the confirmation', async () => {
+    // El cierre del evento (bookkeeping) corre en una tx SEPARADA post-commit. Si falla,
+    // el alta real (SKU + movimiento) ya está commiteada y la confirmación igual sale.
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes("status='active'")) {
+        return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }]);
+      }
+      if (sql.includes('FROM bodegas WHERE client_id')) {
+        return Promise.resolve([{ id: 'bod-1', name: 'Bodega Central' }]);
+      }
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      if (sql.includes('SELECT nombre FROM bodegas')) return Promise.resolve([{ nombre: 'Bodega Central' }]);
+      // El UPDATE de cierre del evento revienta (simula el abort que antes se tragaba).
+      if (sql.includes('UPDATE eventos_crudos')) return Promise.reject(new Error('value too long for type character varying(10)'));
+      return Promise.resolve([]);
+    });
+
+    store[PHONE] = {
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-bk', storagePath: 'materials/x.jpg', step: 'cantidad',
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', bodegaId: 'bod-1',
+      },
+    };
+
+    expect(await svc.handleResponse(PHONE, '3')).toBe(true);
+
+    // El alta real ocurrió y se confirmó, pese al fallo del bookkeeping.
+    expect(skus.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    expect(wa.confirmarMaterial).toHaveBeenCalledTimes(1);
     expect(store[PHONE]).toBeUndefined();
   });
 
