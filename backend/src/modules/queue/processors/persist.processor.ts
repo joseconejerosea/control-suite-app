@@ -5,9 +5,37 @@ import { DataSource } from 'typeorm';
 import { Job } from 'bullmq';
 import { SheetsService } from '../../sheets/sheets.service';
 import { RendicionesService } from '../../rendiciones/rendiciones.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
 import { normalizePhone } from '../../../common/utils/normalize-phone';
+import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
+
+// Etiquetas legibles para el usuario de terreno. El clasificador emite claves
+// técnicas (factura_recibida, guia_despacho…); la confirmación de WhatsApp debe
+// mostrar el tipo en español, no la clave interna.
+// Descriptor de notificación WhatsApp a enviar DESPUÉS del commit de la tx del
+// tenant. Los envíos salientes no deben correr con la transacción abierta.
+type PostCommitNotify =
+  | { kind: 'confirm'; phone: string; tipo: string; proveedor: string; monto: string; proyecto: string; estado: string }
+  | { kind: 'duplicate'; phone: string }
+  | null;
+
+const TIPO_LABELS: Record<string, string> = {
+  factura_recibida: 'Factura recibida',
+  factura_emitida: 'Factura emitida',
+  boleta: 'Boleta',
+  nota_credito: 'Nota de crédito',
+  nota_debito: 'Nota de débito',
+  orden_compra: 'Orden de compra',
+  comprobante: 'Comprobante',
+  contrato: 'Contrato',
+  formulario: 'Formulario',
+  liquidacion: 'Liquidación',
+  guia_despacho: 'Guía de despacho',
+  contrato_personal: 'Contrato de personal',
+  otro: 'Otro',
+};
 
 @Processor('persist')
 export class PersistProcessor extends WorkerHost {
@@ -17,6 +45,7 @@ export class PersistProcessor extends WorkerHost {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly sheetsService: SheetsService,
     private readonly rendicionesService: RendicionesService,
+    private readonly wa: WhatsAppService,
   ) {
     super();
   }
@@ -25,7 +54,31 @@ export class PersistProcessor extends WorkerHost {
     const { evento_crudo_id, client_id } = job.data;
     try {
       // Fase 2 — happy path dentro de una tx con app.current_tenant = client_id.
-      await runWithTenant(this.dataSource, client_id, () => this.persistEvento(job));
+      // persistEvento solo COMPUTA el aviso; el envío saliente por WhatsApp se hace
+      // acá, DESPUÉS de que la transacción del tenant commitea (no con la tx abierta).
+      const notify = await runWithTenant(this.dataSource, client_id, () => this.persistEvento(job));
+
+      // Best-effort: un fallo de notificación jamás debe voltear la factura ya persistida.
+      if (notify?.kind === 'confirm') {
+        try {
+          await this.wa.confirmarProcesado({
+            telefono: notify.phone,
+            tipo: notify.tipo,
+            proveedor: notify.proveedor,
+            monto: notify.monto,
+            proyecto: notify.proyecto,
+            estado: notify.estado,
+          });
+        } catch (e: any) {
+          this.logger.warn(`[F1Persist] WhatsApp confirmation failed: ${e.message}`);
+        }
+      } else if (notify?.kind === 'duplicate') {
+        try {
+          await this.wa.avisarDuplicado(notify.phone);
+        } catch (e: any) {
+          this.logger.warn(`[F1Persist] WhatsApp duplicate notice failed: ${e.message}`);
+        }
+      }
     } catch (err: any) {
       // Raw cause is logged for debugging; the persisted error_message must stay safe
       // because that column is returned by the API and rendered in the admin UI.
@@ -37,13 +90,41 @@ export class PersistProcessor extends WorkerHost {
           [SAFE_MESSAGES.INTEGRATION_FAILURE, evento_crudo_id],
         ),
       ).catch(() => {});
+      // Solo en el último intento: si BullMQ va a reintentar, no notificamos aún
+      // para no mandarle un mensaje de error por cada reintento.
+      if (isFinalAttempt(job)) {
+        // La resolución del teléfono corre bajo RLS (runWithTenant); el envío saliente
+        // se hace FUERA de la tx del tenant.
+        const phone = await runWithTenant(this.dataSource, client_id, () =>
+          this.notifyFailureByEvento(evento_crudo_id),
+        ).catch(() => null);
+        if (phone) await this.wa.avisarFalloProcesamiento(phone).catch(() => {});
+      }
       throw err;
     }
   }
 
+  /**
+   * Resuelve el teléfono del remitente desde el evento crudo para el aviso de fallo
+   * por WhatsApp. Corre bajo runWithTenant (RLS) desde el catch, pero ya NO envía:
+   * devuelve el phone (o null) y el envío saliente se hace fuera de la tx del tenant.
+   * Silenciosa: cualquier error no debe alterar el flujo de fallo ya persistido.
+   */
+  private async notifyFailureByEvento(eventoCrudoId: string): Promise<string | null> {
+    const rows = await this.dataSource
+      .query(`SELECT payload, canal, source FROM eventos_crudos WHERE id=$1`, [eventoCrudoId])
+      .catch(() => []);
+    if (!rows.length) return null;
+    const { payload, canal, source } = rows[0];
+    const channel = canal ?? source ?? 'unknown';
+    if (channel !== 'whatsapp') return null;
+    const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone ?? null) : null;
+    return phone ?? null;
+  }
+
   private async persistEvento(
     job: Job<{ evento_crudo_id: string; client_id: string; classification: any; processing_status: string }>,
-  ): Promise<void> {
+  ): Promise<PostCommitNotify> {
     const { evento_crudo_id, client_id, classification } = job.data;
     this.logger.log(`[F1Persist] Persisting evento: ${evento_crudo_id}`);
 
@@ -79,7 +160,13 @@ export class PersistProcessor extends WorkerHost {
           [evento_crudo_id],
         );
         this.logger.warn(`[F1Persist] Duplicate invoice: ${evento_crudo_id}`);
-        return;
+        // No dejar colgado al remitente tras el ack inicial: avisar que ya estaba
+        // registrado. El envío se hace tras el commit (fuera de la tx del tenant).
+        if (channel === 'whatsapp') {
+          const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone ?? null) : null;
+          if (phone) return { kind: 'duplicate', phone };
+        }
+        return null;
       }
     }
 
@@ -147,6 +234,63 @@ export class PersistProcessor extends WorkerHost {
       categoria: classification.categoria ?? 'Sin categoría',
       vendorName,
     });
+
+    // ─── f1-notify: WhatsApp confirmation to sender ──────────────────────
+    // El de terreno solo recibía el ack inicial ("Procesando con IA…") y quedaba
+    // colgado. Acá, con la factura ya registrada, COMPUTAMOS lo que REALMENTE
+    // se procesó (tipo, monto, proyecto, estado). El envío saliente se hace tras
+    // el commit de la tx del tenant, no acá dentro.
+    return this.sendWhatsAppConfirmation({
+      channel,
+      phone: typeof payload === 'object' ? (payload?.from ?? payload?.phone ?? null) : null,
+      tipo,
+      amount,
+      currency: datos.moneda ?? 'CLP',
+      vendorName,
+      proyectoId: classification.proyecto_id_sugerido ?? null,
+    });
+  }
+
+  /**
+   * COMPUTA el descriptor de confirmación por WhatsApp del documento ya procesado.
+   * La lectura del nombre del proyecto y el formato de monto/tipo son lecturas de DB /
+   * formateo puro que corren dentro de runWithTenant (RLS). El envío saliente NO se
+   * hace acá: se devuelve el descriptor y `process` lo envía tras el commit.
+   */
+  private async sendWhatsAppConfirmation(opts: {
+    channel: string;
+    phone: string | null;
+    tipo: string;
+    amount: number;
+    currency: string;
+    vendorName: string;
+    proyectoId: string | null;
+  }): Promise<PostCommitNotify> {
+    if (opts.channel !== 'whatsapp' || !opts.phone) return null;
+
+    let proyecto = 'sin asignar';
+    if (opts.proyectoId) {
+      const rows = await this.dataSource
+        .query(`SELECT name FROM projects WHERE id=$1 LIMIT 1`, [opts.proyectoId])
+        .catch(() => []);
+      if (rows[0]?.name) proyecto = rows[0].name;
+    }
+
+    const monto = Number(opts.amount) > 0
+      ? new Intl.NumberFormat('es-CL', {
+          style: 'currency', currency: opts.currency, maximumFractionDigits: 0,
+        }).format(Number(opts.amount))
+      : 'no detectado';
+
+    return {
+      kind: 'confirm',
+      phone: opts.phone,
+      tipo: TIPO_LABELS[opts.tipo] ?? 'Documento',
+      proveedor: opts.vendorName || 'no detectado',
+      monto,
+      proyecto,
+      estado: 'Registrado ✓',
+    };
   }
 
   private async resolvePersonaId(

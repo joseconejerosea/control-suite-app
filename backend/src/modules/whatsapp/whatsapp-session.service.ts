@@ -21,6 +21,21 @@ export interface WhatsAppSession {
     collected?: Record<string, string>;
     options?: { id: string; label: string }[];
   } | null;
+  // F3 · Intake de material POP por foto (conversación multi-paso).
+  // Estado de sesión asociado: state === 'awaiting_material'.
+  materialIntake?: {
+    eventoCrudoId: string;
+    storagePath: string;                 // foto del material → foto_key del SKU y del movimiento
+    step: 'kind' | 'nombre' | 'proyecto' | 'bodega' | 'cantidad';
+    attempts: number;
+    suggestedLabel?: string | null;      // nombre sugerido por la visión (ambigüedad/ayuda)
+    nombre?: string;
+    proyectoId?: string;
+    bodegaId?: string;
+    cantidad?: number;
+    projects?: { id: string; name: string }[];  // opciones cacheadas para parsear el número
+    bodegas?: { id: string; name: string }[];
+  } | null;
 }
 
 const PREFIX = 'wa:session:';

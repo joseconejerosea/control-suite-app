@@ -147,20 +147,71 @@ Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);
   }
 
-  // F1 — Confirmación de documento recibido
-  async confirmarDocumento(opts: {
+  // F1 — Confirmación de documento procesado y registrado.
+  // Refleja lo que REALMENTE se procesó (tipo, proveedor, monto, proyecto, estado),
+  // no una plantilla fija: el usuario de terreno debe sentir que el sistema entendió
+  // su envío. Los valores llegan ya resueltos/formateados desde el persist processor.
+  async confirmarProcesado(opts: {
     telefono: string;
-    folio: string;
+    tipo: string;
     proveedor: string;
     monto: string;
+    proyecto: string;
+    estado: string;
   }): Promise<boolean> {
-    const msg = `✅ *Documento recibido*
+    const msg = `✅ *Documento procesado*
 
-Folio: ${opts.folio}
+Tipo: ${opts.tipo}
 Proveedor: ${opts.proveedor}
 Monto: ${opts.monto}
+Proyecto: ${opts.proyecto}
+Estado: ${opts.estado}
 
-Procesando con IA... Te avisamos cuando esté listo.
+Control Suite BTL ⚡`;
+    return this.sendText(opts.telefono, msg);
+  }
+
+  // F1 — El documento ya estaba registrado (duplicado). Se avisa para no dejar
+  // al remitente colgado tras el ack inicial "Procesando con IA…".
+  async avisarDuplicado(telefono: string): Promise<boolean> {
+    const msg = `ℹ️ *Documento duplicado*
+
+Este documento ya estaba registrado, así que no lo cargamos de nuevo.
+
+Control Suite BTL ⚡`;
+    return this.sendText(telefono, msg);
+  }
+
+  // F1 — No se pudo procesar el documento (OCR ilegible, IA no clasificó, o
+  // fallo de infraestructura). Mensaje seguro y genérico: no expone la causa
+  // técnica y le confirma al remitente que un operador lo revisará.
+  async avisarFalloProcesamiento(telefono: string): Promise<boolean> {
+    const msg = `⚠️ *No pudimos procesar tu documento*
+
+No lo pudimos leer/clasificar automáticamente. Un operador lo va a revisar.
+Si era una foto, probá reenviarla más nítida y completa.
+
+Control Suite BTL ⚡`;
+    return this.sendText(telefono, msg);
+  }
+
+  // F3 — Confirmación de material POP registrado en inventario. Refleja el ítem
+  // real recién creado: nombre, ID único (codigo del SKU), proyecto, bodega y cantidad.
+  async confirmarMaterial(opts: {
+    telefono: string;
+    nombre: string;
+    codigo: string;
+    proyecto: string;
+    bodega: string;
+    cantidad: number;
+  }): Promise<boolean> {
+    const msg = `✅ *Material registrado*
+
+Ítem: ${opts.nombre}
+ID: ${opts.codigo}
+Proyecto: ${opts.proyecto}
+Bodega: ${opts.bodega}
+Cantidad: ${opts.cantidad}
 
 Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);

@@ -74,8 +74,23 @@ function buildController(opts: {
 
   // async → el mock devuelve una Promesa (el ds.query real lo es), así
   // `.catch(...)` que usa el controller en isDuplicate/resolveChannel existe.
+  //
+  // `handleText` del path autorizado usa runWithTenant (tieneConvocatoriaAbierta,
+  // notificarAltaUrgente), que abre un QueryRunner para setear app.current_tenant.
+  // El fn interno igual usa this.ds.query (el mock de query de abajo); el runner solo
+  // necesita el ciclo de vida de la tx → stub mínimo.
+  const makeQueryRunner = () => ({
+    connect: jest.fn(async () => undefined),
+    startTransaction: jest.fn(async () => undefined),
+    commitTransaction: jest.fn(async () => undefined),
+    rollbackTransaction: jest.fn(async () => undefined),
+    release: jest.fn(async () => undefined),
+    isTransactionActive: true,
+    query: jest.fn(async () => []),
+  });
   const ds = {
     query: jest.fn(async (sql: string, params: any[]) => opts.queryMocks(sql, params)),
+    createQueryRunner: jest.fn(() => makeQueryRunner()),
   } as unknown as DataSource;
 
   const wa = { sendText } as any;
@@ -88,10 +103,13 @@ function buildController(opts: {
     wa,
     { get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn() } as any, // sessions
     { downloadAndStore: jest.fn() } as any,                                                       // media
+    { handleResponse: jest.fn(async () => false) } as any,                                        // materialIntake
     { handleClarificationResponse: jest.fn(async () => false) } as any,                          // clarification
     { resolve: jest.fn(async () => null) } as any,                                                // projectResolver
     ds,
     { add: jest.fn() } as any,                                                                    // ocrQueue
+    { add: jest.fn() } as any,                                                                    // convocatoriaQueue
+    { add: jest.fn() } as any,                                                                    // returnPhotoQueue
     { checkLocal: jest.fn(() => ({ safe: true, sanitized: 'hola', category: 'safe' })) } as any, // shield
   );
 
@@ -218,7 +236,10 @@ describe('WhatsApp inbound sender gate', () => {
       ([sql]: any[]) => typeof sql === 'string' && sql.includes('promoters') && sql.includes('collaborators'),
     );
     expect(gateCall).toBeDefined();
-    expect(gateCall![1]).toEqual([CLIENT_A, PHONE_DIGITS]);
+    // Los primeros dos params SON clientId + dígitos normalizados (lo que prueba el
+    // anti-tautología). La query del gate añade luego los roles de `users`
+    // (MANAGER/OPERATOR/SUPERVISOR) como params 3-5 — irrelevantes para este chequeo.
+    expect(gateCall![1].slice(0, 2)).toEqual([CLIENT_A, PHONE_DIGITS]);
   });
 
   // (e-unit) Aislamiento de tenant a nivel de parámetro: el clientId del canal

@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
 import { WhatsAppMediaService } from './whatsapp-media.service';
+import { MaterialIntakeService } from './material-intake.service';
 import { ClarificationService } from '../project-resolver/clarification.service';
 import { ProjectResolverService } from '../project-resolver/project-resolver.service';
 import { Public } from '../../common/decorators/public.decorator';
@@ -35,6 +36,7 @@ export class WhatsAppWebhookController {
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
     private readonly media: WhatsAppMediaService,
+    private readonly materialIntake: MaterialIntakeService,
     private readonly clarification: ClarificationService,
     private readonly projectResolver: ProjectResolverService,
     @InjectDataSource() private readonly ds: DataSource,
@@ -329,37 +331,16 @@ export class WhatsAppWebhookController {
 
       const result = await this.media.downloadAndStore(imageId, clientId, 'documents');
 
-      // Use ProjectResolverService for smart project assignment
+      // Proyecto como PISTA, no interactivo. El triage documento-vs-material corre
+      // async en el OcrProcessor; recién ahí, sabiendo el tipo, se pregunta lo que
+      // corresponda (proyecto para documento vía classify, o el intake de material).
+      // Así NO preguntamos "¿a qué proyecto pertenece este documento?" antes de
+      // saber si de verdad es un documento — que es el bug que reportó el cliente.
       let projectId: string | null = null;
       const resolved = await this.projectResolver.resolve(caption, null, clientId, from);
       if (resolved && resolved.confidence >= 0.70) {
         projectId = resolved.projectId;
         await this.sessions.updateLastProject(from, projectId);
-      }
-
-      // If resolver couldn't determine project, fall back to asking
-      if (!projectId) {
-        const projects = await this.ds.query(
-          `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 10`,
-          [clientId],
-        ).catch(() => []);
-
-        if (projects.length > 1) {
-          await this.sessions.set(from, {
-            state: 'awaiting_project',
-            projects,
-            base64: result.buffer.toString('base64'),
-            mimeType: result.mimeType,
-            caption,
-            clientId,
-            canalId,
-            updatedAt: new Date().toISOString(),
-          });
-          const list = projects.map((p: any, i: number) => `${i + 1}. ${p.name}`).join('\n');
-          await this.wa.sendText(from, `A que proyecto pertenece este documento?\n\n${list}\n\nResponde con el numero.`);
-          return;
-        }
-        projectId = projects[0]?.id ?? null;
       }
 
       const eventId = await this.persistEvent({
@@ -377,7 +358,7 @@ export class WhatsAppWebhookController {
         evento_crudo_id: eventId, client_id: clientId, canal: 'whatsapp',
       }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
 
-      await this.wa.sendText(from, 'Documento recibido. Procesando con IA...');
+      await this.wa.sendText(from, '📎 Recibí tu foto, la estoy revisando...');
     } catch (err: any) {
       this.logger.error(`[WhatsApp] Image handling error: ${err.message}`);
       await this.wa.sendText(from, 'No pude procesar la imagen. Intenta de nuevo.');
@@ -587,6 +568,11 @@ export class WhatsAppWebhookController {
       await this.wa.sendText(from, 'No puedo procesar ese mensaje.');
       return;
     }
+
+    // Material intake (F3) — intercepta las respuestas de la conversación de
+    // alta de material POP antes que cualquier otro handler.
+    const materialHandled = await this.materialIntake.handleResponse(from, text);
+    if (materialHandled) return;
 
     // Clarification flow — intercept before other handlers
     const handled = await this.clarification.handleClarificationResponse(from, text, messageId, canalId);

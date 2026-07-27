@@ -42,6 +42,7 @@ import { EquivalenciasModule } from './modules/equivalencias/equivalencias.modul
 import { F5Module } from './modules/f5/f5.module';
 import { F5ViewsModule } from './modules/f5-views/f5-views.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { MaterialIntakeModule } from './modules/whatsapp/material-intake.module';
 import { CronModule } from './modules/cron/cron.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -99,6 +100,7 @@ import { SupportModule } from './modules/support/support.module';
     F5Module,
     F5ViewsModule,
     WhatsAppModule,
+    MaterialIntakeModule,
     CronModule,
     MonitoringModule,
     AuditModule,
