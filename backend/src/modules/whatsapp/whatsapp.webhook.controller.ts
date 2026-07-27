@@ -17,7 +17,7 @@ import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant } from '../../common/tenant/tenant-context';
-import { runWithWaFrom } from './whatsapp-send-context';
+import { runWithWaFrom, getWaFrom } from './whatsapp-send-context';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
@@ -283,7 +283,10 @@ export class WhatsAppWebhookController {
         opts.canalId,
         opts.messageId,
         opts.flow,
-        JSON.stringify({ ...opts.payload, from: opts.from, type: opts.type }),
+        // wa_phone_number_id: el número por el que ENTRÓ el mensaje. Se guarda para
+        // que los workers (OCR/classify/persist) respondan desde ese mismo número y
+        // no desde el global (getWaFrom está activo acá vía runWithWaFrom del webhook).
+        JSON.stringify({ ...opts.payload, from: opts.from, type: opts.type, wa_phone_number_id: getWaFrom() ?? null }),
       ],
     );
 

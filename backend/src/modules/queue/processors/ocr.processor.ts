@@ -9,6 +9,8 @@ import { MetricsService } from '../../metrics/metrics.service';
 import { StorageService } from '../../../common/storage/storage.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { MaterialIntakeService } from '../../whatsapp/material-intake.service';
+import { runWithWaFrom } from '../../whatsapp/whatsapp-send-context';
+import { resolveWaFrom } from '../../whatsapp/resolve-wa-from';
 import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
 
@@ -41,6 +43,13 @@ export class OcrProcessor extends WorkerHost {
   }
 
   async process(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
+    // Los workers no heredan el ALS de número saliente del webhook: sin esto, los
+    // envíos (material, fallos) salen del número GLOBAL y Meta los rechaza (JD-B-003).
+    const waFrom = await resolveWaFrom(this.dataSource, job.data.evento_crudo_id, job.data.client_id);
+    await runWithWaFrom(waFrom, () => this.runJob(job));
+  }
+
+  private async runJob(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
     const { evento_crudo_id, client_id, canal } = job.data;
     this.logger.log(`[F1OCR] Processing evento: ${evento_crudo_id}`);
 
