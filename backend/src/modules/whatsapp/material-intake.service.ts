@@ -261,8 +261,10 @@ export class MaterialIntakeService {
     const clientId = session.clientId!;
 
     try {
+      // Transacción CRÍTICA: SKU + movimiento (los datos que DEBEN persistir, atómicos).
+      // Solo estas escrituras determinan el éxito del alta.
       const { sku, movimiento, proyectoNombre, bodegaNombre } = await runWithTenant(this.ds, clientId, async () => {
-        const sku = await this.crearSkuUnico(clientId, mi.nombre!, mi.storagePath);
+        const sku = await this.crearSkuUnico(clientId, mi.nombre!);
 
         const movimiento = await this.movimientos.create(clientId, {
           sku_id: sku.id,
@@ -277,18 +279,6 @@ export class MaterialIntakeService {
         const proyRows = await this.ds.query(`SELECT name FROM projects WHERE id=$1 LIMIT 1`, [mi.proyectoId]).catch(() => []);
         const bodRows = await this.ds.query(`SELECT nombre FROM bodegas WHERE id=$1 LIMIT 1`, [mi.bodegaId]).catch(() => []);
 
-        // Cerrar el evento crudo: quedó resuelto como material, con trazabilidad al SKU y movimiento.
-        await this.ds.query(
-          `UPDATE eventos_crudos SET
-             flow='F3_MATERIAL', status='processed', processed_at=NOW(),
-             parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb
-           WHERE id=$1`,
-          [
-            mi.eventoCrudoId,
-            JSON.stringify({ material_sku_id: sku.id, material_movimiento_id: movimiento.id, material_registered_at: new Date().toISOString() }),
-          ],
-        ).catch(() => {});
-
         return {
           sku,
           movimiento,
@@ -296,6 +286,26 @@ export class MaterialIntakeService {
           bodegaNombre: bodRows[0]?.nombre ?? 'sin nombre',
         };
       });
+
+      // Bookkeeping en tx SEPARADA (foto del SKU + cierre del evento). Best-effort:
+      // corre DESPUÉS del commit del alta, así un fallo acá (p.ej. un statement que
+      // abortaría la tx) NUNCA puede voltear el SKU/movimiento ya persistidos — solo
+      // se loguea. flow='F3_INTAKE' (9 chars) entra en eventos_crudos.flow VARCHAR(10).
+      await runWithTenant(this.ds, clientId, async () => {
+        if (mi.storagePath) {
+          await this.ds.query(`UPDATE skus SET foto_key=$1 WHERE id=$2 AND client_id=$3`, [mi.storagePath, sku.id, clientId]);
+        }
+        await this.ds.query(
+          `UPDATE eventos_crudos SET
+             flow='F3_INTAKE', status='processed', processed_at=NOW(),
+             parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb
+           WHERE id=$1`,
+          [
+            mi.eventoCrudoId,
+            JSON.stringify({ material_sku_id: sku.id, material_movimiento_id: movimiento.id, material_registered_at: new Date().toISOString() }),
+          ],
+        );
+      }).catch((e: any) => this.logger.warn(`[Material] Bookkeeping post-alta falló (evento ${mi.eventoCrudoId}): ${e.message}`));
 
       await this.sessions.delete(phone);
       await this.wa.confirmarMaterial({
@@ -320,20 +330,11 @@ export class MaterialIntakeService {
    * Crea el SKU con un codigo único por cliente. El codigo ES el "ID único del
    * ítem" que pide el cliente. Reintenta ante colisión de codigo (unique por cliente).
    */
-  private async crearSkuUnico(clientId: string, nombre: string, fotoKey: string): Promise<any> {
+  private async crearSkuUnico(clientId: string, nombre: string): Promise<any> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const codigo = this.genCodigo();
       try {
-        const sku = await this.skus.create(clientId, { codigo, nombre, tipo: 'reusable' } as any);
-        // SkusService.create no inserta foto_key; la seteamos aparte para que el
-        // ítem muestre la foto del material en el inventario.
-        if (fotoKey) {
-          await this.ds
-            .query(`UPDATE skus SET foto_key=$1 WHERE id=$2 AND client_id=$3`, [fotoKey, sku.id, clientId])
-            .catch(() => {});
-          sku.foto_key = fotoKey;
-        }
-        return sku;
+        return await this.skus.create(clientId, { codigo, nombre, tipo: 'reusable' } as any);
       } catch (err: any) {
         // Solo reintentar ante colisión de codigo duplicado (SkusService.create lanza
         // BadRequestException con 'ya existe'). Cualquier otro error (RLS, DB) NO debe
