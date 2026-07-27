@@ -10,6 +10,7 @@ import { ProjectResolverService } from '../../project-resolver/project-resolver.
 import { ClarificationService } from '../../project-resolver/clarification.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 const QUEUE_F1_PERSIST   = 'persist';
@@ -45,8 +46,30 @@ export class ClassifyProcessor extends WorkerHost {
         this.setStatus(evento_crudo_id, 'failed_classification', err.message),
       ).catch(() => {});
       this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+      // Solo en el último intento: evita mandar un error por cada reintento de BullMQ.
+      if (isFinalAttempt(job)) {
+        await runWithTenant(this.dataSource, client_id, () =>
+          this.notifyFailureByEvento(evento_crudo_id, canal),
+        ).catch(() => {});
+      }
       throw err;
     }
+  }
+
+  /** Aviso de fallo por WhatsApp (best-effort). El teléfono viaja en el payload. */
+  private async notifyFailure(payload: any, canal: string): Promise<void> {
+    if (canal !== 'whatsapp') return;
+    const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone ?? null) : null;
+    if (phone) await this.wa.avisarFalloProcesamiento(phone).catch(() => {});
+  }
+
+  /** Igual que notifyFailure pero resolviendo el payload desde el evento (para el catch). */
+  private async notifyFailureByEvento(eventoCrudoId: string, canal: string): Promise<void> {
+    if (canal !== 'whatsapp') return;
+    const rows = await this.dataSource
+      .query(`SELECT payload FROM eventos_crudos WHERE id=$1`, [eventoCrudoId])
+      .catch(() => []);
+    if (rows.length) await this.notifyFailure(rows[0].payload, canal);
   }
 
   private async classifyEvento(
@@ -65,6 +88,7 @@ export class ClassifyProcessor extends WorkerHost {
     if (!ocr_text) {
       await this.setStatus(evento_crudo_id, 'failed_classification', 'No OCR text available');
       this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+      await this.notifyFailure(payload, canal);
       return;
     }
 
@@ -101,6 +125,7 @@ export class ClassifyProcessor extends WorkerHost {
         if (attempts >= 3) {
           await this.setStatus(evento_crudo_id, 'failed_classification', 'AI failed after 3 attempts');
           this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+          await this.notifyFailure(payload, canal);
           return;
         }
         await new Promise(r => setTimeout(r, 2000 * attempts));
@@ -116,6 +141,7 @@ export class ClassifyProcessor extends WorkerHost {
     if (!classification) {
       await this.setStatus(evento_crudo_id, 'failed_classification', 'AI classification failed');
       this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'failed_classification' });
+      await this.notifyFailure(payload, canal);
       return;
     }
 

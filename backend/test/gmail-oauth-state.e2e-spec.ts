@@ -28,7 +28,10 @@ describe('C3 — Gmail OAuth signed state', () => {
     const config = { get: (k: string) => (k === 'JWT_SECRET' ? SECRET : undefined) } as unknown as ConfigService;
     const ds = {} as unknown as DataSource;
     const invoices = {} as unknown as InvoicesService;
-    svc = new GmailService(config, ds, invoices);
+    // 4º dep (OperatorNotifierService): este test solo ejercita el firmado de state
+    // (usa config.JWT_SECRET), así que un stub vacío alcanza.
+    const notifier = {} as any;
+    svc = new GmailService(config, ds, invoices, notifier);
   });
 
   it('roundtrip: verifyState(buildState(clientId)) === clientId', () => {
