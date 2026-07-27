@@ -10,6 +10,8 @@ import { ProjectResolverService } from '../../project-resolver/project-resolver.
 import { ClarificationService } from '../../project-resolver/clarification.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { runWithWaFrom } from '../../whatsapp/whatsapp-send-context';
+import { resolveWaFrom } from '../../whatsapp/resolve-wa-from';
 import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
 
@@ -35,6 +37,12 @@ export class ClassifyProcessor extends WorkerHost {
   }
 
   async process(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
+    // Responder desde el número por el que entró el mensaje, no el global (JD-B-003).
+    const waFrom = await resolveWaFrom(this.dataSource, job.data.evento_crudo_id, job.data.client_id);
+    await runWithWaFrom(waFrom, () => this.runJob(job));
+  }
+
+  private async runJob(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
     const { evento_crudo_id, client_id, canal } = job.data;
     try {
       // Fase 2 — happy path dentro de una tx con app.current_tenant = client_id.
