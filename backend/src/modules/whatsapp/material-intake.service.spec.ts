@@ -15,6 +15,7 @@ describe('MaterialIntakeService', () => {
   let skus: any;
   let movimientos: any;
   let classifyQueue: any;
+  let evidenceIntake: any;
 
   beforeEach(() => {
     store = {};
@@ -57,8 +58,9 @@ describe('MaterialIntakeService', () => {
     skus = { create: jest.fn(async (_c: string, dto: any) => ({ id: 'sku-1', codigo: dto.codigo, nombre: dto.nombre })) };
     movimientos = { create: jest.fn().mockResolvedValue({ id: 'mov-1' }) };
     classifyQueue = { add: jest.fn().mockResolvedValue(undefined) };
+    evidenceIntake = { start: jest.fn().mockResolvedValue(undefined) };
 
-    svc = new MaterialIntakeService(ds, classifyQueue, wa, sessions, skus, movimientos);
+    svc = new MaterialIntakeService(ds, classifyQueue, wa, sessions, skus, movimientos, evidenceIntake);
   });
 
   it('walks nombre → proyecto → bodega → cantidad and registers SKU + entrada movement', async () => {
@@ -166,6 +168,31 @@ describe('MaterialIntakeService', () => {
     );
     expect(skus.create).not.toHaveBeenCalled();
     expect(store[PHONE]).toBeUndefined();
+  });
+
+  it('on ambiguity, answering "3" (evidencia) deletes the session and starts the evidence intake', async () => {
+    await svc.askKind({ eventoCrudoId: 'evt-ev', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/e.jpg', suggestedLabel: 'anfitrionas' });
+    expect(store[PHONE].materialIntake?.step).toBe('kind');
+
+    expect(await svc.handleResponse(PHONE, '3')).toBe(true);
+
+    // La sesión de material se limpió y arrancó el intake de evidencia con los args del intake.
+    expect(sessions.delete).toHaveBeenCalledWith(PHONE);
+    expect(evidenceIntake.start).toHaveBeenCalledWith(expect.objectContaining({
+      eventoCrudoId: 'evt-ev',
+      phoneNumber: PHONE,
+      clientId: CLIENT,
+      storagePath: 'inbound/e.jpg',
+      suggestedLabel: 'anfitrionas',
+    }));
+    // No se registra material.
+    expect(skus.create).not.toHaveBeenCalled();
+  });
+
+  it('the askKind prompt offers the evidencia option (3)', async () => {
+    await svc.askKind({ eventoCrudoId: 'evt-k', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/k.jpg' });
+    const prompt = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(prompt).toContain('3. Evidencia de actividad');
   });
 
   it('returns false when there is no material intake in session', async () => {

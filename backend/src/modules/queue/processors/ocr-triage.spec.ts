@@ -9,7 +9,7 @@ import { OcrProcessor } from './ocr.processor';
 describe('OcrProcessor.parseVisionTriage', () => {
   // Los args del constructor no se usan en el método puro; stubs mínimos.
   const proc = new OcrProcessor(
-    null as any, null as any, null as any, null as any, null as any, null as any, null as any,
+    null as any, null as any, null as any, null as any, null as any, null as any, null as any, null as any,
   );
   const parse = (raw: string) => (proc as any).parseVisionTriage(raw, null);
 
@@ -27,6 +27,12 @@ describe('OcrProcessor.parseVisionTriage', () => {
 
   it('parses an ambiguous verdict', () => {
     expect(parse(JSON.stringify({ kind: 'ambiguous', label: null, text: '' })).kind).toBe('ambiguous');
+  });
+
+  it('parses an evidence verdict (foto de personas/actividad)', () => {
+    const r = parse(JSON.stringify({ kind: 'evidence', label: 'anfitrionas', text: '' }));
+    expect(r.kind).toBe('evidence');
+    expect(r.label).toBe('anfitrionas');
   });
 
   it('tolerates a ```json fenced block', () => {

@@ -8,6 +8,7 @@ import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
 import { WhatsAppMediaService } from './whatsapp-media.service';
 import { MaterialIntakeService } from './material-intake.service';
+import { EvidenceIntakeService } from './evidence-intake.service';
 import { ClarificationService } from '../project-resolver/clarification.service';
 import { ProjectResolverService } from '../project-resolver/project-resolver.service';
 import { Public } from '../../common/decorators/public.decorator';
@@ -37,6 +38,7 @@ export class WhatsAppWebhookController {
     private readonly sessions: WhatsAppSessionService,
     private readonly media: WhatsAppMediaService,
     private readonly materialIntake: MaterialIntakeService,
+    private readonly evidenceIntake: EvidenceIntakeService,
     private readonly clarification: ClarificationService,
     private readonly projectResolver: ProjectResolverService,
     @InjectDataSource() private readonly ds: DataSource,
@@ -118,8 +120,22 @@ export class WhatsAppWebhookController {
         const from      = msg.from as string;
         const msgType   = msg.type as string;
 
-        if (await this.isDuplicate(messageId)) {
+        // Gate de dedup ATÓMICO (SET NX en Redis) al tope del loop, ANTES de
+        // cualquier trabajo. Reemplaza el chequeo racy contra la DB: como el
+        // idempotency_key recién se escribe en persistEvent (después del download
+        // lento del media), un reintento de Meta pasaba isDuplicate y procesaba la
+        // imagen dos veces. claimMessage reclama el messageId de forma atómica:
+        // sólo el primero en reclamarlo procesa, los reintentos se descartan acá.
+        const fresh = await this.sessions.claimMessage(messageId);
+        if (!fresh) {
           this.logger.log(`[WhatsApp] Duplicate message ${messageId} — skipping`);
+          continue;
+        }
+
+        // Guarda secundaria contra la DB para el caso de reinicio de Redis (se
+        // pierde la clave NX): si el evento ya se persistió, no reprocesar.
+        if (await this.isDuplicate(messageId)) {
+          this.logger.log(`[WhatsApp] Duplicate (db) ${messageId} — skipping`);
           continue;
         }
 
@@ -127,7 +143,8 @@ export class WhatsAppWebhookController {
         // un ALS liviano SIN transacción de DB: los sub-handlers siguen abriendo
         // sus propios runWithTenant como antes, y el ALS se propaga a través de
         // ellos para que cada sendText salga desde el número del cliente.
-        await runWithWaFrom(waFrom, async () => {
+        try {
+          await runWithWaFrom(waFrom, async () => {
           // ── Sender gate (Req 7 — togglable via env) ──────────────────────────
           if (process.env.WHATSAPP_SENDER_GATE !== 'off') {
             let authorized: boolean;
@@ -176,7 +193,14 @@ export class WhatsAppWebhookController {
             default:
               this.logger.warn(`[WhatsApp] Unsupported message type: ${msgType}`);
           }
-        });
+          });
+        } catch (err) {
+          // Si el procesamiento falló, liberamos la reclamación NX para que el
+          // reintento de Meta pueda volver a procesar el mensaje. Se relanza para
+          // que el try/catch externo del loop lo loguee.
+          await this.sessions.releaseMessage(messageId).catch(() => {});
+          throw err;
+        }
       }
     } catch (err: any) {
       this.logger.error('[WhatsApp] Webhook error:', err.message);
@@ -576,6 +600,11 @@ export class WhatsAppWebhookController {
     // alta de material POP antes que cualquier otro handler.
     const materialHandled = await this.materialIntake.handleResponse(from, text);
     if (materialHandled) return;
+
+    // Evidencia de actividad (F5) — intercepta las respuestas de la conversación de
+    // alta de evidencia (checkin por foto) antes que cualquier otro handler.
+    const evidenceHandled = await this.evidenceIntake.handleResponse(from, text);
+    if (evidenceHandled) return;
 
     // Clarification flow — intercept before other handlers
     const handled = await this.clarification.handleClarificationResponse(from, text, messageId, canalId);

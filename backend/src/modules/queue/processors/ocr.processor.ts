@@ -9,6 +9,7 @@ import { MetricsService } from '../../metrics/metrics.service';
 import { StorageService } from '../../../common/storage/storage.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { MaterialIntakeService } from '../../whatsapp/material-intake.service';
+import { EvidenceIntakeService } from '../../whatsapp/evidence-intake.service';
 import { runWithWaFrom } from '../../whatsapp/whatsapp-send-context';
 import { resolveWaFrom } from '../../whatsapp/resolve-wa-from';
 import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
@@ -21,7 +22,7 @@ const F1_OCR_MAX_CHARS  = 50000;
 // documento/material/ambiguo (para imágenes de WhatsApp). Ver buildVisionResult.
 type VisionResult = {
   text: string;
-  kind: 'document' | 'material' | 'ambiguous';
+  kind: 'document' | 'material' | 'evidence' | 'ambiguous';
   label: string | null;
   usage: { input_tokens: number; output_tokens: number } | null;
 };
@@ -38,6 +39,7 @@ export class OcrProcessor extends WorkerHost {
     private readonly storage: StorageService,
     private readonly wa: WhatsAppService,
     private readonly materialIntake: MaterialIntakeService,
+    private readonly evidenceIntake: EvidenceIntakeService,
   ) {
     super();
   }
@@ -112,6 +114,14 @@ export class OcrProcessor extends WorkerHost {
       const isImage = !!mimeType && mimeType !== 'application/pdf';
       const phone = eventPayload?.from ?? null;
       if (isImage && canal === 'whatsapp' && phone) {
+        if (ocrResult.kind === 'evidence') {
+          await this.evidenceIntake.start({
+            eventoCrudoId: evento_crudo_id, phoneNumber: phone, clientId: client_id,
+            storagePath: eventPayload?.storage_path, suggestedLabel: ocrResult.label,
+          });
+          this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'evidence_intake' });
+          return;
+        }
         if (ocrResult.kind === 'material') {
           await this.materialIntake.start({
             eventoCrudoId: evento_crudo_id, phoneNumber: phone, clientId: client_id,
@@ -212,10 +222,11 @@ export class OcrProcessor extends WorkerHost {
       : `You are triaging a photo sent to a field-operations bot. Classify it as:
 - "document": an invoice, receipt, boleta, contract, form or any paper/text business document.
 - "material": a physical POP / inventory item (furniture, stand, banner, branded object, equipment) — NOT a paper document.
+- "evidence": a photo of PEOPLE / activity at the event — staff, hostesses (anfitrionas), promoters, attendees, or a setup shot dominated by people. NOT a paper document and NOT a standalone POP/inventory object.
 - "ambiguous": genuinely unclear.
 ALWAYS extract any readable text present in the image into "text", regardless of the kind. Only leave "text" empty if there is truly no readable text in the image.
 Respond with ONLY this JSON, no markdown:
-{"kind":"document|material|ambiguous","label":"<short name of the item if material, else null>","text":"<ALL readable text in the image; empty only if there is truly no text>"}`;
+{"kind":"document|material|evidence|ambiguous","label":"<short name of the item if material, else null>","text":"<ALL readable text in the image; empty only if there is truly no text>"}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -250,7 +261,7 @@ Respond with ONLY this JSON, no markdown:
     try {
       const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      const kind = ['document', 'material', 'ambiguous'].includes(parsed?.kind) ? parsed.kind : 'document';
+      const kind = ['document', 'material', 'evidence', 'ambiguous'].includes(parsed?.kind) ? parsed.kind : 'document';
       return {
         text: typeof parsed?.text === 'string' ? parsed.text : '',
         kind,
