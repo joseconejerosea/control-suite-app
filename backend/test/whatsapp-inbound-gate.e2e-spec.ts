@@ -68,6 +68,8 @@ type QueryMock = (sql: string, params: any[]) => any[];
 function buildController(opts: {
   queryMocks: QueryMock;
   sendTextMock?: jest.Mock;
+  sessionsMock?: any;
+  materialIntakeMock?: any;
 }) {
   // Tipado explícito de args → permite destructurar [, msg] sin error TS.
   const sendText = opts.sendTextMock ?? jest.fn(async (_to: string, _msg: string) => undefined);
@@ -101,9 +103,15 @@ function buildController(opts: {
 
   const ctrl = new WhatsAppWebhookController(
     wa,
-    { get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn() } as any, // sessions
+    opts.sessionsMock ?? {
+      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
+      // Dedup atómico: por defecto el mensaje es fresco (se procesa).
+      claimMessage: jest.fn().mockResolvedValue(true),
+      releaseMessage: jest.fn().mockResolvedValue(undefined),
+    } as any,                                                                                     // sessions
     { downloadAndStore: jest.fn() } as any,                                                       // media
-    { handleResponse: jest.fn(async () => false) } as any,                                        // materialIntake
+    opts.materialIntakeMock ?? { handleResponse: jest.fn(async () => false) } as any,             // materialIntake
+    { handleResponse: jest.fn(async () => false) } as any,                                        // evidenceIntake
     { handleClarificationResponse: jest.fn(async () => false) } as any,                          // clarification
     { resolve: jest.fn(async () => null) } as any,                                                // projectResolver
     ds,
@@ -337,6 +345,89 @@ describe('WhatsApp inbound sender gate', () => {
 
     await expect(ctrl.handleIncoming(metaBody(PHONE_DIGITS))).resolves.toBe('ok');
     expect(notifyCount(sendText)).toBe(1);
+  });
+});
+
+// ─── Dedup atómico (SET NX) ───────────────────────────────────────────────────
+
+describe('WhatsApp inbound atomic dedup gate', () => {
+  const origGate = process.env.WHATSAPP_SENDER_GATE;
+
+  beforeEach(() => {
+    process.env.WHATSAPP_SENDER_GATE = 'off'; // sacar el gate del medio, probar solo dedup
+    jest.clearAllMocks();
+  });
+
+  afterAll(() => {
+    if (origGate !== undefined) process.env.WHATSAPP_SENDER_GATE = origGate;
+    else delete process.env.WHATSAPP_SENDER_GATE;
+  });
+
+  it('claimMessage=false (duplicado) → NO procesa el mensaje ni persiste', async () => {
+    const sessions = {
+      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
+      claimMessage: jest.fn().mockResolvedValue(false), // duplicado
+      releaseMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const { ctrl, ds } = buildController({
+      queryMocks: (sql) => {
+        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
+        if (sql.includes('WHERE idempotency_key')) return [];
+        if (sql.includes('INSERT INTO eventos_crudos')) return [{ id: 'evt-1' }];
+        return [];
+      },
+      sessionsMock: sessions,
+    });
+
+    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+
+    expect(sessions.claimMessage).toHaveBeenCalledTimes(1);
+    // Descartado por el gate atómico: ni siquiera se consulta isDuplicate ni se persiste.
+    expect(insertHappened(ds)).toBe(false);
+  });
+
+  it('claimMessage=false → el handler de texto NO se invoca (materialIntake no consultado)', async () => {
+    const sessions = {
+      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
+      claimMessage: jest.fn().mockResolvedValue(false),
+      releaseMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const materialIntake = { handleResponse: jest.fn(async () => false) };
+    const { ctrl } = buildController({
+      queryMocks: (sql) => {
+        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
+        return [];
+      },
+      sessionsMock: sessions,
+      materialIntakeMock: materialIntake,
+    });
+
+    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+
+    // El mensaje duplicado se salta ANTES de cualquier handler.
+    expect(materialIntake.handleResponse).not.toHaveBeenCalled();
+  });
+
+  it('claimMessage=true (fresco) → procesa y persiste', async () => {
+    const sessions = {
+      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
+      claimMessage: jest.fn().mockResolvedValue(true),
+      releaseMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const { ctrl, ds } = buildController({
+      queryMocks: (sql) => {
+        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
+        if (sql.includes('WHERE idempotency_key')) return [];
+        if (sql.includes('INSERT INTO eventos_crudos')) return [{ id: 'evt-1' }];
+        return [];
+      },
+      sessionsMock: sessions,
+    });
+
+    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+
+    expect(sessions.claimMessage).toHaveBeenCalledTimes(1);
+    expect(insertHappened(ds)).toBe(true);
   });
 });
 

@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
+import { EvidenceIntakeService } from './evidence-intake.service';
 import { SkusService } from '../skus/skus.service';
 import { MovimientosPopService } from '../movimientos-pop/movimientos-pop.service';
 import { runWithTenant } from '../../common/tenant/tenant-context';
@@ -38,6 +39,9 @@ export class MaterialIntakeService {
     private readonly sessions: WhatsAppSessionService,
     private readonly skus: SkusService,
     private readonly movimientos: MovimientosPopService,
+    // EvidenceIntakeService lo provee el mismo @Global MaterialIntakeModule y NO
+    // depende de MaterialIntakeService, así que no hay ciclo al inyectarlo acá.
+    private readonly evidenceIntake: EvidenceIntakeService,
   ) {}
 
   /** Arranca el intake de material: primer paso, preguntar el nombre del ítem. */
@@ -94,7 +98,7 @@ export class MaterialIntakeService {
 
     await this.wa.sendText(
       opts.phoneNumber,
-      `No estoy seguro de qué me enviaste. ¿Es un documento o un material POP?\n\n1. Documento (factura, boleta, etc.)\n2. Material POP (para inventario)\n\nRespondé con el número.`,
+      `No estoy seguro de qué me enviaste. ¿Es un documento, un material POP o evidencia de actividad?\n\n1. Documento (factura, boleta, etc.)\n2. Material POP (para inventario)\n3. Evidencia de actividad (personas en el evento)\n\nRespondé con el número.`,
     );
   }
 
@@ -144,7 +148,22 @@ export class MaterialIntakeService {
       return true;
     }
 
-    return this.retryOrEscalate(phone, session, 'Respondé 1 (documento) o 2 (material).');
+    if (num === 3) {
+      // Es evidencia de actividad → arrancar el intake de evidencia (checkin por
+      // foto). Se borra la sesión de material primero para no dejar estado colgado;
+      // EvidenceIntakeService.start crea su propia sesión (state='awaiting_evidence').
+      await this.sessions.delete(phone);
+      await this.evidenceIntake.start({
+        eventoCrudoId: mi.eventoCrudoId,
+        phoneNumber: phone,
+        clientId: session.clientId!,
+        storagePath: mi.storagePath,
+        suggestedLabel: mi.suggestedLabel,
+      });
+      return true;
+    }
+
+    return this.retryOrEscalate(phone, session, 'Respondé 1 (documento), 2 (material) o 3 (evidencia).');
   }
 
   private async handleNombre(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
