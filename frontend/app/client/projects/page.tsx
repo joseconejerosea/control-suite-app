@@ -12,6 +12,7 @@ type Project = {
   start_date?: string;
   end_date?: string;
   budget?: number;
+  objectives?: string;
 };
 
 const STATUS_STYLE: Record<string, { background: string; color: string }> = {
@@ -32,7 +33,7 @@ export default function ProjectsPage() {
   const [showForm, setShowForm]   = useState(false);
   const [showAI, setShowAI]       = useState(false);
   const [selected, setSelected]   = useState<Project | null>(null);
-  const [form, setForm]           = useState({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" });
+  const [form, setForm]           = useState({ name: "", description: "", objectives: "", status: "active", start_date: "", end_date: "", budget: "" });
   const [saving, setSaving]       = useState(false);
 
   // AI upload states
@@ -68,7 +69,7 @@ export default function ProjectsPage() {
       }
       setShowForm(false);
       setSelected(null);
-      setForm({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" });
+      setForm({ name: "", description: "", objectives: "", status: "active", start_date: "", end_date: "", budget: "" });
       fetchProjects();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
@@ -76,8 +77,16 @@ export default function ProjectsPage() {
 
   const openEdit = (p: Project) => {
     setSelected(p);
-    setForm({ name: p.name, description: p.description ?? "", status: p.status, start_date: p.start_date ?? "", end_date: p.end_date ?? "", budget: p.budget ? String(p.budget) : "" });
+    setForm({ name: p.name, description: p.description ?? "", objectives: p.objectives ?? "", status: p.status, start_date: p.start_date ?? "", end_date: p.end_date ?? "", budget: p.budget ? String(p.budget) : "" });
     setShowForm(true);
+  };
+
+  // CLP no usa decimales y el separador de miles es el punto: "5.000.000" o "$5.000.000".
+  // parseFloat("5.000.000") devuelve 5 (se corta en el segundo punto), así que limpiamos
+  // a solo dígitos antes de parsear. Devuelve undefined si no hay ningún dígito.
+  const parseCLP = (v: any): number | undefined => {
+    const digits = String(v ?? "").replace(/[^\d]/g, "");
+    return digits ? parseInt(digits, 10) : undefined;
   };
 
   // Mapea el extracted_data del inbox (IA) a los campos editables del form de revisión.
@@ -149,7 +158,7 @@ export default function ProjectsPage() {
         brief: aiResult.brief || undefined,
         fecha_inicio: aiResult.fecha_inicio || undefined,
         fecha_fin: aiResult.fecha_fin || undefined,
-        presupuesto_otorgado: aiResult.presupuesto_otorgado ? parseFloat(String(aiResult.presupuesto_otorgado)) : undefined,
+        presupuesto_otorgado: parseCLP(aiResult.presupuesto_otorgado),
       });
       setShowAI(false);
       setAiFile(null);
@@ -195,7 +204,7 @@ export default function ProjectsPage() {
               style={{ padding: "9px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
               AI desde doc
             </button>
-            <button onClick={() => { setShowForm(true); setSelected(null); setForm({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" }); }}
+            <button onClick={() => { setShowForm(true); setSelected(null); setForm({ name: "", description: "", objectives: "", status: "active", start_date: "", end_date: "", budget: "" }); }}
               style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
               + Nuevo proyecto
             </button>
@@ -249,6 +258,7 @@ export default function ProjectsPage() {
               <div className="space-y-3">
                 {inp("name", "Nombre del proyecto *", "text", { placeholder: "Q3 BTL Campaign" })}
                 {inp("description", "Descripción", "textarea", { placeholder: "Descripción opcional" })}
+                {inp("objectives", "Objetivos", "textarea", { placeholder: "Objetivos del proyecto (opcional)" })}
                 {inp("status", "Estado", "select", { options: [{ value: "active", label: "Activo" }, { value: "paused", label: "Pausado" }, { value: "archived", label: "Archivado" }] })}
                 <div className="grid grid-cols-2 gap-3">
                   {inp("start_date", "Fecha inicio", "date")}

@@ -51,6 +51,7 @@ export class ProjectsService {
     return this.repo.create(clientId, {
       name:        dto.name,
       description: dto.description ?? null,
+      objectives:  dto.objectives ?? null,
       status:      dto.status ?? 'active',
       start_date:  dto.start_date ?? null,
       end_date:    dto.end_date ?? null,
@@ -77,6 +78,7 @@ export class ProjectsService {
     const updated = await this.repo.update(clientId, id, {
       name:        dto.name        ?? existing.name,
       description: dto.description ?? existing.description,
+      objectives:  dto.objectives  ?? existing.objectives,
       status:      dto.status      ?? existing.status,
       start_date:  dto.start_date  ?? existing.start_date,
       end_date:    dto.end_date    ?? existing.end_date,
