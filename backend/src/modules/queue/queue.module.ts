@@ -28,6 +28,7 @@ import { RendicionesModule } from '../rendiciones/rendiciones.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { MovimientosPopModule } from '../movimientos-pop/movimientos-pop.module';
+import { ProjectInboxModule } from '../project-inbox/project-inbox.module';
 
 const QUEUE_OCR            = 'ocr';
 const QUEUE_CLASSIFY       = 'classify';
@@ -65,6 +66,7 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
     WhatsAppModule,
     ProjectsModule,
     MovimientosPopModule,
+    ProjectInboxModule,
   ],
   providers: [
     EventProducer,

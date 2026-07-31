@@ -5,6 +5,8 @@ import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Job } from 'bullmq';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
+import { StorageService } from '../../../common/storage/storage.service';
+import { BriefTextExtractorService } from '../../project-inbox/brief-text-extractor.service';
 
 export const QUEUE_PROJECT_INBOX_EXTRACT = 'project-inbox-extract';
 
@@ -32,6 +34,8 @@ export class ProjectInboxExtractProcessor extends WorkerHost {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
+    private readonly briefExtractor: BriefTextExtractorService,
   ) {
     super();
   }
@@ -63,7 +67,7 @@ export class ProjectInboxExtractProcessor extends WorkerHost {
     );
 
     try {
-      const texto = this.extraerTexto(item.raw_content);
+      const texto = await this.obtenerTexto(item.raw_content);
       const extracted = await this.extraerDatosConIA(texto);
       const missing = this.camposFaltantes(extracted);
 
@@ -83,6 +87,33 @@ export class ProjectInboxExtractProcessor extends WorkerHost {
       ).catch(() => {});
       throw err;
     }
+  }
+
+  /**
+   * Obtiene el texto del brief. El flujo nuevo guarda el archivo en Storage y deja
+   * en raw_content { filename, mime_type, storage_path, size }: se descarga y se
+   * extrae texto con BriefTextExtractorService. Si no hay storage_path (filas
+   * legacy), cae al parseo del JSONB libre para no romper items viejos.
+   */
+  private async obtenerTexto(rawContent: any): Promise<string> {
+    const rc = typeof rawContent === 'string' ? this.tryParse(rawContent) : rawContent ?? {};
+    const storagePath = rc.storage_path;
+
+    if (typeof storagePath === 'string' && storagePath.trim()) {
+      const buffer = await this.storage.download(storagePath);
+      const { text, warnings } = await this.briefExtractor.extract(
+        buffer,
+        rc.mime_type ?? '',
+        rc.filename ?? '',
+      );
+      if (warnings.length) {
+        this.logger.warn(`[InboxExtract] warnings extrayendo ${rc.filename}: ${warnings.join('; ')}`);
+      }
+      return text;
+    }
+
+    // Legacy: raw_content sin storage_path → texto pegado directo en el JSONB.
+    return this.extraerTexto(rc);
   }
 
   /** raw_content es JSONB libre del frontend; buscamos el texto del brief donde suela venir. */

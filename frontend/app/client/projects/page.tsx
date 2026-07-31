@@ -40,6 +40,7 @@ export default function ProjectsPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult]   = useState<any>(null);
   const [aiInboxId, setAiInboxId] = useState<string | null>(null);
+  const [aiError, setAiError]     = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchProjects = () => {
@@ -79,27 +80,63 @@ export default function ProjectsPage() {
     setShowForm(true);
   };
 
+  // Mapea el extracted_data del inbox (IA) a los campos editables del form de revisión.
+  const mapExtracted = (ex: any) => ({
+    nombre_proyecto: ex?.nombre_proyecto ?? "",
+    brief: ex?.brief ?? "",
+    fecha_inicio: ex?.fecha_inicio ?? "",
+    fecha_fin: ex?.fecha_fin ?? "",
+    presupuesto_otorgado: ex?.presupuesto_otorgado ?? "",
+  });
+
   const processAIFile = async () => {
     if (!aiFile) return;
     setAiLoading(true);
+    setAiError("");
     setAiResult(null);
     setAiInboxId(null);
     try {
-      const inbox = await api.post<any>("/v1/app/project-inbox/upload", {
-        source: "UPLOAD",
-        raw_content: { filename: aiFile.name, size: aiFile.size },
-      });
+      // 1) Subir el archivo real como multipart (el backend lo guarda en Storage y
+      //    encola la extracción IA que puebla extracted_data → status READY).
+      const fd = new FormData();
+      fd.append("file", aiFile);
+      const inbox = await api.upload<any>("/v1/app/project-inbox/upload", fd);
       const inboxId = inbox?.id ?? inbox?.data?.id;
-      setAiInboxId(inboxId ?? null);
-      setAiResult({
-        nombre_proyecto: aiFile.name.replace(/\.[^/.]+$/, ""),
-        brief: "",
-        fecha_inicio: "",
-        fecha_fin: "",
-        presupuesto_otorgado: "",
-      });
+      if (!inboxId) throw new Error("El backend no devolvió un id de inbox.");
+      setAiInboxId(inboxId);
+
+      // 2) Poll hasta READY (éxito) o PENDING tras haber estado PROCESSING (error IA).
+      //    Cap ~40s.
+      const MAX_POLLS = 25;
+      const DELAY_MS = 1500;
+      let sawProcessing = false;
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise((r) => setTimeout(r, DELAY_MS));
+        const item = await api.get<any>(`/v1/app/project-inbox/${inboxId}`);
+        const data = item?.data ?? item;
+        const status = data?.status;
+
+        if (status === "PROCESSING") sawProcessing = true;
+
+        if (status === "READY") {
+          setAiResult(mapExtracted(data?.extracted_data ?? {}));
+          return;
+        }
+        // Volver a PENDING tras PROCESSING = la extracción falló y reintenta/aborta.
+        if (status === "PENDING" && sawProcessing) {
+          setAiResult(mapExtracted({}));
+          setAiError("No se pudieron extraer los datos automáticamente. Completa los campos a mano.");
+          return;
+        }
+      }
+
+      // Timeout: dejar el form editable para carga manual.
+      setAiResult(mapExtracted({}));
+      setAiError("La extracción está tardando. Podés completar los campos a mano y crear el proyecto.");
     } catch (e) {
       console.error(e);
+      setAiError(e instanceof Error ? e.message : "Error al procesar el documento.");
     } finally { setAiLoading(false); }
   };
 
@@ -154,7 +191,7 @@ export default function ProjectsPage() {
           <div className="flex gap-2">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar proyectos..."
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", width: 200 }} />
-            <button onClick={() => { setShowAI(true); setAiResult(null); setAiFile(null); setAiInboxId(null); }}
+            <button onClick={() => { setShowAI(true); setAiResult(null); setAiFile(null); setAiInboxId(null); setAiError(""); }}
               style={{ padding: "9px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
               AI desde doc
             </button>
@@ -252,8 +289,11 @@ export default function ProjectsPage() {
                     <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>
                     <div className="font-medium text-sm mb-1">{aiFile ? aiFile.name : "Arrastra el documento aqui"}</div>
                     <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>PDF, Excel, Word, PowerPoint</div>
-                    <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.ppt" style={{ display: "none" }} onChange={e => setAiFile(e.target.files?.[0] ?? null)} />
+                    <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.pptx,.ppt" style={{ display: "none" }} onChange={e => setAiFile(e.target.files?.[0] ?? null)} />
                   </div>
+                  {aiError && !aiLoading && (
+                    <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "rgba(200,32,44,0.12)", color: "var(--red-light, #f87171)" }}>{aiError}</div>
+                  )}
                   <button onClick={processAIFile} disabled={!aiFile || aiLoading}
                     style={{ width: "100%", padding: "11px", borderRadius: 10, border: "none", background: aiFile ? "var(--red)" : "var(--secondary)", color: aiFile ? "#fff" : "var(--muted-foreground)", cursor: aiFile ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 600 }}>
                     {aiLoading ? "AI procesando documento..." : "Procesar con AI"}
@@ -268,6 +308,10 @@ export default function ProjectsPage() {
                     <div className="font-semibold text-sm" style={{ color: "#f59e0b" }}>Revision requerida antes de crear</div>
                     <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>Verifica que los datos extraidos por AI son correctos antes de aprobar.</div>
                   </div>
+
+                  {aiError && (
+                    <div className="text-xs px-3 py-2 rounded-lg mb-4" style={{ background: "rgba(200,32,44,0.12)", color: "var(--red-light, #f87171)" }}>{aiError}</div>
+                  )}
 
                   <div className="space-y-3 mb-4">
                     {[
@@ -289,7 +333,7 @@ export default function ProjectsPage() {
                   </div>
 
                   <div className="flex gap-2">
-                    <button onClick={() => { setAiResult(null); setAiFile(null); setAiInboxId(null); }}
+                    <button onClick={() => { setAiResult(null); setAiFile(null); setAiInboxId(null); setAiError(""); }}
                       style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>
                       Reintentar
                     </button>
