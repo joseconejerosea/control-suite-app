@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, saveAuth } from "@/lib/api";
 import { Zap, Eye, EyeOff, ArrowRight } from "lucide-react";
 
 function parseJwt(token: string) {
@@ -26,6 +26,7 @@ export default function LoginPage() {
     try {
       const res = await api.post<any>("/auth/login", { email, password });
       const token = res?.data?.accessToken ?? res?.access_token ?? res?.accessToken;
+      const refresh = res?.data?.refreshToken ?? res?.refresh_token ?? res?.refreshToken;
       if (!token) throw new Error("No token received");
 
       // Decode user from JWT payload
@@ -37,8 +38,7 @@ export default function LoginPage() {
         client_id: payload?.client_id ?? "",
       };
 
-      localStorage.setItem("cs_token", token);
-      localStorage.setItem("cs_user", JSON.stringify(user));
+      saveAuth(token, refresh ?? null, user);
 
       window.location.href = user.role === "super_admin" ? "/admin/dashboard" : "/client/dashboard";
     } catch (err: unknown) {

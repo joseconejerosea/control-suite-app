@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { roleLabel } from "@/lib/roles";
+import { clearAuth } from "@/lib/api";
 import {
   LayoutDashboard, FolderOpen, MapPin, Users, Megaphone,
   FileText, UserCircle, Zap, Building2, ChevronRight,
@@ -148,7 +149,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="px-2 py-3 border-t" style={{ borderColor: "var(--border)" }}>
-        <button onClick={() => { localStorage.removeItem("cs_token"); localStorage.removeItem("cs_user"); window.location.href = "/login"; }}
+        <button onClick={() => { clearAuth(); window.location.href = "/login"; }}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm"
           style={{ background: "none", border: "none", color: "var(--muted-foreground)", cursor: "pointer" }}>
           Sign out
