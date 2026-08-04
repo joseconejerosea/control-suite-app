@@ -47,6 +47,7 @@ describe('PersistProcessor — error_message sanitization', () => {
       { exportInvoice: jest.fn() } as any,
       { asignarFacturaARendicion: jest.fn() } as any,
       { confirmarProcesado: jest.fn().mockResolvedValue(true) } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
     );
   });
 
@@ -125,6 +126,7 @@ describe('PersistProcessor — WhatsApp confirmation (happy path)', () => {
       { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
       { asignarFacturaARendicion: jest.fn().mockResolvedValue(undefined) } as any,
       { confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
     );
   });
 
@@ -253,6 +255,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
       { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
       { asignarFacturaARendicion } as any,
       { confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
     );
 
     return { processor, queryMock, confirmarProcesado, asignarFacturaARendicion };
@@ -421,6 +424,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
       { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
       { asignarFacturaARendicion } as any,
       { confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
     );
 
     const job = {
@@ -481,6 +485,241 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
   });
 });
 
+// ─── SLICE C — C01/C02: NUEVO offer set after single_active_project confirmation ─
+//
+// HONEST LIMITATION (spec R-14(d)/SCENARIO-18):
+// When resolver_method='single_active_project', the comprobante (invoice/rendición)
+// is ALREADY committed by the time the NUEVO offer is sent. NUEVO can only re-point
+// the evento + create a draft; it does NOT move the already-persisted invoice.
+// The offer session carries facturaId (the already-persisted invoice id) precisely
+// so the create flow can document sub-case 2 in raw_content.reassign_factura_id on
+// the draft, and the confirmation message remains honest (no claim of moving it).
+describe('PersistProcessor — Slice C: NUEVO offer (C01/C02)', () => {
+  /**
+   * Build a processor with a minimal WhatsAppSessionService mock (sessions.set spy)
+   * and a query mock that supports the single_active_project happy path.
+   *
+   * The processor constructor now takes a 5th argument: WhatsAppSessionService.
+   * `classification.resolver_method` drives the offer.
+   */
+  function buildProcessorWithSessions(opts: {
+    resolverMethod?: string;
+    phone?: string;
+    invoiceId?: string;
+    canCreate?: boolean; // true = MANAGER user found
+    language?: 'en' | 'es'; // language of the MANAGER user (drives nuevoLine wording)
+  } = {}) {
+    const { resolverMethod = 'single_active_project', phone = '5492216205665', invoiceId = 'inv-solo', canCreate = true, language = 'es' } = opts;
+
+    const sessionSet = jest.fn().mockResolvedValue(undefined);
+    const sessionGet = jest.fn().mockResolvedValue(null);
+    const sessionsMock = { get: sessionGet, set: sessionSet, delete: jest.fn() };
+
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+
+    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('SELECT payload')) {
+        return [{
+          canal: null,
+          source: 'whatsapp',
+          email_from: null,
+          payload: { from: phone },
+          parsed_data: null,
+        }];
+      }
+      if (sql.includes('INSERT INTO invoices')) return [{ id: invoiceId }];
+      if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Proyecto Solo' }];
+      // canCreate inline query: MANAGER check (also carries language for nuevoLine wording)
+      if (sql.includes("role = 'MANAGER'")) {
+        return canCreate ? [{ id: 'user-mgr', language }] : [];
+      }
+      // resolvePersonaId
+      if (sql.includes('FROM promoters')) return [{ id: 'persona-1' }];
+      return [];
+    });
+
+    const makeQueryRunner = () => ({
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      isTransactionActive: true,
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    });
+
+    const ds = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      ds,
+      { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
+      { asignarFacturaARendicion: jest.fn().mockResolvedValue(undefined) } as any,
+      { confirmarProcesado } as any,
+      sessionsMock as any,
+    );
+
+    return { processor, queryMock, confirmarProcesado, sessionSet, sessionGet };
+  }
+
+  function makeSingleActiveProjectJob(opts: { invoiceId?: string; resolverMethod?: string } = {}): any {
+    return {
+      data: {
+        evento_crudo_id: 'ec-solo',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.95,
+          proyecto_id_sugerido: 'proj-solo',
+          resolver_method: opts.resolverMethod ?? 'single_active_project',
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor Solo',
+          },
+        },
+      },
+    };
+  }
+
+  it('C01 — appends Spanish NUEVO escape line for a Spanish MANAGER (ES)', async () => {
+    const { processor, confirmarProcesado } = buildProcessorWithSessions({ canCreate: true, language: 'es' });
+    const job = makeSingleActiveProjectJob();
+
+    await processor.process(job);
+
+    expect(confirmarProcesado).toHaveBeenCalledTimes(1);
+    const opts = confirmarProcesado.mock.calls[0][0];
+    // Spanish MANAGER → Spanish wording, and NOT the English branch.
+    expect(opts.nuevoLine).toMatch(/NUEVO/);
+    expect(opts.nuevoLine).toMatch(/otro proyecto/i);
+    expect(opts.nuevoLine).not.toMatch(/different project/i);
+    expect(opts.nuevoLine).not.toMatch(/reply NEW/i);
+  });
+
+  it('C01 — appends English NUEVO escape line for an English MANAGER (EN)', async () => {
+    // Language resolution mirrors getUserLanguageForCreate: MANAGER row carries language='en'.
+    // This guards against an EN/ES swap (same bug class as Slice A) by asserting the
+    // English branch is genuinely English and contains no Spanish wording.
+    const { processor, confirmarProcesado } = buildProcessorWithSessions({ canCreate: true, language: 'en' });
+    const job = makeSingleActiveProjectJob();
+
+    await processor.process(job);
+
+    const opts = confirmarProcesado.mock.calls[0][0];
+    expect(opts.nuevoLine).toMatch(/different project/i);
+    expect(opts.nuevoLine).toMatch(/reply NEW/i);
+    expect(opts.nuevoLine).not.toMatch(/NUEVO/);
+    expect(opts.nuevoLine).not.toMatch(/otro proyecto/i);
+  });
+
+  it('C02 — sets project_create_offer session after confirmation with state=awaiting_clarification (ADR-11)', async () => {
+    const { processor, sessionSet } = buildProcessorWithSessions({ canCreate: true });
+    const job = makeSingleActiveProjectJob();
+
+    await processor.process(job);
+
+    // session.set MUST have been called with a project_create_offer clarification
+    const offerSetCall = sessionSet.mock.calls.find((args: any[]) => {
+      const session = args[1];
+      return session?.clarification?.type === 'project_create_offer';
+    });
+    expect(offerSetCall).toBeDefined();
+    const savedSession = offerSetCall[1];
+    // ADR-11: state MUST be 'awaiting_clarification'
+    expect(savedSession.state).toBe('awaiting_clarification');
+    // Must carry the evento id
+    expect(savedSession.clarification.eventoCrudoId).toBe('ec-solo');
+    // Must carry the auto-assigned project id
+    expect(savedSession.clarification.autoAssignedProjectId).toBe('proj-solo');
+  });
+
+  it('C02 — facturaId is stored on the offer session (sub-case 2 detection)', async () => {
+    const { processor, sessionSet } = buildProcessorWithSessions({ canCreate: true, invoiceId: 'inv-FAC-solo' });
+    const job = makeSingleActiveProjectJob();
+
+    await processor.process(job);
+
+    const offerSetCall = sessionSet.mock.calls.find((args: any[]) => {
+      return args[1]?.clarification?.type === 'project_create_offer';
+    });
+    expect(offerSetCall).toBeDefined();
+    // facturaId = the invoice committed during this run (sub-case 2 — already persisted)
+    expect(offerSetCall[1].clarification.facturaId).toBeDefined();
+  });
+
+  it('C01/C02 — NO offer when resolver_method != single_active_project (multi-project path)', async () => {
+    const { processor, sessionSet, confirmarProcesado } = buildProcessorWithSessions({ canCreate: true });
+    const job = makeSingleActiveProjectJob({ resolverMethod: 'keyword_match' });
+
+    await processor.process(job);
+
+    // confirmarProcesado still fires (whatsapp channel), but no nuevoLine
+    expect(confirmarProcesado).toHaveBeenCalled();
+    const opts = confirmarProcesado.mock.calls[0][0];
+    expect(opts.nuevoLine ?? opts.extraLine).toBeUndefined();
+
+    // No offer session set
+    const offerSetCall = sessionSet.mock.calls.find((args: any[]) =>
+      args[1]?.clarification?.type === 'project_create_offer',
+    );
+    expect(offerSetCall).toBeUndefined();
+  });
+
+  it('C01/C02 — NO offer when sender is not MANAGER (non-MANAGER gate)', async () => {
+    const { processor, sessionSet, confirmarProcesado } = buildProcessorWithSessions({ canCreate: false });
+    const job = makeSingleActiveProjectJob();
+
+    await processor.process(job);
+
+    expect(confirmarProcesado).toHaveBeenCalled();
+    const opts = confirmarProcesado.mock.calls[0][0];
+    expect(opts.nuevoLine ?? opts.extraLine).toBeUndefined();
+
+    const offerSetCall = sessionSet.mock.calls.find((args: any[]) =>
+      args[1]?.clarification?.type === 'project_create_offer',
+    );
+    expect(offerSetCall).toBeUndefined();
+  });
+
+  it('C01/C02 — NO offer when phone is unresolved (email channel, no phone)', async () => {
+    const sessionSet = jest.fn().mockResolvedValue(undefined);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('SELECT payload')) return [{ canal: 'email', source: 'email', email_from: 'x@y.com', payload: {}, parsed_data: null }];
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-1' }];
+      return [];
+    });
+
+    const makeQR = () => ({ connect: jest.fn().mockResolvedValue(undefined), startTransaction: jest.fn().mockResolvedValue(undefined), commitTransaction: jest.fn().mockResolvedValue(undefined), rollbackTransaction: jest.fn().mockResolvedValue(undefined), release: jest.fn().mockResolvedValue(undefined), isTransactionActive: true, query: (sql: string, p?: any[]) => queryMock(sql, p) });
+    const ds = { createQueryRunner: jest.fn(() => makeQR()), query: (sql: string, p?: any[]) => queryMock(sql, p) } as unknown as DataSource;
+    const processor = new PersistProcessor(
+      ds,
+      { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
+      { asignarFacturaARendicion: jest.fn().mockResolvedValue(undefined) } as any,
+      { confirmarProcesado } as any,
+      { get: jest.fn(), set: sessionSet, delete: jest.fn() } as any,
+    );
+
+    const job = makeSingleActiveProjectJob();
+    await processor.process(job);
+
+    // No WA confirmation for email channel, no offer set
+    expect(confirmarProcesado).not.toHaveBeenCalled();
+    const offerSetCall = sessionSet.mock.calls.find((args: any[]) =>
+      args[1]?.clarification?.type === 'project_create_offer',
+    );
+    expect(offerSetCall).toBeUndefined();
+  });
+});
+
 describe('PersistProcessor — duplicate notification', () => {
   let processor: PersistProcessor;
   let queryMock: jest.Mock;
@@ -524,6 +763,7 @@ describe('PersistProcessor — duplicate notification', () => {
       { exportInvoice: jest.fn() } as any,
       { asignarFacturaARendicion: jest.fn() } as any,
       { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
     );
   });
 

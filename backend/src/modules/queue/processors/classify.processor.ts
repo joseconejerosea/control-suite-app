@@ -156,7 +156,16 @@ export class ClassifyProcessor extends WorkerHost {
 
     // [ADR-12] Honor resolved_project_id as single source of truth.
     // When set, skip resolve() and the entire low_confidence clarification block.
-    const resolvedProjectId = parsed_data?.resolved_project_id as string | null | undefined;
+    // JBF-002 — jsonb may arrive as an object OR a JSON string depending on the driver/path;
+    // parse the string form the same way persist.processor and approve()/reject() do so the
+    // short-circuit fires consistently (classify is THE gate that closes the reassign loop).
+    const parsedData: Record<string, unknown> | null =
+      typeof parsed_data === 'string'
+        ? ((): Record<string, unknown> | null => {
+            try { return JSON.parse(parsed_data); } catch { return null; }
+          })()
+        : (typeof parsed_data === 'object' ? parsed_data : null);
+    const resolvedProjectId = (parsedData?.resolved_project_id ?? null) as string | null;
 
     if (resolvedProjectId) {
       // Already resolved by a prior human decision (clarification or approve() reassignment).

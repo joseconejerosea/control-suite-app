@@ -172,6 +172,11 @@ export class ProjectInboxService {
       : [];
 
     let projectId: string;
+    // JBF-001 — eventos that are re-pointed to 'queued' AND must be re-enqueued for OCR
+    // post-commit. ONLY genuinely parked (not-yet-persisted) eventos land here; an evento
+    // already persisted into an invoices row (factura_id set / status='processed') is NOT
+    // re-enqueued, because re-running classify→persist would duplicate or silently lose it.
+    const eventosToEnqueue: string[] = [];
     try {
       const projRes = await qr.query(
         `INSERT INTO projects
@@ -212,9 +217,47 @@ export class ProjectInboxService {
       );
 
       // B01/B03 — Reassign parked eventos inside the SAME tx (GUC already set above).
-      // Sets resolved_project_id → persist will honor it; status='queued' → re-files.
       // No .catch swallow here: errors must propagate so the tx rolls back (NFR-02).
+      //
+      // JBF-001 — Two sub-cases for a pending evento at this point:
+      //  (a) genuinely parked (Case-3/Case-2 create): never persisted → no factura_id,
+      //      status is not 'processed'. Re-point resolved_project_id + status='queued' and
+      //      re-enqueue OCR so it re-files under the new project (today's behavior).
+      //  (b) already persisted (NUEVO offer, single_active_project): persist ALREADY stamped
+      //      factura_id + status='processed' BEFORE the offer. Re-enqueuing OCR would re-run
+      //      classify→persist → a DUPLICATE invoice under the new project, or persist's dedup
+      //      marks it 'duplicate' and the reassignment silently evaporates. So we do NOT
+      //      re-enqueue and do NOT flip it back to 'queued'. The committed invoice honestly
+      //      stays under the original project (documented limitation, spec R-14(d)); the new
+      //      project + draft are still created (valuable for future comprobantes). We record
+      //      resolved_project_id for auditability without disturbing the processed status.
       for (const eventoId of pendingEventoIds) {
+        const probe = await qr.query(
+          `SELECT factura_id, status FROM eventos_crudos WHERE id = $1`,
+          [eventoId],
+        );
+        const row = Array.isArray(probe) ? probe[0] : undefined;
+        const alreadyPersisted = !!row && (row.factura_id != null || row.status === 'processed');
+
+        if (alreadyPersisted) {
+          // Sub-case (b): keep the processed invoice; only annotate resolved_project_id for
+          // record-keeping. Do NOT touch status → no re-processing, no duplicate, no loss.
+          await qr.query(
+            `UPDATE eventos_crudos
+             SET parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb
+             WHERE id = $2`,
+            [JSON.stringify({ reassigned_project_id: projectId }), eventoId],
+          );
+          this.logger.log(
+            `[ProjectInbox] Evento ${eventoId} already persisted (factura_id=${row.factura_id ?? 'n/a'}, ` +
+            `status=${row.status}); NOT re-enqueuing OCR (JBF-001). Committed invoice stays under its ` +
+            `original project; new project ${projectId} + draft ${id} created for future comprobantes.`,
+          );
+          continue;
+        }
+
+        // Sub-case (a): genuinely parked → re-point + re-file.
+        // Sets resolved_project_id → persist will honor it; status='queued' → re-files.
         await qr.query(
           `UPDATE eventos_crudos
            SET parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb,
@@ -222,6 +265,7 @@ export class ProjectInboxService {
            WHERE id = $2`,
           [JSON.stringify({ resolved_project_id: projectId }), eventoId],
         );
+        eventosToEnqueue.push(eventoId);
       }
 
       await qr.commitTransaction();
@@ -241,11 +285,16 @@ export class ProjectInboxService {
     // to operator manual review so it surfaces instead of being silently lost.
     // this.ds.query is the same request-scoped, RLS-safe path reject() uses
     // (approve() runs in HTTP context where installTenantQueryRouting set the GUC).
-    for (const eventoId of pendingEventoIds) {
+    // JBF-001 — only eventos re-pointed to 'queued' (genuinely parked) get re-enqueued;
+    // already-persisted eventos are intentionally excluded (see reassignment loop above).
+    for (const eventoId of eventosToEnqueue) {
       try {
         await this.ocrQueue.add(
           'process',
-          { evento_crudo_id: eventoId, client_id: tenantId },
+          // JAF-001 — carry canal so classify's whatsapp gate (canal==='whatsapp') runs on
+          // re-file; without it a re-filed WhatsApp comprobante with missing OCR fields would
+          // silently skip data-clarification. Mirrors clarification.service.ts re-enqueue.
+          { evento_crudo_id: eventoId, client_id: tenantId, canal: 'whatsapp' },
           { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
         );
       } catch (err: any) {

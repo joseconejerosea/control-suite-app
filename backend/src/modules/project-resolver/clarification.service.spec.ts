@@ -427,6 +427,71 @@ describe('ClarificationService · handleProjectCreateResponse (A09)', () => {
     );
   });
 
+  it('sub-case 2 (facturaId present) → park UPDATE sets reassignment_pending=true (R-06/SCENARIO-18)', async () => {
+    const parkQuery = jest.fn().mockResolvedValue([]);
+    const createDraftMock = jest.fn().mockResolvedValue({ id: 'draft-rp' });
+    const sessions = buildSessions({
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const svc = buildService({
+      dsQuery: parkQuery,
+      sessions,
+      projectInboxService: { createDraftFromWhatsApp: createDraftMock },
+    });
+
+    const session = buildSessionWithCreate();
+    // sub-case 2: an already-persisted comprobante being re-pointed.
+    session.clarification.facturaId = 'fac-99';
+
+    await (svc as any).handleProjectCreateResponse(
+      '5491155550000',
+      session,
+      'Reasignado Con Factura',
+      'client-1',
+    );
+
+    const parkCall = parkQuery.mock.calls.find((c: any[]) =>
+      String(c[0]).includes("status = 'parked'"),
+    );
+    expect(parkCall).toBeDefined();
+    const parsed = JSON.parse(parkCall[1][0]);
+    expect(parsed.parked_reason).toBe('project_create');
+    expect(parsed.reassignment_pending).toBe(true);
+  });
+
+  it('plain Case-3 create (no facturaId) → park UPDATE does NOT set reassignment_pending (R-06)', async () => {
+    const parkQuery = jest.fn().mockResolvedValue([]);
+    const createDraftMock = jest.fn().mockResolvedValue({ id: 'draft-plain' });
+    const sessions = buildSessions({
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const svc = buildService({
+      dsQuery: parkQuery,
+      sessions,
+      projectInboxService: { createDraftFromWhatsApp: createDraftMock },
+    });
+
+    // No facturaId on the session (plain create sub-case).
+    await (svc as any).handleProjectCreateResponse(
+      '5491155550000',
+      buildSessionWithCreate(),
+      'Proyecto Nuevo Sin Factura',
+      'client-1',
+    );
+
+    const parkCall = parkQuery.mock.calls.find((c: any[]) =>
+      String(c[0]).includes("status = 'parked'"),
+    );
+    expect(parkCall).toBeDefined();
+    const parsed = JSON.parse(parkCall[1][0]);
+    expect(parsed.parked_reason).toBe('project_create');
+    expect(parsed.reassignment_pending).toBeUndefined();
+  });
+
   it('wraps park+create in a tenant-scoped transaction (JBA-005/JBA-004)', async () => {
     const createDraftMock = jest.fn().mockResolvedValue({ id: 'draft-3' });
     const sessions = buildSessions({
@@ -550,6 +615,205 @@ describe('ClarificationService · handleProjectCreateResponse (A09)', () => {
     expect(parkCall).toBeUndefined();
     // Session should be cleared (escalate + delete)
     expect((sessions.delete as jest.Mock)).toHaveBeenCalled();
+  });
+});
+
+// ─── SLICE C — C04/C05: project_create_offer routing ────────────────────────
+
+describe('ClarificationService · handleClarificationResponse — project_create_offer (C04/C05)', () => {
+  /**
+   * Builds a session with type='project_create_offer' and state='awaiting_clarification'.
+   * autoAssignedProjectId + eventoCrudoId simulate the state set by persist.processor
+   * after a single_active_project confirmation.
+   */
+  function buildOfferSession(opts: { facturaId?: string } = {}): any {
+    return {
+      state: 'awaiting_clarification',
+      clientId: 'client-1',
+      projects: [],
+      base64: '',
+      mimeType: '',
+      caption: '',
+      canalId: null,
+      updatedAt: new Date().toISOString(),
+      clarification: {
+        eventoCrudoId: 'ec-55',
+        type: 'project_create_offer',
+        attempts: 0,
+        autoAssignedProjectId: 'proj-solo',
+        ...(opts.facturaId ? { facturaId: opts.facturaId } : {}),
+      },
+    };
+  }
+
+  it('C04 — NUEVO reply from MANAGER → transitions to project_create and asks for name', async () => {
+    // MANAGER: dsQuery returns a user row for the canCreateProject check
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes("role = 'MANAGER'")) return [{ id: 'user-mgr' }];
+      // getUserLanguageForCreate: users.phone check
+      if (sql.includes('SELECT language FROM users')) return [{ language: 'es' }];
+      return [];
+    });
+
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildOfferSession()),
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ dsQuery, sessions, wa: { sendText: waSpy } });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'NUEVO', 'msg-c04', null);
+
+    // Must be handled (true)
+    expect(result).toBe(true);
+
+    // Session must transition to project_create with state=awaiting_clarification (ADR-11)
+    const setCall = (sessions.set as jest.Mock).mock.calls.find((args: any[]) =>
+      args[1]?.clarification?.type === 'project_create',
+    );
+    expect(setCall).toBeDefined();
+    const savedSession = setCall[1];
+    expect(savedSession.state).toBe('awaiting_clarification');
+    expect(savedSession.clarification.pendingEventoIds).toContain('ec-55');
+
+    // Name-request message should have been sent
+    expect(waSpy).toHaveBeenCalled();
+  });
+
+  it('C04 — regex variants (nueva, crear, new, create) all trigger create flow', async () => {
+    const variants = ['nueva', 'crear', 'new', 'create', ' NUEVO ', 'Nueva'];
+    for (const reply of variants) {
+      const sessions = buildSessions({
+        get: jest.fn().mockResolvedValue(buildOfferSession()),
+        set: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
+      });
+      const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes("role = 'MANAGER'")) return [{ id: 'user-mgr' }];
+        if (sql.includes('SELECT language FROM users')) return [{ language: 'es' }];
+        return [];
+      });
+      const waSpy = jest.fn().mockResolvedValue(true);
+      const svc = buildService({ dsQuery, sessions, wa: { sendText: waSpy } });
+
+      const result = await svc.handleClarificationResponse('5491155550000', reply, 'msg-x', null);
+      expect(result).toBe(true);
+
+      const setCall = (sessions.set as jest.Mock).mock.calls.find((args: any[]) =>
+        args[1]?.clarification?.type === 'project_create',
+      );
+      expect(setCall).toBeDefined();
+    }
+  });
+
+  it('C04 — NUEVO from non-MANAGER → denial message sent, offer cleared, no create', async () => {
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      // non-MANAGER: returns no rows
+      if (sql.includes("role = 'MANAGER'")) return [];
+      if (sql.includes('SELECT language FROM users')) return [];
+      return [];
+    });
+
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildOfferSession()),
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const createDraftMock = jest.fn();
+    const svc = buildService({
+      dsQuery,
+      sessions,
+      wa: { sendText: waSpy },
+      projectInboxService: { createDraftFromWhatsApp: createDraftMock },
+    });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'NUEVO', 'msg-c04-deny', null);
+
+    // Must handle it (true) — offer is cleared, denial sent
+    expect(result).toBe(true);
+    // No draft created
+    expect(createDraftMock).not.toHaveBeenCalled();
+    // Denial/coordinator message sent
+    expect(waSpy).toHaveBeenCalled();
+    // Session cleared (delete called)
+    expect((sessions.delete as jest.Mock)).toHaveBeenCalled();
+    // No project_create transition set
+    const createSetCall = (sessions.set as jest.Mock).mock.calls.find((args: any[]) =>
+      args[1]?.clarification?.type === 'project_create',
+    );
+    expect(createSetCall).toBeUndefined();
+  });
+
+  it('C05 — non-matching reply returns false, offer session NOT consumed (SCENARIO-20, NFR-07)', async () => {
+    // Any text that does not match /^\s*(nuevo|nueva|crear|new|create)\s*$/i
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildOfferSession()),
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ sessions, wa: { sendText: waSpy } });
+
+    const nonMatchingReplies = ['hola', 'ok', '123', 'si', 'no', 'gracias', 'nuevo proyecto extra'];
+    for (const reply of nonMatchingReplies) {
+      const result = await svc.handleClarificationResponse('5491155550000', reply, 'msg-nomatch', null);
+      // MUST return false — message proceeds to standard handleText, no session consumed
+      expect(result).toBe(false);
+    }
+
+    // Session set was NOT called (offer persists until TTL — no session mutation on non-match)
+    const offerClearCall = (sessions.delete as jest.Mock).mock.calls;
+    expect(offerClearCall.length).toBe(0);
+  });
+
+  it('C05 — offer session carries autoAssignedProjectId + eventoCrudoId into project_create transition', async () => {
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes("role = 'MANAGER'")) return [{ id: 'user-mgr' }];
+      if (sql.includes('SELECT language FROM users')) return [{ language: 'es' }];
+      return [];
+    });
+
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildOfferSession({ facturaId: 'FAC-99' })),
+      set: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ dsQuery, sessions, wa: { sendText: waSpy } });
+
+    await svc.handleClarificationResponse('5491155550000', 'NUEVO', 'msg-c05-ctx', null);
+
+    const setCall = (sessions.set as jest.Mock).mock.calls.find((args: any[]) =>
+      args[1]?.clarification?.type === 'project_create',
+    );
+    expect(setCall).toBeDefined();
+    const clarification = setCall[1].clarification;
+    // facturaId must be threaded through to project_create (sub-case 2)
+    expect(clarification.facturaId).toBe('FAC-99');
+    // eventoCrudoId must be in pendingEventoIds
+    expect(clarification.pendingEventoIds).toContain('ec-55');
+  });
+
+  it('C05 — ADR-11: project_create_offer state=awaiting_clarification gate (SCENARIO-25)', async () => {
+    // If session exists with clarification but state != awaiting_clarification → L97 gate returns false.
+    const badSession = {
+      state: 'idle', // writer omitted state
+      clientId: 'client-1',
+      projects: [], base64: '', mimeType: '', caption: '', canalId: null, updatedAt: new Date().toISOString(),
+      clarification: {
+        eventoCrudoId: 'ec-55',
+        type: 'project_create_offer',
+        attempts: 0,
+        autoAssignedProjectId: 'proj-solo',
+      },
+    };
+    const sessions = buildSessions({ get: jest.fn().mockResolvedValue(badSession) });
+    const svc = buildService({ sessions });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'NUEVO', 'msg-bad', null);
+    expect(result).toBe(false);
   });
 });
 

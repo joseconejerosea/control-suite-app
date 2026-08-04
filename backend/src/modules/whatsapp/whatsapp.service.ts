@@ -151,6 +151,10 @@ Control Suite BTL ⚡`;
   // Refleja lo que REALMENTE se procesó (tipo, proveedor, monto, proyecto, estado),
   // no una plantilla fija: el usuario de terreno debe sentir que el sistema entendió
   // su envío. Los valores llegan ya resueltos/formateados desde el persist processor.
+  //
+  // [Slice C / ADR-10] nuevoLine is an optional escape-hatch line appended when
+  // resolver_method='single_active_project' and the sender is a MANAGER. Non-breaking:
+  // callers that do not supply nuevoLine receive the original message format unchanged.
   async confirmarProcesado(opts: {
     telefono: string;
     tipo: string;
@@ -158,14 +162,16 @@ Control Suite BTL ⚡`;
     monto: string;
     proyecto: string;
     estado: string;
+    nuevoLine?: string;
   }): Promise<boolean> {
+    const nuevoSection = opts.nuevoLine ? `\n\n${opts.nuevoLine}` : '';
     const msg = `✅ *Documento procesado*
 
 Tipo: ${opts.tipo}
 Proveedor: ${opts.proveedor}
 Monto: ${opts.monto}
 Proyecto: ${opts.proyecto}
-Estado: ${opts.estado}
+Estado: ${opts.estado}${nuevoSection}
 
 Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);
