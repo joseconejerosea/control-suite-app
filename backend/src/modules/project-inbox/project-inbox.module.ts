@@ -8,10 +8,12 @@ import { ExcelParserService } from '../document-ingestion/parsers/excel-parser.s
 import { CsvParserService } from '../document-ingestion/parsers/csv-parser.service';
 
 const QUEUE_PROJECT_INBOX_EXTRACT = 'project-inbox-extract';
+const QUEUE_OCR = 'ocr';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: QUEUE_PROJECT_INBOX_EXTRACT }),
+    BullModule.registerQueue({ name: QUEUE_OCR }),
   ],
   controllers: [ProjectInboxController],
   providers: [
