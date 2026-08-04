@@ -6,6 +6,7 @@ import { Job } from 'bullmq';
 import { SheetsService } from '../../sheets/sheets.service';
 import { RendicionesService } from '../../rendiciones/rendiciones.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppSessionService } from '../../whatsapp/whatsapp-session.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
 import { runWithWaFrom } from '../../whatsapp/whatsapp-send-context';
 import { resolveWaFrom } from '../../whatsapp/resolve-wa-from';
@@ -19,7 +20,25 @@ import { SAFE_MESSAGES } from '../../../common/exceptions';
 // Descriptor de notificación WhatsApp a enviar DESPUÉS del commit de la tx del
 // tenant. Los envíos salientes no deben correr con la transacción abierta.
 type PostCommitNotify =
-  | { kind: 'confirm'; phone: string; tipo: string; proveedor: string; monto: string; proyecto: string; estado: string }
+  | {
+      kind: 'confirm';
+      phone: string;
+      tipo: string;
+      proveedor: string;
+      monto: string;
+      proyecto: string;
+      estado: string;
+      // [Slice C / ADR-10] Optional NUEVO escape line appended when resolver_method='single_active_project'.
+      // Passed as a non-breaking optional to confirmarProcesado so callers that do not care
+      // about the offer line are unaffected (nuevoLine=undefined → message unchanged).
+      nuevoLine?: string;
+      // Context for setting the project_create_offer session after the confirmation is sent.
+      offerContext?: {
+        eventoCrudoId: string;
+        autoAssignedProjectId: string;
+        facturaId?: string;
+      };
+    }
   | { kind: 'duplicate'; phone: string }
   | null;
 
@@ -48,6 +67,7 @@ export class PersistProcessor extends WorkerHost {
     private readonly sheetsService: SheetsService,
     private readonly rendicionesService: RendicionesService,
     private readonly wa: WhatsAppService,
+    private readonly sessions: WhatsAppSessionService,
   ) {
     super();
   }
@@ -77,9 +97,46 @@ export class PersistProcessor extends WorkerHost {
             monto: notify.monto,
             proyecto: notify.proyecto,
             estado: notify.estado,
+            nuevoLine: notify.nuevoLine,
           });
         } catch (e: any) {
           this.logger.warn(`[F1Persist] WhatsApp confirmation failed: ${e.message}`);
+        }
+
+        // [Slice C / ADR-10 / ADR-11] After sending the confirmation, set the
+        // project_create_offer session if the offer context was computed.
+        // Best-effort: a Redis failure here must NOT roll back the already-committed invoice.
+        // HONEST LIMITATION (spec R-14(d)/SCENARIO-18): the invoice is ALREADY persisted at
+        // this point. The offer allows re-pointing the evento and creating a draft; it does
+        // NOT move the committed invoice/rendición to the new project (out of scope).
+        if (notify.offerContext) {
+          const { eventoCrudoId, autoAssignedProjectId, facturaId } = notify.offerContext;
+          try {
+            const existing = await this.sessions.get(notify.phone);
+            const session = existing ?? {
+              state: '',
+              projects: [],
+              base64: '',
+              mimeType: '',
+              caption: '',
+              clientId: job.data.client_id,
+              canalId: null,
+              updatedAt: new Date().toISOString(),
+            };
+            // [ADR-11] INVARIANT: state and clarification must be set in the same write.
+            session.state = 'awaiting_clarification';
+            session.clarification = {
+              eventoCrudoId,
+              type: 'project_create_offer',
+              attempts: 0,
+              autoAssignedProjectId,
+              ...(facturaId ? { facturaId } : {}),
+            };
+            await this.sessions.set(notify.phone, session as any);
+            this.logger.log(`[F1Persist] project_create_offer session set for ${notify.phone} evento=${eventoCrudoId}`);
+          } catch (e: any) {
+            this.logger.warn(`[F1Persist] Could not set project_create_offer session: ${e.message}`);
+          }
         }
       } else if (notify?.kind === 'duplicate') {
         try {
@@ -275,6 +332,12 @@ export class PersistProcessor extends WorkerHost {
       vendorName,
       // B07 — ADR-12: resolved_project_id takes precedence at confirmation site too.
       proyectoId: resolvedProjectId ?? classification.proyecto_id_sugerido ?? null,
+      // [Slice C] Pass resolver_method and invoiceId so sendWhatsAppConfirmation
+      // can compute the ADR-10 NUEVO offer for single_active_project events.
+      resolverMethod: classification.resolver_method ?? null,
+      eventoCrudoId: evento_crudo_id,
+      clientId: client_id,
+      invoiceId,
     });
   }
 
@@ -283,6 +346,18 @@ export class PersistProcessor extends WorkerHost {
    * La lectura del nombre del proyecto y el formato de monto/tipo son lecturas de DB /
    * formateo puro que corren dentro de runWithTenant (RLS). El envío saliente NO se
    * hace acá: se devuelve el descriptor y `process` lo envía tras el commit.
+   *
+   * [Slice C / ADR-10] When resolverMethod='single_active_project' and the sender is a
+   * MANAGER, the returned descriptor includes:
+   *   - nuevoLine: the NUEVO escape line to append to the confirmation message
+   *   - offerContext: { eventoCrudoId, autoAssignedProjectId, facturaId } so runJob can
+   *     set the project_create_offer session AFTER sending the confirmation.
+   *
+   * HONEST LIMITATION (spec R-14(d)/SCENARIO-18): the invoice is ALREADY committed by
+   * the time this method runs (it is called at the end of persistEvento, inside the
+   * runWithTenant block). The NUEVO offer can re-point the evento and create a draft;
+   * it does NOT move the committed invoice/rendición. The nuevoLine and confirmation
+   * text reflect this (they do not claim to move the invoice).
    */
   private async sendWhatsAppConfirmation(opts: {
     channel: string;
@@ -292,6 +367,11 @@ export class PersistProcessor extends WorkerHost {
     currency: string;
     vendorName: string;
     proyectoId: string | null;
+    // [Slice C] Additional fields for ADR-10 NUEVO offer computation
+    resolverMethod?: string | null;
+    eventoCrudoId?: string;
+    clientId?: string;
+    invoiceId?: string;
   }): Promise<PostCommitNotify> {
     if (opts.channel !== 'whatsapp' || !opts.phone) return null;
 
@@ -309,7 +389,44 @@ export class PersistProcessor extends WorkerHost {
         }).format(Number(opts.amount))
       : 'no detectado';
 
-    return {
+    // [Slice C / ADR-10 / R-14(a)(b)] Compute NUEVO offer for single_active_project.
+    // Non-breaking: only appended when resolver_method='single_active_project' AND sender is MANAGER.
+    // Language: getUserLanguageForCreate is in ClarificationService (not available here without
+    // circular injection). We use a minimal inline DB lookup mirroring getUserLanguageForCreate.
+    // Deviation noted: inline MANAGER + lang query instead of injecting ClarificationService
+    // (avoids circular dependency: ClarificationService → ProjectInboxService → QueueModule → PersistProcessor).
+    let nuevoLine: string | undefined;
+    let offerContext: PostCommitNotify extends { kind: 'confirm' } ? any : never;
+
+    if (opts.resolverMethod === 'single_active_project' && opts.phone && opts.eventoCrudoId && opts.clientId) {
+      const digitPhone = opts.phone.replace(/\D/g, '');
+      const managerRows = await this.dataSource
+        .query(
+          `SELECT language FROM users
+           WHERE regexp_replace(phone, '\\D', '', 'g') = $1
+             AND client_id = $2
+             AND role = 'MANAGER'
+             AND is_active = true
+           LIMIT 1`,
+          [digitPhone, opts.clientId],
+        )
+        .catch(() => []);
+
+      if (managerRows.length > 0) {
+        const lang = managerRows[0]?.language === 'en' ? 'en' : 'es';
+        nuevoLine = lang === 'en'
+          ? 'If this is for a different project, reply NEW.'
+          : 'Si es para otro proyecto, respondé NUEVO.';
+
+        (offerContext as any) = {
+          eventoCrudoId: opts.eventoCrudoId,
+          autoAssignedProjectId: opts.proyectoId ?? '',
+          ...(opts.invoiceId ? { facturaId: opts.invoiceId } : {}),
+        };
+      }
+    }
+
+    const result: PostCommitNotify = {
       kind: 'confirm',
       phone: opts.phone,
       tipo: TIPO_LABELS[opts.tipo] ?? 'Documento',
@@ -317,7 +434,11 @@ export class PersistProcessor extends WorkerHost {
       monto,
       proyecto,
       estado: 'Registrado ✓',
+      ...(nuevoLine !== undefined ? { nuevoLine } : {}),
+      ...(offerContext !== undefined ? { offerContext } : {}),
     };
+
+    return result;
   }
 
   private async resolvePersonaId(

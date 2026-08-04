@@ -60,6 +60,10 @@ interface BeginProjectCreateOpts {
   from: string;
   lang: string;
   pendingEventoIds?: string[];
+  // [Slice C / ADR-10] Carried from project_create_offer → project_create for sub-case 2
+  // (invoice already persisted). handleProjectCreateResponse reads this from the session
+  // clarification and passes it to createDraftFromWhatsApp as reassignFacturaId.
+  facturaId?: string;
 }
 
 @Injectable()
@@ -195,7 +199,7 @@ export class ClarificationService {
    *  - Case 2 (sender selects the __create__ sentinel)
    */
   async beginProjectCreate(opts: BeginProjectCreateOpts): Promise<void> {
-    const { eventoCrudoId, clientId, from, lang, pendingEventoIds } = opts;
+    const { eventoCrudoId, clientId, from, lang, pendingEventoIds, facturaId } = opts;
 
     const nameRequestMsg = lang === 'en'
       ? 'What is the new project name? Please type it below.'
@@ -209,6 +213,9 @@ export class ClarificationService {
       type: 'project_create',
       attempts: 0,
       pendingEventoIds: pendingEventoIds ?? [eventoCrudoId],
+      // [Slice C] Thread facturaId from project_create_offer → project_create (sub-case 2).
+      // handleProjectCreateResponse reads this and passes it to createDraftFromWhatsApp.
+      ...(facturaId ? { facturaId } : {}),
     };
     await this.sessions.set(from, session);
 
@@ -262,11 +269,20 @@ export class ClarificationService {
     // (b) park + insert are atomic — a failed INSERT rolls back the park UPDATEs, so no
     // orphaned 'parked' evento is left behind.
     const draft = await runWithTenant(this.ds, clientId, async () => {
-      // Park all pending eventos
+      // Park all pending eventos.
+      // [Slice C / R-06 sub-case 2 / SCENARIO-18] When the parked evento carries a
+      // facturaId (an already-persisted comprobante being re-pointed), flag it with
+      // reassignment_pending=true so the reassignment is tracked. Plain Case-3 create
+      // (no facturaId) does NOT get the flag.
+      const parkedData: Record<string, unknown> = {
+        parked_at: new Date().toISOString(),
+        parked_reason: 'project_create',
+        ...(clarification.facturaId ? { reassignment_pending: true } : {}),
+      };
       for (const eid of pendingEventoIds) {
         await this.ds.query(
           `UPDATE eventos_crudos SET status = 'parked', parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
-          [JSON.stringify({ parked_at: new Date().toISOString(), parked_reason: 'project_create' }), eid],
+          [JSON.stringify(parkedData), eid],
         );
       }
 
@@ -319,9 +335,74 @@ export class ClarificationService {
       return this.handleProjectCreateResponse(phoneNumber, session, text, session.clientId!);
     }
 
-    // project_create_offer is handled in Slice C (C05).
-    // For now, return false so non-NUEVO replies fall through to handleText (no session leak).
+    if (clarification.type === 'project_create_offer') {
+      return this.handleProjectCreateOfferResponse(phoneNumber, text, session);
+    }
+
     return false;
+  }
+
+  // ── ADR-10 NUEVO escape: handle reply to project_create_offer ────────────────
+
+  /**
+   * Routes a sender's reply to the project_create_offer sub-state (ADR-10 / R-14(c)).
+   *
+   * Matching reply (/^\s*(nuevo|nueva|crear|new|create)\s*$/i):
+   *   - MANAGER: transitions to project_create sub-state and begins name collection.
+   *     The facturaId from the offer session is threaded through so createDraftFromWhatsApp
+   *     can set raw_content.reassign_factura_id (sub-case 2 — R-14(d)).
+   *   - Non-MANAGER: sends a denial/coordinator message and clears the offer. No draft.
+   *
+   * Non-matching reply:
+   *   - Returns false immediately. The project_create_offer sub-state is NOT consumed or
+   *     cleared (NFR-07). The message proceeds to the standard handleText path. The offer
+   *     session expires via its Redis TTL. No dead-end, no session leak (SCENARIO-20).
+   */
+  private async handleProjectCreateOfferResponse(
+    phoneNumber: string,
+    text: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    const NUEVO_REGEX = /^\s*(nuevo|nueva|crear|new|create)\s*$/i;
+    if (!NUEVO_REGEX.test(text)) {
+      // Non-matching reply: do NOT consume the offer session (NFR-07 / SCENARIO-20).
+      return false;
+    }
+
+    const clarification = session.clarification as SessionClarification;
+    const clientId = session.clientId!;
+
+    // Role gate (R-04, R-14(e)): only MANAGER may enter the create flow.
+    const isManager = await this.canCreateProject(phoneNumber, clientId);
+
+    if (!isManager) {
+      // Non-MANAGER attempted NUEVO: send denial and clear the offer.
+      const lang = await this.getUserLanguageForCreate(phoneNumber, clientId);
+      const denyMsg = lang === 'en'
+        ? 'Only a manager can create a new project from WhatsApp. Please contact your manager.'
+        : 'Solo un gestor puede crear un proyecto nuevo desde WhatsApp. Contactá a tu gestor.';
+      await this.wa.sendText(phoneNumber, denyMsg);
+      await this.sessions.delete(phoneNumber);
+      this.logger.log(`[Clarification] project_create_offer: NUEVO denied (non-MANAGER) for ${phoneNumber}`);
+      return true;
+    }
+
+    // MANAGER: transition to project_create sub-state and begin name collection.
+    // Thread facturaId through (sub-case 2 detection — R-14(d)/SCENARIO-18).
+    const lang = await this.getUserLanguageForCreate(phoneNumber, clientId);
+    await this.beginProjectCreate({
+      eventoCrudoId: clarification.eventoCrudoId,
+      clientId,
+      from: phoneNumber,
+      lang,
+      pendingEventoIds: [clarification.eventoCrudoId],
+      // Pass facturaId from the offer so the name handler can include it in the draft
+      // (beginProjectCreate writes session.clarification which handleProjectCreateResponse reads).
+      facturaId: clarification.facturaId,
+    });
+
+    this.logger.log(`[Clarification] project_create_offer: NUEVO accepted for ${phoneNumber} evento=${clarification.eventoCrudoId}`);
+    return true;
   }
 
   // ── Existing project-selection handler (unchanged) ─────────────────────────
