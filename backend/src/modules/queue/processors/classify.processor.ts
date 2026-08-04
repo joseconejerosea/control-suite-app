@@ -86,12 +86,13 @@ export class ClassifyProcessor extends WorkerHost {
     const { evento_crudo_id, client_id, canal } = job.data;
     this.logger.log(`[F1Classify] Classifying evento: ${evento_crudo_id}`);
 
+    // [ADR-12] Include parsed_data to check for resolved_project_id (single source of truth).
     const rows = await this.dataSource.query(
-      `SELECT ocr_text, payload, canal FROM eventos_crudos WHERE id=$1`,
+      `SELECT ocr_text, payload, canal, parsed_data FROM eventos_crudos WHERE id=$1`,
       [evento_crudo_id],
     );
     if (!rows.length) throw new Error('Evento not found');
-    const { ocr_text, payload } = rows[0];
+    const { ocr_text, payload, parsed_data } = rows[0];
 
     if (!ocr_text) {
       await this.setStatus(evento_crudo_id, 'failed_classification', 'No OCR text available');
@@ -153,21 +154,34 @@ export class ClassifyProcessor extends WorkerHost {
       return;
     }
 
-    // Run ProjectResolverService to improve project assignment
-    try {
-      const messageText = ocr_text || payload?.text || '';
-      const phoneNumber = payload?.from || payload?.phone || null;
-      const resolved = await this.projectResolver.resolve(
-        messageText, null, client_id, phoneNumber as string,
-      );
-      if (resolved) {
-        classification.proyecto_id_sugerido = resolved.projectId;
-        classification.proyecto_alternativos = resolved.alternatives.map(a => a.id);
-        classification.resolver_method = resolved.method;
-        classification.resolver_confidence = resolved.confidence;
+    // [ADR-12] Honor resolved_project_id as single source of truth.
+    // When set, skip resolve() and the entire low_confidence clarification block.
+    const resolvedProjectId = parsed_data?.resolved_project_id as string | null | undefined;
+
+    if (resolvedProjectId) {
+      // Already resolved by a prior human decision (clarification or approve() reassignment).
+      // Use it directly; skip resolve() and any clarification prompts.
+      classification.proyecto_id_sugerido = resolvedProjectId;
+      classification.resolver_method = 'preresolved';
+      classification.resolver_confidence = 1.0;
+      this.logger.log(`[F1Classify] ADR-12 short-circuit: evento ${evento_crudo_id} → resolved_project_id=${resolvedProjectId}`);
+    } else {
+      // Run ProjectResolverService to improve project assignment
+      try {
+        const messageText = ocr_text || payload?.text || '';
+        const phoneNumber = payload?.from || payload?.phone || null;
+        const resolved = await this.projectResolver.resolve(
+          messageText, null, client_id, phoneNumber as string,
+        );
+        if (resolved) {
+          classification.proyecto_id_sugerido = resolved.projectId;
+          classification.proyecto_alternativos = resolved.alternatives.map(a => a.id);
+          classification.resolver_method = resolved.method;
+          classification.resolver_confidence = resolved.confidence;
+        }
+      } catch (err: any) {
+        this.logger.warn(`[F1Classify] ProjectResolver error: ${err.message}`);
       }
-    } catch (err: any) {
-      this.logger.warn(`[F1Classify] ProjectResolver error: ${err.message}`);
     }
 
     const confidence = classification.confidence_score ?? 0;
@@ -202,29 +216,68 @@ export class ClassifyProcessor extends WorkerHost {
 
     // Baja confianza → diálogo bidireccional por WhatsApp.
     //  - Sin proyecto resuelto → se pregunta a qué proyecto pertenece.
+    //    Case 3 (0 proyectos activos) → prompt de creación para MANAGER.
+    //    Case 2 (>1 proyectos activos) → lista con opción de crear para MANAGER.
     //  - Con proyecto pero campos críticos faltantes → se piden esos datos.
+    //
+    // [ADR-12] Short-circuit SCOPE: si resolved_project_id está seteado, el proyecto ya
+    // fue resuelto por una decisión humana previa. Se saltea SÓLO la resolución de proyecto
+    // y la clarificación/creación de proyecto (Case 3 / Case 2), PERO se PRESERVA la
+    // data-clarification: una factura ya asignada a proyecto pero con monto/fecha/razón_social
+    // faltantes debe seguir pidiendo esos datos. Como resolvedProjectId ya seteó
+    // proyecto_id_sugerido arriba, el flujo entra naturalmente en la rama else (data).
     if (processingStatus === 'low_confidence') {
       const phoneNumber = payload?.from as string;
       if (phoneNumber && canal === 'whatsapp') {
         try {
-          if (!classification.proyecto_id_sugerido) {
+          // [ADR-12] Con resolved_project_id, proyecto_id_sugerido ya está seteado →
+          // esta rama de resolución/clarificación de proyecto NO corre. El guard explícito
+          // documenta la intención y evita ofrecer crear proyecto sobre un evento ya resuelto.
+          if (!resolvedProjectId && !classification.proyecto_id_sugerido) {
             const activeProjects = await this.dataSource.query(
               `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
               [client_id],
             );
-            if (activeProjects.length > 1) {
-              const userLang = await this.getUserLanguage(phoneNumber, client_id);
+
+            if (activeProjects.length === 0) {
+              // [Case 3] No active projects — offer project creation to MANAGER.
+              const userLang = await this.clarificationService.getUserLanguageForCreate(phoneNumber, client_id);
+              const isManager = await this.clarificationService.canCreateProject(phoneNumber, client_id);
+              if (isManager) {
+                await this.clarificationService.beginProjectCreate({
+                  eventoCrudoId: evento_crudo_id,
+                  clientId: client_id,
+                  from: phoneNumber,
+                  lang: userLang,
+                });
+                this.logger.log(`[F1Classify] Case 3: beginProjectCreate for ${evento_crudo_id}`);
+              } else {
+                // Non-MANAGER: send denial/guidance message
+                const denialMsg = userLang === 'en'
+                  ? 'No active projects found. Please contact your coordinator to create a project first.'
+                  : 'No hay proyectos activos. Contactá a tu coordinador para crear un proyecto primero.';
+                await this.wa.sendText(phoneNumber, denialMsg);
+                this.logger.log(`[F1Classify] Case 3: non-MANAGER denial for ${evento_crudo_id}`);
+              }
+              return;
+            } else if (activeProjects.length > 1) {
+              // [Case 2] Multiple projects — show list with optional create sentinel.
+              const userLang = await this.clarificationService.getUserLanguageForCreate(phoneNumber, client_id);
+              const allowCreate = await this.clarificationService.canCreateProject(phoneNumber, client_id);
               await this.clarificationService.requestProjectClarification({
                 eventoCrudoId: evento_crudo_id,
                 clientId: client_id,
                 phoneNumber,
                 projects: activeProjects,
                 language: userLang,
+                allowCreate,
               });
-              this.logger.log(`[F1Classify] Project clarification requested for ${evento_crudo_id}`);
+              this.logger.log(`[F1Classify] Case 2: project clarification requested for ${evento_crudo_id} (allowCreate=${allowCreate})`);
               return;
             }
+            // Case 1 (length === 1): resolve() already set proyecto_id_sugerido → fall through to persist.
           } else {
+            // Project resolved but critical fields missing → data clarification.
             const missing = this.missingCriticalFields(classification.datos_extraidos);
             if (missing.length) {
               const userLang = await this.getUserLanguage(phoneNumber, client_id);

@@ -13,13 +13,24 @@ export interface WhatsAppSession {
   lastProjectId?: string | null;
   updatedAt: string;
   // Clarification flow
+  //
+  // [ADR-11] INVARIANT: Every write assigning `clarification` MUST also set
+  // `session.state='awaiting_clarification'` in the SAME set() call, so the
+  // handleClarificationResponse gate (clarification.service.ts L97) routes the
+  // subsequent reply. Writers that omit state cause the L97 guard to return false.
   clarification?: {
     eventoCrudoId: string;
-    type: 'project' | 'data';
+    type: 'project' | 'data' | 'project_create' | 'project_create_offer';
     attempts: number;
     pendingFields?: string[];
     collected?: Record<string, string>;
     options?: { id: string; label: string }[];
+    // [project_create / project_create_offer] Parked eventos to link to the draft.
+    pendingEventoIds?: string[];
+    // [project_create_offer] The single project the comprobante was auto-filed to.
+    autoAssignedProjectId?: string;
+    // [project_create_offer] The already-persisted invoice, if any (sub-case 2).
+    facturaId?: string;
   } | null;
   // F3 · Intake de material POP por foto (conversación multi-paso).
   // Estado de sesión asociado: state === 'awaiting_material'.
