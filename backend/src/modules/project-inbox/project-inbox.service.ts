@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { ProjectInbox } from './entities/project-inbox.entity';
 
 const QUEUE_PROJECT_INBOX_EXTRACT = 'project-inbox-extract';
+const QUEUE_OCR = 'ocr';
 
 @Injectable()
 export class ProjectInboxService {
@@ -15,6 +16,7 @@ export class ProjectInboxService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     @InjectQueue(QUEUE_PROJECT_INBOX_EXTRACT) private readonly extractQueue: Queue,
+    @InjectQueue(QUEUE_OCR) private readonly ocrQueue: Queue,
     private readonly audit: AuditService,
   ) {}
 
@@ -160,6 +162,16 @@ export class ProjectInboxService {
     // Fase 2 — este QueryRunner manual no pasa por el patch del ds: setear el GUC acá.
     await qr.query(`SELECT set_config('app.current_tenant', $1, true)`, [tenantId]);
 
+    // Collect pending evento ids BEFORE entering tx block (parsed from raw_content).
+    const rawContent: Record<string, unknown> =
+      typeof item.raw_content === 'string'
+        ? JSON.parse(item.raw_content)
+        : (item.raw_content ?? {});
+    const pendingEventoIds: string[] = Array.isArray(rawContent.pending_evento_ids)
+      ? (rawContent.pending_evento_ids as string[])
+      : [];
+
+    let projectId: string;
     try {
       const projRes = await qr.query(
         `INSERT INTO projects
@@ -180,7 +192,7 @@ export class ProjectInboxService {
           }),
         ],
       );
-      const projectId = projRes[0].id;
+      projectId = projRes[0].id;
 
       if (extracted.locales?.length) {
         for (const local of extracted.locales) {
@@ -199,21 +211,61 @@ export class ProjectInboxService {
         [id, projectId, userId],
       );
 
+      // B01/B03 — Reassign parked eventos inside the SAME tx (GUC already set above).
+      // Sets resolved_project_id → persist will honor it; status='queued' → re-files.
+      // No .catch swallow here: errors must propagate so the tx rolls back (NFR-02).
+      for (const eventoId of pendingEventoIds) {
+        await qr.query(
+          `UPDATE eventos_crudos
+           SET parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb,
+               status = 'queued'
+           WHERE id = $2`,
+          [JSON.stringify({ resolved_project_id: projectId }), eventoId],
+        );
+      }
+
       await qr.commitTransaction();
-
-      await this.audit.log({
-        tenantId, userId, action: 'APPROVE_INBOX', entity: 'project_inbox',
-        entityId: id, metadata: { project_id: projectId }, ip,
-      });
-
-      this.logger.log(`[ProjectInbox] Approved ${id} → project ${projectId}`);
-      return { project_id: projectId };
     } catch (err) {
       await qr.rollbackTransaction();
       throw err;
     } finally {
       await qr.release();
     }
+
+    // B01/B03 — Post-commit: enqueue OCR for each reassigned evento.
+    // Done AFTER commitTransaction so a rollback never leaves ghost jobs.
+    //
+    // JAB-001/JBB-001 — The tx already committed (evento is status='queued' with
+    // resolved_project_id set). If ocrQueue.add throws (queue/Redis outage), the
+    // evento would be orphaned: queued but with no job and no recovery. Escalate it
+    // to operator manual review so it surfaces instead of being silently lost.
+    // this.ds.query is the same request-scoped, RLS-safe path reject() uses
+    // (approve() runs in HTTP context where installTenantQueryRouting set the GUC).
+    for (const eventoId of pendingEventoIds) {
+      try {
+        await this.ocrQueue.add(
+          'process',
+          { evento_crudo_id: eventoId, client_id: tenantId },
+          { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+        );
+      } catch (err: any) {
+        this.logger.warn(`[ProjectInbox] No se pudo encolar OCR para evento ${eventoId}: ${err.message}`);
+        await this.ds.query(
+          `UPDATE eventos_crudos SET status = 'escalated' WHERE id = $1`,
+          [eventoId],
+        ).catch((escErr: any) =>
+          this.logger.error(`[ProjectInbox] No se pudo escalar evento huérfano ${eventoId}: ${escErr.message}`),
+        );
+      }
+    }
+
+    await this.audit.log({
+      tenantId, userId, action: 'APPROVE_INBOX', entity: 'project_inbox',
+      entityId: id, metadata: { project_id: projectId! }, ip,
+    });
+
+    this.logger.log(`[ProjectInbox] Approved ${id} → project ${projectId!}`);
+    return { project_id: projectId! };
   }
 
   async reject(
@@ -234,6 +286,24 @@ export class ProjectInboxService {
        WHERE id = $1 AND tenant_id = $4`,
       [id, userId, JSON.stringify(reason), tenantId],
     );
+
+    // B02/B04 — Escalate parked eventos so they surface for operator review.
+    // Uses this.ds.query which is request-scoped and RLS-safe via TenantInterceptor
+    // (reject() is called from HTTP, where installTenantQueryRouting sets the GUC).
+    const rawContent: Record<string, unknown> =
+      typeof item.raw_content === 'string'
+        ? JSON.parse(item.raw_content)
+        : (item.raw_content ?? {});
+    const pendingEventoIds: string[] = Array.isArray(rawContent.pending_evento_ids)
+      ? (rawContent.pending_evento_ids as string[])
+      : [];
+
+    for (const eventoId of pendingEventoIds) {
+      await this.ds.query(
+        `UPDATE eventos_crudos SET status = 'escalated' WHERE id = $1`,
+        [eventoId],
+      );
+    }
 
     await this.audit.log({
       tenantId, userId, action: 'REJECT_INBOX', entity: 'project_inbox',

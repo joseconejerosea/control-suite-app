@@ -143,10 +143,25 @@ export class PersistProcessor extends WorkerHost {
     const confidence = classification.confidence_score ?? 0;
 
     const eventoRows = await this.dataSource.query(
-      `SELECT payload, canal, source, email_from FROM eventos_crudos WHERE id=$1`, [evento_crudo_id],
+      `SELECT payload, canal, source, email_from, parsed_data FROM eventos_crudos WHERE id=$1`, [evento_crudo_id],
     );
     if (!eventoRows.length) throw new Error('Evento not found');
-    const { canal, source: eventoSource, payload, email_from } = eventoRows[0];
+    const { canal, source: eventoSource, payload, email_from, parsed_data } = eventoRows[0];
+
+    // B06/B07 — ADR-12: honor resolved_project_id from parsed_data at both derivation sites.
+    // Precedence: resolved_project_id > proyecto_id_sugerido > payload.project_id > null.
+    // JBB-002 — jsonb may arrive as an object OR a JSON string depending on the driver/path;
+    // parse the string form the same way approve()/reject() do so it is honored consistently.
+    const parsedData: Record<string, unknown> | null =
+      typeof parsed_data === 'string'
+        ? ((): Record<string, unknown> | null => {
+            try { return JSON.parse(parsed_data); } catch { return null; }
+          })()
+        : (typeof parsed_data === 'object' ? parsed_data : null);
+    const resolvedProjectId: string | null =
+      parsedData !== null
+        ? ((parsedData.resolved_project_id as string | null) ?? null)
+        : null;
     // WhatsApp guarda el canal en la columna `source` (no `canal`). `invoices.source`
     // es NOT NULL → fallback para no romper el INSERT con un canal null.
     const channel = canal ?? eventoSource ?? 'unknown';
@@ -205,7 +220,9 @@ export class PersistProcessor extends WorkerHost {
     // ─── f2-rendicion: agrupar gasto en rendición semanal ─────────────────
     if (category === 'expense') {
       try {
-        const projectId = classification.proyecto_id_sugerido
+        // B06 — ADR-12: resolved_project_id takes precedence over all other sources.
+        const projectId = resolvedProjectId
+          ?? classification.proyecto_id_sugerido
           ?? (typeof payload === 'object' ? payload?.project_id : null)
           ?? null;
         const personaId = await this.resolvePersonaId(client_id, payload, channel);
@@ -256,7 +273,8 @@ export class PersistProcessor extends WorkerHost {
       amount,
       currency: datos.moneda ?? 'CLP',
       vendorName,
-      proyectoId: classification.proyecto_id_sugerido ?? null,
+      // B07 — ADR-12: resolved_project_id takes precedence at confirmation site too.
+      proyectoId: resolvedProjectId ?? classification.proyecto_id_sugerido ?? null,
     });
   }
 

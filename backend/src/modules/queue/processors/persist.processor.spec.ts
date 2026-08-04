@@ -193,6 +193,294 @@ describe('PersistProcessor — WhatsApp confirmation (happy path)', () => {
   });
 });
 
+// ─── TASK-B06/B07 — ADR-12: persist honors resolved_project_id ──────────────
+
+describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)', () => {
+  /**
+   * Helper: builds a PersistProcessor with a queryMock that returns standard
+   * evento data (whatsapp channel) and an invoice insert returning 'inv-adrl'.
+   * The classification has proyecto_id_sugerido optionally, and the evento
+   * row optionally has parsed_data.resolved_project_id.
+   */
+  function buildProcessorWithResolvedId(opts: {
+    resolvedProjectId: string | null;
+    proyectoIdSugerido?: string | null;
+    payloadProjectId?: string | null;
+  }) {
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const asignarFacturaARendicion = jest.fn().mockResolvedValue(undefined);
+
+    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('SELECT payload')) {
+        return [{
+          canal: null,
+          source: 'whatsapp',
+          email_from: null,
+          payload: {
+            from: '5492216205665',
+            ...(opts.payloadProjectId ? { project_id: opts.payloadProjectId } : {}),
+          },
+          parsed_data: opts.resolvedProjectId !== null
+            ? { resolved_project_id: opts.resolvedProjectId }
+            : null,
+        }];
+      }
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-adrl' }];
+      if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Resolved Project' }];
+      // resolvePersonaId: return a promoter so asignarFacturaARendicion is called
+      if (sql.includes('FROM promoters')) return [{ id: 'persona-1' }];
+      return [];
+    });
+
+    const makeQueryRunner = () => ({
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      isTransactionActive: true,
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    });
+
+    const ds = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      ds,
+      { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
+      { asignarFacturaARendicion } as any,
+      { confirmarProcesado } as any,
+    );
+
+    return { processor, queryMock, confirmarProcesado, asignarFacturaARendicion };
+  }
+
+  it('B06 — rendición derivation uses resolved_project_id over proyecto_id_sugerido', async () => {
+    const { processor, asignarFacturaARendicion } = buildProcessorWithResolvedId({
+      resolvedProjectId: 'proj-resolved',
+      proyectoIdSugerido: 'proj-other',
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-adrl',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: 'proj-other',
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor X',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    // asignarFacturaARendicion must receive resolved_project_id, not proyecto_id_sugerido
+    expect(asignarFacturaARendicion).toHaveBeenCalled();
+    const callArgs = asignarFacturaARendicion.mock.calls[0];
+    // signature: (clientId, invoiceId, personaId, projectId, amount, date)
+    const projectIdArg = callArgs[3];
+    expect(projectIdArg).toBe('proj-resolved');
+    expect(projectIdArg).not.toBe('proj-other');
+  });
+
+  it('B07 — confirmation derivation uses resolved_project_id over proyecto_id_sugerido', async () => {
+    const { processor, queryMock, confirmarProcesado } = buildProcessorWithResolvedId({
+      resolvedProjectId: 'proj-resolved',
+      proyectoIdSugerido: 'proj-other',
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-adrl',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: 'proj-other',
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor X',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    // The SELECT FROM projects to get project name should use proj-resolved, not proj-other
+    const projectSelectCalls = queryMock.mock.calls.filter(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('FROM projects') && sql.includes('WHERE id='),
+    );
+    expect(projectSelectCalls.length).toBeGreaterThanOrEqual(1);
+    const [, params] = projectSelectCalls[0];
+    expect(params[0]).toBe('proj-resolved');
+    expect(params[0]).not.toBe('proj-other');
+  });
+
+  it('B06/B07 — null resolved_project_id → legacy behavior: proyecto_id_sugerido used', async () => {
+    const { processor, asignarFacturaARendicion, queryMock } = buildProcessorWithResolvedId({
+      resolvedProjectId: null,
+      proyectoIdSugerido: 'proj-suggested',
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-legacy',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: 'proj-suggested',
+          datos_extraidos: {
+            monto_total: 1000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor Y',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    // Rendición: projectId should be 'proj-suggested' (legacy behavior)
+    expect(asignarFacturaARendicion).toHaveBeenCalled();
+    const rendicionArgs = asignarFacturaARendicion.mock.calls[0];
+    expect(rendicionArgs[3]).toBe('proj-suggested');
+
+    // Confirmation: the FROM projects lookup MUST have run with the legacy id.
+    // JAB-002/JBB-006 — assert unconditionally: a regression that drops the
+    // confirmation derivation (never selecting the project) must fail here, not
+    // pass vacuously behind a length>0 guard.
+    const projectSelectCalls = queryMock.mock.calls.filter(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('FROM projects') && sql.includes('WHERE id='),
+    );
+    expect(projectSelectCalls.length).toBeGreaterThanOrEqual(1);
+    expect(projectSelectCalls[0][1][0]).toBe('proj-suggested');
+  });
+
+  it('JBB-002 — handles parsed_data delivered as a JSON string (not just object)', async () => {
+    // Some drivers/paths return jsonb columns as a string. approve()/reject() already
+    // parse the string form; persist must do the same so resolved_project_id is honored.
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const asignarFacturaARendicion = jest.fn().mockResolvedValue(undefined);
+
+    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('SELECT payload')) {
+        return [{
+          canal: null,
+          source: 'whatsapp',
+          email_from: null,
+          payload: { from: '5492216205665' },
+          // parsed_data as a JSON STRING, not an object.
+          parsed_data: JSON.stringify({ resolved_project_id: 'proj-resolved' }),
+        }];
+      }
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-adrl' }];
+      if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Resolved Project' }];
+      if (sql.includes('FROM promoters')) return [{ id: 'persona-1' }];
+      return [];
+    });
+
+    const makeQueryRunner = () => ({
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      isTransactionActive: true,
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    });
+
+    const ds = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      ds,
+      { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
+      { asignarFacturaARendicion } as any,
+      { confirmarProcesado } as any,
+    );
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-str',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: 'proj-other',
+          datos_extraidos: { monto_total: 5000, moneda: 'CLP', razon_social_emisor: 'Proveedor X' },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    // resolved_project_id parsed from the string wins over proyecto_id_sugerido.
+    expect(asignarFacturaARendicion).toHaveBeenCalled();
+    expect(asignarFacturaARendicion.mock.calls[0][3]).toBe('proj-resolved');
+  });
+
+  it('B06 — resolved_project_id used over payload.project_id for rendición', async () => {
+    const { processor, asignarFacturaARendicion } = buildProcessorWithResolvedId({
+      resolvedProjectId: 'proj-resolved',
+      payloadProjectId: 'proj-from-payload',
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-adrl2',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          // No proyecto_id_sugerido set
+          datos_extraidos: {
+            monto_total: 2000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor Z',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    expect(asignarFacturaARendicion).toHaveBeenCalled();
+    const rendicionArgs = asignarFacturaARendicion.mock.calls[0];
+    expect(rendicionArgs[3]).toBe('proj-resolved');
+    expect(rendicionArgs[3]).not.toBe('proj-from-payload');
+  });
+});
+
 describe('PersistProcessor — duplicate notification', () => {
   let processor: PersistProcessor;
   let queryMock: jest.Mock;
