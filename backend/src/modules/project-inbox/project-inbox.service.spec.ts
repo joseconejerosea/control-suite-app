@@ -455,6 +455,138 @@ describe('ProjectInboxService · approve() reassignment (B01/B03)', () => {
     expect(escalateCalls[0][1]).toContain('ec-42');
   });
 
+  it('re-enqueues OCR with canal=whatsapp for a parked UNPROCESSED evento (JAF-001)', async () => {
+    // The evento is genuinely parked (never persisted): no factura_id, status not 'processed'.
+    const ocrQueueAdd = jest.fn().mockResolvedValue({});
+
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT pi.*')) {
+        return [{
+          id: 'inbox-1',
+          status: 'READY',
+          extracted_data: JSON.stringify({ nombre_proyecto: 'Test' }),
+          raw_content: JSON.stringify({ pending_evento_ids: ['ec-parked'] }),
+        }];
+      }
+      return [];
+    });
+
+    const qrQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('INSERT INTO projects')) return [{ id: 'proj-new' }];
+      // Per-evento status probe: parked → NOT persisted.
+      if (sql.includes('SELECT') && sql.includes('eventos_crudos')) {
+        return [{ factura_id: null, status: 'awaiting_project' }];
+      }
+      return [];
+    });
+
+    const ds = {
+      query: (sql: string, params?: any[]) => dsQuery(sql, params),
+      createQueryRunner: jest.fn(() => ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => qrQuery(sql, params),
+      })),
+    } as unknown as DataSource;
+
+    const svc = new ProjectInboxService(
+      ds,
+      { add: jest.fn().mockResolvedValue({}) } as any,
+      { add: ocrQueueAdd } as any,
+      { log: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    const result = await svc.approve('tenant-1', 'inbox-1', 'user-1', {}, '127.0.0.1');
+    expect(result).toEqual({ project_id: 'proj-new' });
+
+    // Parked evento → OCR IS re-enqueued.
+    expect(ocrQueueAdd).toHaveBeenCalledTimes(1);
+    const [, payload] = ocrQueueAdd.mock.calls[0];
+    expect(payload.evento_crudo_id).toBe('ec-parked');
+    expect(payload.client_id).toBe('tenant-1');
+    // JAF-001 — canal must be carried so classify's whatsapp gate runs on re-file.
+    expect(payload.canal).toBe('whatsapp');
+
+    // Its status is re-pointed to 'queued' inside the tx.
+    const requeueCalls = qrQuery.mock.calls.filter(
+      ([s]: [string]) => typeof s === 'string' && s.includes('eventos_crudos') && s.includes("'queued'"),
+    );
+    expect(requeueCalls.length).toBe(1);
+  });
+
+  it('does NOT re-enqueue OCR for an ALREADY-PERSISTED evento (factura_id set) but still creates project+draft (JBF-001)', async () => {
+    // Sub-case 2 (single_active_project offer): the evento was fully processed into an
+    // invoices row BEFORE the NUEVO offer (persist stamps factura_id + status='processed').
+    // Re-enqueuing OCR would duplicate/lose the invoice → must be skipped.
+    const ocrQueueAdd = jest.fn().mockResolvedValue({});
+
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT pi.*')) {
+        return [{
+          id: 'inbox-persisted',
+          status: 'READY',
+          extracted_data: JSON.stringify({ nombre_proyecto: 'Nuevo Proyecto' }),
+          raw_content: JSON.stringify({ pending_evento_ids: ['ec-persisted'] }),
+        }];
+      }
+      return [];
+    });
+
+    let projectInserted = false;
+    let inboxApproved = false;
+    const qrQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('INSERT INTO projects')) { projectInserted = true; return [{ id: 'proj-new' }]; }
+      if (sql.includes('UPDATE project_inbox')) { inboxApproved = true; return []; }
+      // Per-evento status probe: already persisted (factura_id set, status='processed').
+      if (sql.includes('SELECT') && sql.includes('eventos_crudos')) {
+        return [{ factura_id: 'fac-123', status: 'processed' }];
+      }
+      return [];
+    });
+
+    const ds = {
+      query: (sql: string, params?: any[]) => dsQuery(sql, params),
+      createQueryRunner: jest.fn(() => ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => qrQuery(sql, params),
+      })),
+    } as unknown as DataSource;
+
+    const svc = new ProjectInboxService(
+      ds,
+      { add: jest.fn().mockResolvedValue({}) } as any,
+      { add: ocrQueueAdd } as any,
+      { log: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    const result = await svc.approve('tenant-1', 'inbox-persisted', 'user-1', {}, '127.0.0.1');
+
+    // Project + draft approval still happen — the offer is still valuable.
+    expect(projectInserted).toBe(true);
+    expect(inboxApproved).toBe(true);
+    expect(result).toEqual({ project_id: 'proj-new' });
+
+    // JBF-001 — the already-persisted evento must NOT be re-enqueued (no duplicate/loss).
+    expect(ocrQueueAdd).not.toHaveBeenCalled();
+
+    // And it must NOT be re-pointed to 'queued' (re-processing signal).
+    const requeueCalls = qrQuery.mock.calls.filter(
+      ([s]: [string]) => typeof s === 'string' && s.includes('eventos_crudos') && s.includes("'queued'"),
+    );
+    expect(requeueCalls.length).toBe(0);
+  });
+
   it('rolls back and propagates error when reassignment DML fails (NFR-02 / SCENARIO-21)', async () => {
     const rollbackFn = jest.fn().mockResolvedValue(undefined);
 

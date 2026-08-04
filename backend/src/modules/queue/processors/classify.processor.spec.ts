@@ -355,6 +355,52 @@ describe('ClassifyProcessor · ADR-12 — resolved_project_id short-circuit', ()
     expect(persistQueueAdd).not.toHaveBeenCalled();
   });
 
+  it('resolved_project_id in STRING-form parsed_data → short-circuit STILL fires (JBF-002)', async () => {
+    // persist.processor and approve() defensively handle a JSON-string parsed_data
+    // (jsonb may arrive as a string depending on the driver/path). classify is THE gate
+    // that closes the reassign loop, so it must parse the string form the same way before
+    // reading resolved_project_id — otherwise the short-circuit silently fails to fire.
+    const resolveMock = jest.fn().mockResolvedValue(null);
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const beginProjectCreate = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+
+    const { processor } = buildProcessor({
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{
+            ocr_text: 'factura test',
+            payload: { from: '5491155550000' },
+            canal: 'whatsapp',
+            // STRING form (not an object) — mirrors the jsonb-as-string driver path.
+            parsed_data: JSON.stringify({ resolved_project_id: 'P-string' }),
+          }];
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p-other', name: 'Other' }];
+        return [];
+      },
+      resolveResult: null,
+      persistQueueAdd,
+      requestProjectClarification,
+      beginProjectCreate,
+    });
+
+    jest.spyOn(processor['projectResolver'], 'resolve').mockImplementation(resolveMock);
+
+    const job = buildJob('ec-jbf002-string');
+    await (processor as any).classifyEvento(job);
+
+    // Short-circuit must fire even though parsed_data arrived as a JSON string.
+    expect(resolveMock).not.toHaveBeenCalled();
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    expect(beginProjectCreate).not.toHaveBeenCalled();
+    expect(persistQueueAdd).toHaveBeenCalled();
+    const persistPayload = persistQueueAdd.mock.calls[0][1];
+    expect(persistPayload.classification.proyecto_id_sugerido).toBe('P-string');
+  });
+
   it('resolved_project_id null → resolve() is called normally (backward compat)', async () => {
     const resolveMock = jest.fn().mockResolvedValue({
       projectId: 'p-solo',
