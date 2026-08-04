@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { ProjectInbox } from './entities/project-inbox.entity';
 
 const QUEUE_PROJECT_INBOX_EXTRACT = 'project-inbox-extract';
 
@@ -40,6 +41,74 @@ export class ProjectInboxService {
     );
     if (!rows.length) throw new NotFoundException('Inbox item not found');
     return rows[0];
+  }
+
+  // ── WhatsApp draft creation (ADR-3) ─────────────────────────────────────────
+
+  /**
+   * Creates a project_inbox draft from a WhatsApp-initiated project-create flow.
+   *
+   * Key design decisions (ADR-3):
+   *  - status = 'READY' (approve() accepts READY; no extract pass needed).
+   *  - extracted_data.nombre_proyecto = name (the field approve() reads at L102).
+   *  - The project-inbox-extract job is NOT enqueued: prevents the IA extract from
+   *    overwriting the user-provided name.
+   *  - raw_content.created_via = 'whatsapp' for auditability.
+   *  - raw_content.pending_evento_ids links the parked comprobante to the draft.
+   *  - missing_fields set so the web form knows what to collect before activation.
+   */
+  async createDraftFromWhatsApp(
+    tenantId: string,
+    opts: {
+      name: string;
+      pendingEventoIds: string[];
+      reassignFacturaId?: string;
+      storagePath?: string;
+      mimeType?: string;
+      filename?: string;
+    },
+  ): Promise<ProjectInbox> {
+    const { name, pendingEventoIds, reassignFacturaId, storagePath, mimeType, filename } = opts;
+
+    const extractedData = {
+      nombre_proyecto: name,
+      name,
+      fecha_inicio: null,
+      fecha_fin: null,
+      presupuesto_otorgado: null,
+    };
+
+    const rawContent: Record<string, unknown> = {
+      name,
+      nombre_proyecto: name,
+      pending_evento_ids: pendingEventoIds,
+      created_via: 'whatsapp',
+      ...(reassignFacturaId && { reassign_factura_id: reassignFacturaId }),
+      ...(storagePath && { storage_path: storagePath }),
+      ...(mimeType && { mime_type: mimeType }),
+      ...(filename && { filename }),
+    };
+
+    const missingFields = ['fecha_inicio', 'fecha_fin', 'presupuesto_otorgado'];
+
+    const res = await this.ds.query(
+      `INSERT INTO project_inbox (tenant_id, source, raw_content, extracted_data, missing_fields, status)
+       VALUES ($1, 'WHATSAPP', $2::jsonb, $3::jsonb, $4::jsonb, 'READY')
+       RETURNING *`,
+      [
+        tenantId,
+        JSON.stringify(rawContent),
+        JSON.stringify(extractedData),
+        JSON.stringify(missingFields),
+      ],
+    );
+
+    // NOTE: the project-inbox-extract job is intentionally NOT enqueued here.
+    // Enqueueing it would cause the IA to overwrite extracted_data.nombre_proyecto
+    // with a generated name, corrupting the user-provided value (ADR-3).
+
+    this.logger.log(`[ProjectInbox] WhatsApp draft created: ${res[0]?.id} (tenant=${tenantId})`);
+    return res[0] as ProjectInbox;
   }
 
   async createFromUpload(

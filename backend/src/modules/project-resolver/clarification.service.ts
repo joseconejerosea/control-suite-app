@@ -4,9 +4,19 @@ import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { runWithTenant } from '../../common/tenant/tenant-context';
 import { WhatsAppSessionService, WhatsAppSession } from '../whatsapp/whatsapp-session.service';
 
+// Non-null clarification sub-object shape, derived from the session union so that
+// field mismatches (e.g. reading a field that does not exist on the union) are
+// caught by the compiler instead of silently yielding `undefined` (JAA-001/JBA-003).
+type SessionClarification = NonNullable<WhatsAppSession['clarification']>;
+import { ProjectInboxService } from '../project-inbox/project-inbox.service';
+
 const MAX_ATTEMPTS = 2;
+// Cap for user-provided project names (JAA-005/JBA-008). 200 is a sane bound well
+// within projects.name VARCHAR(255); prevents unbounded input from the WhatsApp reply.
+const PROJECT_NAME_MAX_LENGTH = 200;
 
 // Campos críticos que F1 puede pedir por WhatsApp cuando el OCR no los leyó.
 // El orden acá define el orden en que se preguntan.
@@ -31,6 +41,9 @@ interface ClarificationRequest {
   phoneNumber: string;
   projects: { id: string; name: string }[];
   language: string;
+  // [ADR-2] When true, appends the __create__ sentinel option to the list.
+  // Only set when the sender is confirmed MANAGER via canCreateProject().
+  allowCreate?: boolean;
 }
 
 interface DataClarificationRequest {
@@ -39,6 +52,14 @@ interface DataClarificationRequest {
   phoneNumber: string;
   pendingFields: string[];
   language: string;
+}
+
+interface BeginProjectCreateOpts {
+  eventoCrudoId: string;
+  clientId: string;
+  from: string;
+  lang: string;
+  pendingEventoIds?: string[];
 }
 
 @Injectable()
@@ -51,10 +72,76 @@ export class ClarificationService {
     @InjectQueue('persist') private readonly persistQueue: Queue,
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
+    private readonly projectInboxService: ProjectInboxService,
   ) {}
 
+  // ── Role gate: MANAGER-only may initiate project creation (ADR-4) ──────────
+
+  /**
+   * Returns true if the sender's phone resolves to a user with role=MANAGER
+   * and is_active=true in the tenant. Fail-closed on DB error or unmapped phone.
+   * Phone digit-normalization mirrors regexp_replace(phone, '\D', '', 'g') (JB2-013).
+   */
+  async canCreateProject(phone: string, clientId: string): Promise<boolean> {
+    try {
+      const digitPhone = phone.replace(/\D/g, '');
+      const rows = await this.ds.query(
+        `SELECT id FROM users
+         WHERE regexp_replace(phone, '\\D', '', 'g') = $1
+           AND client_id = $2
+           AND role = 'MANAGER'
+           AND is_active = true
+         LIMIT 1`,
+        [digitPhone, clientId],
+      );
+      return rows.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Language lookup for MANAGER senders (ADR-5) ───────────────────────────
+
+  /**
+   * Resolves the sender language for create-flow messages.
+   * Checks users.phone (digits) FIRST (covers MANAGER senders), then
+   * falls back to the promoters-phone join (existing behavior for promoters).
+   * The existing getUserLanguage() is NOT modified.
+   */
+  async getUserLanguageForCreate(
+    phoneNumber: string,
+    clientId: string,
+  ): Promise<'es' | 'en'> {
+    const digitPhone = phoneNumber.replace(/\D/g, '');
+
+    // Primary: check users table (MANAGER phones stored here)
+    const userRows = await this.ds.query(
+      `SELECT language FROM users
+       WHERE regexp_replace(phone, '\\D', '', 'g') = $1
+         AND client_id = $2
+       LIMIT 1`,
+      [digitPhone, clientId],
+    ).catch(() => []);
+    if (userRows[0]?.language) {
+      return userRows[0].language === 'en' ? 'en' : 'es';
+    }
+
+    // Fallback: promoters join (same as existing getUserLanguage)
+    const promoterRows = await this.ds.query(
+      `SELECT u.language FROM users u
+       JOIN promoters p ON p.client_id = u.client_id
+       WHERE p.phone = $1 AND p.client_id = $2
+       LIMIT 1`,
+      [phoneNumber, clientId],
+    ).catch(() => []);
+    const lang = promoterRows[0]?.language;
+    return lang === 'en' ? 'en' : 'es';
+  }
+
+  // ── Project clarification (Case 2 — list with optional create sentinel) ────
+
   async requestProjectClarification(req: ClarificationRequest): Promise<void> {
-    const { eventoCrudoId, clientId, phoneNumber, projects, language } = req;
+    const { eventoCrudoId, clientId, phoneNumber, projects, language, allowCreate } = req;
 
     if (!projects.length) {
       this.logger.warn(`[Clarification] No projects to clarify for evento ${eventoCrudoId}`);
@@ -62,6 +149,16 @@ export class ClarificationService {
     }
 
     const options = projects.map((p, i) => ({ id: p.id, label: `${i + 1}. ${p.name}` }));
+
+    // [ADR-2] Append the create-new sentinel when the caller confirms MANAGER role.
+    if (allowCreate) {
+      const n = options.length + 1;
+      options.push({
+        id: '__create__',
+        label: `${n}. crear nuevo proyecto / create new`,
+      });
+    }
+
     const list = options.map(o => o.label).join('\n');
 
     const message = language === 'en'
@@ -69,6 +166,7 @@ export class ClarificationService {
       : `No pude determinar a qué proyecto pertenece este documento. Responde con el número:\n\n${list}`;
 
     const session = await this.sessions.get(phoneNumber) ?? this.emptySession(clientId);
+    // [ADR-11] INVARIANT: state and clarification set atomically.
     session.state = 'awaiting_clarification';
     session.clarification = {
       eventoCrudoId,
@@ -87,6 +185,114 @@ export class ClarificationService {
     this.logger.log(`[Clarification] Sent project options to ${phoneNumber} for evento ${eventoCrudoId}`);
   }
 
+  // ── Project create flow: name collection (Case 3 + Case 2 sentinel) ────────
+
+  /**
+   * Initiates the project-name-collection sub-state.
+   * [ADR-11] Atomically sets state='awaiting_clarification' in the same session write.
+   * Called from:
+   *  - Case 3 (0 active projects, MANAGER)
+   *  - Case 2 (sender selects the __create__ sentinel)
+   */
+  async beginProjectCreate(opts: BeginProjectCreateOpts): Promise<void> {
+    const { eventoCrudoId, clientId, from, lang, pendingEventoIds } = opts;
+
+    const nameRequestMsg = lang === 'en'
+      ? 'What is the new project name? Please type it below.'
+      : '¿Cuál es el nombre del nuevo proyecto? Escribilo a continuación.';
+
+    const session = await this.sessions.get(from) ?? this.emptySession(clientId);
+    // [ADR-11] INVARIANT: state and clarification MUST be set in the same write.
+    session.state = 'awaiting_clarification';
+    session.clarification = {
+      eventoCrudoId,
+      type: 'project_create',
+      attempts: 0,
+      pendingEventoIds: pendingEventoIds ?? [eventoCrudoId],
+    };
+    await this.sessions.set(from, session);
+
+    await this.wa.sendText(from, nameRequestMsg);
+    this.logger.log(`[Clarification] beginProjectCreate: sent name-request to ${from} for evento ${eventoCrudoId}`);
+  }
+
+  // ── Handle sender's name reply ─────────────────────────────────────────────
+
+  private async handleProjectCreateResponse(
+    phoneNumber: string,
+    session: WhatsAppSession,
+    text: string,
+    clientId: string,
+  ): Promise<boolean> {
+    const clarification = session.clarification as SessionClarification;
+    // Cap to projects.name (VARCHAR(200)) and trim before storing/echoing (JAA-005/JBA-008).
+    const name = (text ?? '').trim().slice(0, PROJECT_NAME_MAX_LENGTH);
+
+    if (name.length < 3) {
+      // Invalid name
+      if (clarification.attempts < MAX_ATTEMPTS - 1) {
+        clarification.attempts++;
+        // [ADR-11] Keep state set while awaiting retry
+        session.state = 'awaiting_clarification';
+        await this.sessions.set(phoneNumber, session);
+
+        const lang = await this.getUserLanguageForCreate(phoneNumber, clientId);
+        const retryMsg = lang === 'en'
+          ? 'Please provide a project name of at least 3 characters. Last attempt.'
+          : 'Escribí un nombre de al menos 3 caracteres para el proyecto. Último intento.';
+        await this.wa.sendText(phoneNumber, retryMsg);
+        return true;
+      }
+
+      // Max attempts reached: escalate. [JAA-003] resolve language via the
+      // create-flow lookup (users.phone first) so a MANAGER isn't forced to Spanish.
+      const escLang = await this.getUserLanguageForCreate(phoneNumber, clientId);
+      await this.escalateToOperator(clarification.eventoCrudoId, phoneNumber, clientId, escLang);
+      await this.sessions.delete(phoneNumber);
+      return true;
+    }
+
+    // Valid name: park evento(s) + create draft atomically, then confirm and clear.
+    const pendingEventoIds: string[] = clarification.pendingEventoIds ?? [clarification.eventoCrudoId];
+
+    // [JBA-005/JBA-004] The name-reply path reaches here under runWithWaFrom only
+    // (webhook is @Public, no tenant GUC). The park UPDATE and the createDraftFromWhatsApp
+    // INSERT touch RLS tables (eventos_crudos, project_inbox) that read app.current_tenant.
+    // Wrap both in a single runWithTenant transaction so (a) the tenant GUC is set and
+    // (b) park + insert are atomic — a failed INSERT rolls back the park UPDATEs, so no
+    // orphaned 'parked' evento is left behind.
+    const draft = await runWithTenant(this.ds, clientId, async () => {
+      // Park all pending eventos
+      for (const eid of pendingEventoIds) {
+        await this.ds.query(
+          `UPDATE eventos_crudos SET status = 'parked', parsed_data = COALESCE(parsed_data, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+          [JSON.stringify({ parked_at: new Date().toISOString(), parked_reason: 'project_create' }), eid],
+        );
+      }
+
+      // Create the WHATSAPP draft (READY, no extract).
+      // ADR-10 sub-case 2: carry the already-persisted invoice (session field is `facturaId`).
+      return this.projectInboxService.createDraftFromWhatsApp(clientId, {
+        name,
+        pendingEventoIds,
+        ...(clarification.facturaId && { reassignFacturaId: clarification.facturaId }),
+      });
+    });
+
+    // Confirm and clear session
+    const lang = await this.getUserLanguageForCreate(phoneNumber, clientId);
+    const confirmMsg = lang === 'en'
+      ? `✅ Draft project "${name}" created. A manager will review and activate it from the web.`
+      : `✅ Borrador del proyecto "${name}" creado. Un gestor lo revisará y activará desde la web.`;
+    await this.wa.sendText(phoneNumber, confirmMsg);
+
+    await this.sessions.delete(phoneNumber);
+    this.logger.log(`[Clarification] Project draft created: ${draft.id} for evento(s) ${pendingEventoIds.join(',')}`);
+    return true;
+  }
+
+  // ── Main clarification response dispatcher ─────────────────────────────────
+
   async handleClarificationResponse(
     phoneNumber: string,
     text: string,
@@ -94,12 +300,12 @@ export class ClarificationService {
     canalId: string | null,
   ): Promise<boolean> {
     const session = await this.sessions.get(phoneNumber);
+    // [ADR-11] L97 gate: both clarification AND state must be set by the writer.
     if (!session?.clarification || session.state !== 'awaiting_clarification') {
       return false;
     }
 
     const { clarification } = session;
-    const { eventoCrudoId, options, attempts } = clarification;
 
     if (clarification.type === 'project') {
       return this.handleProjectResponse(phoneNumber, text, session, messageId, canalId);
@@ -109,8 +315,16 @@ export class ClarificationService {
       return this.handleDataResponse(phoneNumber, text, session);
     }
 
+    if (clarification.type === 'project_create') {
+      return this.handleProjectCreateResponse(phoneNumber, session, text, session.clientId!);
+    }
+
+    // project_create_offer is handled in Slice C (C05).
+    // For now, return false so non-NUEVO replies fall through to handleText (no session leak).
     return false;
   }
+
+  // ── Existing project-selection handler (unchanged) ─────────────────────────
 
   private async handleProjectResponse(
     phoneNumber: string,
@@ -143,6 +357,18 @@ export class ClarificationService {
     }
 
     const selected = options[num - 1];
+
+    // [ADR-2] If the __create__ sentinel is selected, begin the project-create flow.
+    if (selected.id === '__create__') {
+      const lang = await this.getUserLanguageForCreate(phoneNumber, session.clientId);
+      await this.beginProjectCreate({
+        eventoCrudoId,
+        clientId: session.clientId,
+        from: phoneNumber,
+        lang,
+      });
+      return true;
+    }
 
     await this.ds.query(
       `UPDATE eventos_crudos SET
@@ -180,7 +406,8 @@ export class ClarificationService {
     return true;
   }
 
-  // ── Aclaración de datos (campos del OCR mal leídos) ────────────────────────
+  // ── Data clarification (unchanged) ────────────────────────────────────────
+
   async requestDataClarification(req: DataClarificationRequest): Promise<void> {
     const { eventoCrudoId, clientId, phoneNumber, pendingFields, language } = req;
 
@@ -191,6 +418,7 @@ export class ClarificationService {
     }
 
     const session = (await this.sessions.get(phoneNumber)) ?? this.emptySession(clientId);
+    // [ADR-11] INVARIANT: state and clarification set atomically.
     session.state = 'awaiting_clarification';
     session.clientId = clientId;
     session.clarification = {
@@ -227,7 +455,6 @@ export class ClarificationService {
     const language = await this.getUserLanguage(phoneNumber, session.clientId);
     const normalized = this.normalizeFieldValue(currentField, text);
 
-    // Respuesta ilegible → reintento, y a los MAX_ATTEMPTS se escala al operador.
     if (normalized === null) {
       clarification.attempts++;
 
@@ -245,7 +472,6 @@ export class ClarificationService {
       return true;
     }
 
-    // Dato válido → guardar y avanzar la cola.
     clarification.collected = { ...(clarification.collected ?? {}), [currentField]: normalized };
     clarification.pendingFields = pending.slice(1);
     clarification.attempts = 0;
@@ -256,7 +482,6 @@ export class ClarificationService {
       return true;
     }
 
-    // Todos los campos completos → mergear en la clasificación y encolar persist.
     await this.finalizeDataClarification(clarification.eventoCrudoId, session.clientId, clarification.collected);
     await this.sessions.delete(phoneNumber);
 
@@ -312,7 +537,6 @@ export class ClarificationService {
       .catch(() => []);
     const classification = rows[0]?.ai_classification ?? {};
 
-    // monto_total tiene que ser número para el INSERT de invoices (persist.processor).
     const corrected: Record<string, any> = { ...collected };
     if (corrected.monto_total != null) corrected.monto_total = Number(corrected.monto_total);
 
@@ -344,7 +568,19 @@ export class ClarificationService {
     );
   }
 
-  private async escalateToOperator(eventoCrudoId: string, phoneNumber: string, clientId: string): Promise<void> {
+  /**
+   * Escalates an evento to manual review.
+   * @param lang optional pre-resolved language. Create-flow callers pass the
+   *   language resolved via getUserLanguageForCreate (users.phone first), so a
+   *   MANAGER sender is not forced to Spanish by the promoters-only getUserLanguage
+   *   (JAA-003). When omitted, falls back to the existing promoters-join lookup.
+   */
+  private async escalateToOperator(
+    eventoCrudoId: string,
+    phoneNumber: string,
+    clientId: string,
+    lang?: 'es' | 'en',
+  ): Promise<void> {
     await this.ds.query(
       `UPDATE eventos_crudos SET
         status = 'escalated',
@@ -359,7 +595,7 @@ export class ClarificationService {
       ],
     );
 
-    const language = await this.getUserLanguage(phoneNumber, clientId);
+    const language = lang ?? (await this.getUserLanguage(phoneNumber, clientId));
     const msg = language === 'en'
       ? 'I will forward this to an operator for manual review. Thank you.'
       : 'Voy a derivar esto a un operador para revisión manual. Gracias.';
@@ -368,6 +604,7 @@ export class ClarificationService {
     this.logger.warn(`[Clarification] Escalated evento ${eventoCrudoId} after ${MAX_ATTEMPTS} failed attempts`);
   }
 
+  // Existing getUserLanguage (promoters path — unchanged).
   private async getUserLanguage(phoneNumber: string, clientId: string): Promise<string> {
     const rows = await this.ds.query(
       `SELECT u.language FROM users u
