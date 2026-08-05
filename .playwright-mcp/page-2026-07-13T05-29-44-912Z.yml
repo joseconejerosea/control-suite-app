@@ -1,4 +1,0 @@
-- generic [active] [ref=f13e1]:
-  - heading "502 Bad Gateway" [level=1] [ref=f13e3]
-  - separator [ref=f13e4]
-  - generic [ref=f13e5]: nginx/1.24.0 (Ubuntu)
