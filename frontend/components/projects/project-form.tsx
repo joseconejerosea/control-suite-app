@@ -84,7 +84,7 @@ function buildConfig(f: FormState) {
     cliente_final: f.cliente_final || null,
     cliente_final_rut: f.cliente_rut || null,
     costo_estimado: parseCLP(f.costo_estimado) ?? null,
-    margen_proyectado: f.margen ? Number(f.margen) : null,
+    margen_proyectado: (() => { const m = parseFloat(String(f.margen).replace(",", ".").replace(/[^\d.]/g, "")); return f.margen && Number.isFinite(m) ? m : null; })(),
     locales: f.locales.filter((l) => l.nombre.trim() || l.direccion.trim()),
     perfil_personas: f.personas
       .filter((p) => p.rol.trim())
@@ -112,10 +112,18 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
   const [aiInboxId, setAiInboxId] = useState<string | null>(null);
   const [aiMsg, setAiMsg] = useState("");
 
+  // Config crudo del proyecto en edición, para preservar la procedencia (source, inbox_id,
+  // notas_ia, ia_extracted) al guardar en lugar de aplastarla con buildConfig.
+  const [rawConfig, setRawConfig] = useState<any>(null);
+
   useEffect(() => {
     if (mode === "edit" && projectId) {
       api.get<any>(`/projects/${projectId}`)
-        .then((r) => setForm(fromProject(r?.data ?? r)))
+        .then((r) => {
+          const proj = r?.data ?? r;
+          setForm(fromProject(proj));
+          setRawConfig(proj?.config ?? null);
+        })
         .catch(() => setError("No se pudo cargar el proyecto."))
         .finally(() => setLoading(false));
     }
@@ -138,19 +146,42 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
 
       const MAX_POLLS = 25, DELAY_MS = 1500;
       let sawProcessing = false;
+      // El job de extracción reintenta (attempts:3) y vuelve el estado a PENDING entre intentos.
+      // Exigimos 2 PENDING post-processing consecutivos antes de declarar fallo, para no
+      // confundir un reintento en curso con una extracción fallida.
+      let pendingAfterProcessing = 0;
       for (let i = 0; i < MAX_POLLS; i++) {
         await new Promise((r) => setTimeout(r, DELAY_MS));
         const item = await api.get<any>(`/v1/app/project-inbox/${inboxId}`);
         const data = item?.data ?? item;
         if (data?.status === "PROCESSING") sawProcessing = true;
         if (data?.status === "READY") {
-          setForm((prev) => ({ ...prev, ...fromExtracted(data?.extracted_data ?? {}) }));
+          // La extracción tardía no debe pisar lo que el usuario ya escribió: solo rellena
+          // campos vacíos (string vacío o array vacío), nunca sobrescribe valores no vacíos.
+          const extracted = fromExtracted(data?.extracted_data ?? {});
+          setForm((prev) => {
+            const merged: FormState = { ...prev };
+            (Object.keys(extracted) as (keyof FormState)[]).forEach((k) => {
+              const cur = prev[k];
+              const isNonEmptyString = typeof cur === "string" && cur.trim() !== "";
+              const isNonEmptyArray = Array.isArray(cur) && cur.length > 0;
+              if (!isNonEmptyString && !isNonEmptyArray) {
+                (merged as any)[k] = (extracted as any)[k];
+              }
+            });
+            return merged;
+          });
           setAiMsg("Datos extraídos. Revisá y completá lo que falte antes de crear.");
           return;
         }
         if (data?.status === "PENDING" && sawProcessing) {
-          setAiMsg("No se pudieron extraer los datos automáticamente. Completá los campos a mano.");
-          return;
+          pendingAfterProcessing++;
+          if (pendingAfterProcessing >= 2) {
+            setAiMsg("No se pudieron extraer los datos automáticamente. Completá los campos a mano.");
+            return;
+          }
+        } else {
+          pendingAfterProcessing = 0;
         }
       }
       setAiMsg("La extracción está tardando. Podés completar los campos a mano y crear el proyecto.");
@@ -167,10 +198,12 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
     setSaving(true);
     setError("");
     try {
-      const config = buildConfig(form);
+      const rich = buildConfig(form);
       if (mode === "create" && aiInboxId) {
         // Vino de un documento → approve() del inbox (crea locations desde locales).
-        await api.put(`/v1/app/project-inbox/${aiInboxId}/approve`, {
+        // approve() ignora objectives/status (fija status='active'): hacemos un PATCH de
+        // seguimiento para no perder esos campos.
+        const res = await api.put<any>(`/v1/app/project-inbox/${aiInboxId}/approve`, {
           nombre_proyecto: form.name || undefined,
           brief: form.brief || undefined,
           fecha_inicio: form.start_date || undefined,
@@ -179,12 +212,24 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
           cliente_final: form.cliente_final || undefined,
           cliente_final_rut: form.cliente_rut || undefined,
           costo_estimado: parseCLP(form.costo_estimado),
-          margen_proyectado: form.margen ? Number(form.margen) : undefined,
-          locales: config.locales,
-          perfil_personas: config.perfil_personas,
-          hitos: config.hitos,
+          margen_proyectado: rich.margen_proyectado ?? undefined,
+          locales: rich.locales,
+          perfil_personas: rich.perfil_personas,
+          hitos: rich.hitos,
         });
+        const pid = (res as any)?.data?.project_id ?? (res as any)?.project_id;
+        if (pid) {
+          // .catch para que un seguimiento fallido no bloquee la navegación.
+          await api.patch(`/projects/${pid}`, { objectives: form.objectives || undefined, status: form.status }).catch(() => {});
+        }
       } else {
+        // Preserva la procedencia del config existente (source, inbox_id, notas_ia). Si el
+        // proyecto vino de IA (tiene ia_extracted), los campos ricos editados van DENTRO de
+        // ia_extracted para que fromProject los relea; si no, van planos.
+        const cfgObj = (rawConfig && typeof rawConfig === "object") ? rawConfig : {};
+        const config = ("ia_extracted" in cfgObj)
+          ? { ...cfgObj, ia_extracted: { ...(cfgObj.ia_extracted ?? {}), ...rich } }
+          : { ...cfgObj, ...rich };
         const body = {
           name: form.name,
           description: form.brief || undefined,
@@ -247,6 +292,12 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
               style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: aiFile ? "var(--red, #C8202C)" : "var(--secondary)", color: aiFile ? "#fff" : "var(--muted-foreground)", cursor: aiFile && !aiLoading ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
               {aiLoading ? "Procesando…" : "Procesar con IA"}
             </button>
+            {(aiFile || aiInboxId) && (
+              <button onClick={() => { setAiFile(null); setAiInboxId(null); setAiMsg(""); if (fileRef.current) fileRef.current.value = ""; }}
+                style={{ padding: "8px 12px", borderRadius: 8, border: "none", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>
+                Quitar documento
+              </button>
+            )}
           </div>
           {aiMsg && <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 10 }}>{aiMsg}</div>}
         </div>
