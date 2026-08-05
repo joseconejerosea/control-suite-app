@@ -1,0 +1,24 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - heading "Configuración" [level=1] [ref=f2e7]
+    - generic [ref=f2e8]:
+      - button "Cuenta" [ref=f2e9] [cursor=pointer]
+      - button "Equipo" [ref=f2e14] [cursor=pointer]
+      - button "Operaciones" [ref=f2e20] [cursor=pointer]
+      - button "Integraciones" [ref=f2e24] [cursor=pointer]
+    - generic [ref=f2e29]:
+      - generic [ref=f2e30]: Información de la empresa
+      - generic [ref=f2e31]:
+        - generic [ref=f2e32]:
+          - generic [ref=f2e33]: Nombre empresa
+          - textbox "Control Suite Agency" [ref=f2e34]
+        - generic [ref=f2e35]:
+          - generic [ref=f2e36]: RUT
+          - textbox "76.123.456-7" [ref=f2e37]
+      - generic [ref=f2e38]:
+        - generic [ref=f2e39]: Plan actual
+        - generic [ref=f2e40]:
+          - generic [ref=f2e41]: basic
+          - generic [ref=f2e42]: Contacta a soporte para cambiar de plan
+      - button "Guardar cambios" [ref=f2e44] [cursor=pointer]
+  - alert [ref=f2e49]

@@ -1,10 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
 import {
-  Settings, Users, Warehouse, Link2, Building2,
-  Save, Plus, Trash2, Eye, EyeOff, Copy, RefreshCw,
+  Settings, Warehouse, Link2, Building2,
+  Save, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
 import GmailConnect from "@/components/integrations/gmail-connect";
+import AppShell from "@/components/layout/app-shell";
 
 // NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
 const API = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/api`;
@@ -19,14 +20,9 @@ function getUser() {
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 const TABS = [
   { id: "cuenta",       label: "Cuenta",       icon: Building2 },
-  { id: "equipo",       label: "Equipo",        icon: Users },
   { id: "operaciones",  label: "Operaciones",   icon: Warehouse },
   { id: "integraciones",label: "Integraciones", icon: Link2 },
 ];
-
-// ── Permissions matrix ────────────────────────────────────────────────────────
-const FLUJOS = ["F1 Documentos", "F2 Rendiciones", "F3 Inventario", "F4 Proyectos", "F5 Terreno"];
-const ACCIONES = ["ver", "crear", "aprobar", "eliminar"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -37,10 +33,6 @@ export default function ConfigPage() {
 
   // Cuenta
   const [cuenta, setCuenta] = useState({ nombre: "", rut: "", plan: "", email_contacto: "" });
-
-  // Equipo
-  const [equipo, setEquipo]   = useState<any[]>([]);
-  const [permisos, setPermisos] = useState<Record<string, Record<string, boolean>>>({});
 
   // Operaciones
   const [bodegas, setBodegas]   = useState<any[]>([]);
@@ -74,12 +66,6 @@ export default function ConfigPage() {
           }));
         }
       }).catch(() => {});
-
-    // Equipo (collaborators)
-    fetch(`${API}/collaborators`, { headers: h })
-      .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setEquipo(d); })
-      .catch(() => {});
 
     // Bodegas
     fetch(`${API}/v1/app/bodegas`, { headers: h })
@@ -174,73 +160,6 @@ export default function ConfigPage() {
           <button onClick={saveCuenta} disabled={saving}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             <Save size={14} /> {saving ? "Guardando..." : "Guardar cambios"}
-          </button>
-        </div>
-      </>)}
-    </div>
-  );
-
-  // EQUIPO
-  const tabEquipo = (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {card(<>
-        {sectionTitle("Miembros del equipo")}
-        {equipo.length === 0
-          ? <div style={{ color: "var(--muted-foreground)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin colaboradores registrados. Agrégalos desde Colaboradores.</div>
-          : equipo.map(m => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600 }}>
-                {(m.name?.[0] ?? "U").toUpperCase()}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{m.email} · {m.phone}</div>
-              </div>
-              {badge(m.role ?? "Staff")}
-            </div>
-          ))
-        }
-      </>)}
-
-      {card(<>
-        {sectionTitle("Matriz de permisos (persona × flujo × acción)")}
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--muted-foreground)", fontWeight: 500 }}>Flujo</th>
-                {ACCIONES.map(a => (
-                  <th key={a} style={{ textAlign: "center", padding: "6px 8px", color: "var(--muted-foreground)", fontWeight: 500, textTransform: "capitalize" }}>{a}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {FLUJOS.map(flujo => (
-                <tr key={flujo} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "8px 8px", fontWeight: 500 }}>{flujo}</td>
-                  {ACCIONES.map(accion => {
-                    const key = `${flujo}-${accion}`;
-                    const checked = permisos[flujo]?.[accion] ?? true;
-                    return (
-                      <td key={accion} style={{ textAlign: "center", padding: "8px" }}>
-                        <input type="checkbox" checked={checked}
-                          onChange={e => setPermisos(prev => ({
-                            ...prev,
-                            [flujo]: { ...(prev[flujo] ?? {}), [accion]: e.target.checked }
-                          }))}
-                          style={{ width: 14, height: 14, cursor: "pointer" }} />
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={() => showToast("Permisos guardados ✓")}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            <Save size={14} /> Guardar permisos
           </button>
         </div>
       </>)}
@@ -342,14 +261,14 @@ export default function ConfigPage() {
 
   const tabContent: Record<string, React.ReactNode> = {
     cuenta:        tabCuenta,
-    equipo:        tabEquipo,
     operaciones:   tabOperaciones,
     integraciones: tabIntegraciones,
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: "1.5rem", maxWidth: 820, margin: "0 auto" }}>
+    <AppShell>
+    <div style={{ maxWidth: 820, margin: "0 auto" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
         <Settings size={20} />
@@ -384,5 +303,6 @@ export default function ConfigPage() {
         </div>
       )}
     </div>
+    </AppShell>
   );
 }
