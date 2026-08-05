@@ -1,0 +1,81 @@
+- generic [active] [ref=f5e1]:
+  - generic [ref=f5e2]:
+    - complementary [ref=f5e3]:
+      - generic [ref=f5e8]:
+        - generic [ref=f5e9]: Control Suite
+        - generic [ref=f5e10]: Operations Platform
+      - navigation [ref=f5e11]:
+        - generic [ref=f5e12]:
+          - generic [ref=f5e13]: General
+          - link "Dashboard" [ref=f5e14] [cursor=pointer]:
+            - /url: /client/dashboard
+        - generic [ref=f5e21]:
+          - generic [ref=f5e22]: Operación
+          - link "Reportes Internos" [ref=f5e23] [cursor=pointer]:
+            - /url: /client/reportes
+          - link "Documentos por revisar" [ref=f5e28] [cursor=pointer]:
+            - /url: /client/documentos-revisar
+          - link "Inventario POP" [ref=f5e32] [cursor=pointer]:
+            - /url: /client/inventario
+          - link "Rendiciones" [ref=f5e38] [cursor=pointer]:
+            - /url: /client/rendiciones
+          - link "Terreno" [ref=f5e43] [cursor=pointer]:
+            - /url: /client/terreno
+          - link "Calendario" [ref=f5e51] [cursor=pointer]:
+            - /url: /client/calendario
+          - link "Proyectos" [ref=f5e55] [cursor=pointer]:
+            - /url: /client/projects
+          - link "Campañas" [ref=f5e59] [cursor=pointer]:
+            - /url: /client/campaigns
+          - link "Ubicaciones" [ref=f5e64] [cursor=pointer]:
+            - /url: /client/locations
+          - link "Staff" [ref=f5e69] [cursor=pointer]:
+            - /url: /client/promoters
+          - link "Documentos" [ref=f5e76] [cursor=pointer]:
+            - /url: /client/documents
+          - link "Colaboradores" [ref=f5e81] [cursor=pointer]:
+            - /url: /client/collaborators
+        - generic [ref=f5e87]:
+          - generic [ref=f5e88]: Configuración
+          - link "Usuarios" [ref=f5e89] [cursor=pointer]:
+            - /url: /client/usuarios
+          - link "Configuración" [ref=f5e95] [cursor=pointer]:
+            - /url: /client/config
+          - link "Equivalencias OCR" [ref=f5e102] [cursor=pointer]:
+            - /url: /client/equivalencias
+        - generic [ref=f5e109]:
+          - generic [ref=f5e110]: IA
+          - link "Control Mind" [ref=f5e111] [cursor=pointer]:
+            - /url: /client/mind
+      - button "Sign out" [ref=f5e122] [cursor=pointer]
+    - generic [ref=f5e123]:
+      - banner [ref=f5e124]:
+        - heading "Control Suite" [level=1] [ref=f5e125]
+        - generic [ref=f5e126]:
+          - button [ref=f5e127] [cursor=pointer]
+          - generic [ref=f5e132]: CS
+          - button "Sign out" [ref=f5e133] [cursor=pointer]
+      - main [ref=f5e137]:
+        - generic [ref=f5e138]:
+          - heading "Configuración" [level=1] [ref=f5e143]
+          - generic [ref=f5e144]:
+            - button "Cuenta" [ref=f5e145] [cursor=pointer]
+            - button "Operaciones" [ref=f5e150] [cursor=pointer]
+            - button "Integraciones" [ref=f5e154] [cursor=pointer]
+          - generic [ref=f5e159]:
+            - generic [ref=f5e160]: Información de la empresa
+            - generic [ref=f5e161]:
+              - generic [ref=f5e162]:
+                - generic [ref=f5e163]: Nombre empresa
+                - textbox "Control Suite Agency" [ref=f5e164]
+              - generic [ref=f5e165]:
+                - generic [ref=f5e166]: RUT
+                - textbox "76.123.456-7" [ref=f5e167]
+            - generic [ref=f5e168]:
+              - generic [ref=f5e169]: Plan actual
+              - generic [ref=f5e170]:
+                - generic [ref=f5e171]: basic
+                - generic [ref=f5e172]: Contacta a soporte para cambiar de plan
+            - button "Guardar cambios" [ref=f5e174] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f5e184] [cursor=pointer]
+  - alert [ref=f5e188]
