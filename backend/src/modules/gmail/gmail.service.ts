@@ -222,6 +222,17 @@ export class GmailService {
 
     for (const msg of messages) {
       try {
+        // Anti-reprocesamiento: si este correo ya tuvo un desenlace terminal en un
+        // poll anterior (factura, feedback o descartado), no lo volvemos a tocar.
+        // Sin esto, un correo que no es factura se re-lee y se le corre IA en cada
+        // poll durante los 15 min de la ventana. Ver migración 061.
+        const seen = await this.dataSource.query(
+          `SELECT 1 FROM gmail_processed_emails WHERE client_id = $1 AND gmail_id = $2 LIMIT 1`,
+          [clientId, msg.id],
+        );
+        if (seen.length) continue;
+
+        // Compat: facturas guardadas ANTES de la tabla de procesados (sin marca).
         const exists = await this.dataSource.query(
           `SELECT 1 FROM invoices WHERE raw_payload->>'gmail_id' = $1 AND client_id = $2 LIMIT 1`,
           [msg.id, clientId],
@@ -241,23 +252,23 @@ export class GmailService {
         const from        = hdr('From');
         const body        = this.extractBody(full.data.payload);
 
-        const imageAttachments = this.findImageAttachments(full.data.payload);
+        const attachments = this.findInvoiceAttachments(full.data.payload);
         let invoice: any = null;
 
-        if (imageAttachments.length > 0) {
-          this.logger.log(`[GmailService] Found ${imageAttachments.length} image(s) in email: "${subject}"`);
-          for (const att of imageAttachments) {
+        if (attachments.length > 0) {
+          this.logger.log(`[GmailService] Found ${attachments.length} adjunto(s) (imagen/PDF) in email: "${subject}"`);
+          for (const att of attachments) {
             try {
               const attRes = await gmail.users.messages.attachments.get({
                 userId: 'me',
                 messageId: msg.id!,
                 id: att.attachmentId!,
               });
-              const imageData = (attRes.data.data ?? '')
+              const fileData = (attRes.data.data ?? '')
                 .replace(/-/g, '+')
                 .replace(/_/g, '/');
               const mimeType = att.mimeType ?? 'image/jpeg';
-              invoice = await this.extractInvoiceFromImage(imageData, mimeType);
+              invoice = await this.extractInvoiceFromDocument(fileData, mimeType);
               if (invoice?.is_invoice) break;
             } catch (err) {
               this.logger.warn(`[GmailService] Failed to process attachment: ${err}`);
@@ -269,6 +280,10 @@ export class GmailService {
           const text = `Subject: ${subject}\nFrom: ${from}\n\n${body}`;
           invoice = await this.extractInvoiceFromText(text);
         }
+
+        // Desenlace del correo. Solo marcamos como procesado cuando llegamos a un
+        // estado TERMINAL; si la IA falló (null) dejamos sin marca para reintentar.
+        let outcome: 'invoice' | 'feedback' | 'ignored' | null = null;
 
         if (invoice?.is_invoice) {
           const today = new Date().toISOString().split('T')[0];
@@ -283,6 +298,7 @@ export class GmailService {
             { subject, from, body: body.slice(0, 500), gmail_id: msg.id },
           );
           saved++;
+          outcome = 'invoice';
           this.logger.log(`[GmailService] Invoice saved from email: "${subject}" — vendor: ${invoice.vendor_name}, amount: ${invoice.amount}`);
         } else {
           // No es factura → intentamos tratarlo como feedback del cliente (respuesta
@@ -295,9 +311,21 @@ export class GmailService {
           });
           if (created) {
             saved++;
-          } else {
+            outcome = 'feedback';
+          } else if (invoice !== null || (!attachments.length && !body && !subject)) {
+            // Terminal: o la IA respondió definitivamente "no es factura", o el correo
+            // no tenía nada analizable. En ambos casos no hay más que hacer → marcar.
+            outcome = 'ignored';
             this.logger.log(`[GmailService] Not an invoice / no match: "${subject}"`);
+          } else {
+            // La IA se intentó pero falló (red / respuesta no parseable) → NO marcar,
+            // se reintenta en el próximo poll mientras siga en la ventana de 15 min.
+            this.logger.warn(`[GmailService] AI extraction failed — will retry: "${subject}"`);
           }
+        }
+
+        if (outcome && msg.id) {
+          await this.markEmailProcessed(clientId, msg.id, outcome);
         }
       } catch (err) {
         this.logger.error(`[GmailService] Error processing email ${msg.id}: ${err}`);
@@ -452,14 +480,21 @@ export class GmailService {
     return `${asunto}${cuerpo}`.trim().slice(0, 3900);
   }
 
-  private findImageAttachments(payload: any): Array<{ attachmentId: string; mimeType: string }> {
+  /**
+   * Adjuntos que pueden contener una factura: imágenes y PDFs. Ambos formatos los
+   * banca la Messages API de Anthropic (imagen → bloque `image`, PDF → `document`).
+   */
+  private findInvoiceAttachments(payload: any): Array<{ attachmentId: string; mimeType: string }> {
     const results: Array<{ attachmentId: string; mimeType: string }> = [];
     if (!payload) return results;
+
+    const isInvoiceMime = (mime: string) =>
+      mime.startsWith('image/') || mime === 'application/pdf';
 
     const scanPart = (part: any) => {
       if (!part) return;
       const mime = part.mimeType ?? '';
-      if (mime.startsWith('image/') && part.body?.attachmentId) {
+      if (isInvoiceMime(mime) && part.body?.attachmentId) {
         results.push({ attachmentId: part.body.attachmentId, mimeType: mime });
       }
       if (part.parts) {
@@ -471,6 +506,27 @@ export class GmailService {
     return results;
   }
 
+  /**
+   * Marca un correo como ya procesado para este tenant (anti-reprocesamiento del
+   * poll). Idempotente. Va bajo runWithTenant porque pollInbox corre en runAsSystem
+   * y el INSERT debe quedar scopeado al tenant para satisfacer el WITH CHECK de RLS
+   * (mismo patrón que la creación de incidencia en tryCreateIncidenciaFromFeedback).
+   */
+  private async markEmailProcessed(
+    clientId: string,
+    gmailId: string,
+    outcome: 'invoice' | 'feedback' | 'ignored',
+  ): Promise<void> {
+    await runWithTenant(this.dataSource, clientId, () =>
+      this.dataSource.query(
+        `INSERT INTO gmail_processed_emails (client_id, gmail_id, outcome)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (client_id, gmail_id) DO NOTHING`,
+        [clientId, gmailId, outcome],
+      ),
+    ).catch((e) => this.logger.error(`[GmailService] markEmailProcessed error: ${e}`));
+  }
+
   private parseAIResponse(raw: string): any {
     const cleaned = raw
       .replace(/```json\n?/g, '')
@@ -479,7 +535,12 @@ export class GmailService {
     return JSON.parse(cleaned);
   }
 
-  private async extractInvoiceFromImage(base64Data: string, mimeType: string): Promise<any> {
+  private async extractInvoiceFromDocument(base64Data: string, mimeType: string): Promise<any> {
+    // Bloque de contenido según el tipo de adjunto: imágenes → `image`; PDF →
+    // `document`. Los dos usan source base64 en la Messages API de Anthropic.
+    const mediaBlock = mimeType === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+      : { type: 'image',    source: { type: 'base64', media_type: mimeType,          data: base64Data } };
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -494,8 +555,8 @@ export class GmailService {
           messages: [{
             role: 'user',
             content: [
-              { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Data } },
-              { type: 'text', text: `Eres un extractor de facturas y boletas chilenas. Analiza esta imagen.
+              mediaBlock,
+              { type: 'text', text: `Eres un extractor de facturas y boletas chilenas. Analiza este documento.
 
 REGLAS:
 - Si NO es factura/boleta/recibo → {"is_invoice": false}
@@ -526,7 +587,7 @@ Output SOLO JSON valido, sin markdown:
       const data = await response.json() as any;
       return this.parseAIResponse(data?.content?.[0]?.text ?? '');
     } catch (e) {
-      this.logger.error(`[GmailService] extractInvoiceFromImage error: ${e}`);
+      this.logger.error(`[GmailService] extractInvoiceFromDocument error: ${e}`);
       return null;
     }
   }
