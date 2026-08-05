@@ -64,7 +64,10 @@ export default function UsuariosPage() {
     try {
       const r = await fetch(`${API}/v1/app/admin/users?client_id=${clientId}`, { headers: authHeaders() });
       const d = await r.json();
-      setUsers(Array.isArray(d) ? d : []);
+      // El ResponseInterceptor global envuelve las respuestas en { data, timestamp, path },
+      // así que la lista viene en d.data — no es un array pelado. (Bug detectado en dev:
+      // sin este desenvuelto la tabla mostraba "Sin usuarios" con usuarios reales cargados.)
+      setUsers(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : []));
     } catch { /* best-effort */ }
     finally { setLoading(false); }
   }, [clientId]);
