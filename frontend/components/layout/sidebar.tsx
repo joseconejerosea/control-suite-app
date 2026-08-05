@@ -30,6 +30,7 @@ const CLIENT_SECTIONS = [
     { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
   ]},
   { label: "Configuración", items: [
+    { label: "Usuarios",          icon: UserCircle,  href: "/client/usuarios" },
     { label: "Configuración",     icon: Settings,    href: "/client/config" },
     { label: "Equivalencias OCR", icon: GitCompare,  href: "/client/equivalencias" },
   ]},
