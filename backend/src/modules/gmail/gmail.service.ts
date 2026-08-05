@@ -252,7 +252,17 @@ export class GmailService {
         const from        = hdr('From');
         const body        = this.extractBody(full.data.payload);
 
-        const attachments = this.findInvoiceAttachments(full.data.payload);
+        // Gate de facturas: solo el STAFF del tenant (users/collaborators/promoters
+        // con este email) puede inyectar comprobantes por correo. Corre ANTES de la
+        // IA → un remitente no autorizado no gasta tokens de extracción. El feedback
+        // del cliente NO se gatea acá: tiene su propia puerta en matchReporte
+        // (token / report_recipients), porque el cliente final no es staff.
+        const senderEmail = this.extractEmailAddress(from).toLowerCase();
+        const senderIsStaff = await this.isAuthorizedInvoiceSender(clientId, senderEmail);
+
+        const attachments = senderIsStaff
+          ? this.findInvoiceAttachments(full.data.payload)
+          : [];
         let invoice: any = null;
 
         if (attachments.length > 0) {
@@ -276,10 +286,15 @@ export class GmailService {
           }
         }
 
-        if (!invoice?.is_invoice && (body || subject)) {
+        if (senderIsStaff && !invoice?.is_invoice && (body || subject)) {
           const text = `Subject: ${subject}\nFrom: ${from}\n\n${body}`;
           invoice = await this.extractInvoiceFromText(text);
         }
+
+        // ¿Se intentó extracción con IA? Solo si el remitente es staff y había algo
+        // que analizar. Distingue un "no factura" terminal (marcar) de un fallo
+        // transitorio de la IA (reintentar).
+        const aiAttempted = senderIsStaff && (attachments.length > 0 || !!(body || subject));
 
         // Desenlace del correo. Solo marcamos como procesado cuando llegamos a un
         // estado TERMINAL; si la IA falló (null) dejamos sin marca para reintentar.
@@ -312,9 +327,10 @@ export class GmailService {
           if (created) {
             saved++;
             outcome = 'feedback';
-          } else if (invoice !== null || (!attachments.length && !body && !subject)) {
-            // Terminal: o la IA respondió definitivamente "no es factura", o el correo
-            // no tenía nada analizable. En ambos casos no hay más que hacer → marcar.
+          } else if (!aiAttempted || invoice !== null) {
+            // Terminal: no se intentó IA (remitente no-staff o correo vacío) o la IA
+            // respondió definitivamente "no es factura", y no hubo match de feedback.
+            // No hay nada más que hacer → marcar para no reprocesar.
             outcome = 'ignored';
             this.logger.log(`[GmailService] Not an invoice / no match: "${subject}"`);
           } else {
@@ -525,6 +541,36 @@ export class GmailService {
         [clientId, gmailId, outcome],
       ),
     ).catch((e) => this.logger.error(`[GmailService] markEmailProcessed error: ${e}`));
+  }
+
+  /**
+   * Gate de facturas por email: ¿el remitente es STAFF de este tenant? Autorizados =
+   * users / collaborators / promoters del cliente con este email (activos). Espeja el
+   * gate de WhatsApp (isAuthorizedSender) pero por correo. Corre ANTES de la IA, así
+   * un remitente desconocido no gasta tokens ni puede inyectar facturas falsas.
+   * Fail-closed: ante error de DB, NO autoriza.
+   */
+  private async isAuthorizedInvoiceSender(clientId: string, email: string): Promise<boolean> {
+    const normalized = (email ?? '').trim().toLowerCase();
+    if (!normalized) return false;
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT 1 FROM users
+           WHERE client_id = $1 AND is_active = true AND lower(email) = $2
+         UNION
+         SELECT 1 FROM collaborators
+           WHERE client_id = $1 AND is_active = true AND lower(email) = $2
+         UNION
+         SELECT 1 FROM promoters
+           WHERE client_id = $1 AND status = 'active' AND lower(email) = $2
+         LIMIT 1`,
+        [clientId, normalized],
+      );
+      return rows.length > 0;
+    } catch (e) {
+      this.logger.error(`[GmailService] isAuthorizedInvoiceSender error: ${e}`);
+      return false; // fail-closed
+    }
   }
 
   private parseAIResponse(raw: string): any {
