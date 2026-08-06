@@ -52,6 +52,15 @@ class AprobarProyectoDto {
   @IsOptional() @IsString() comentario?: string;
 }
 
+class ConvocarAnfitrionesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ConvocatoriaItemDto)
+  items: ConvocatoriaItemDto[];
+
+  @IsOptional() @IsString() comentario?: string;
+}
+
 class ReportRecipientsDto {
   @IsArray()
   @IsEmail({}, { each: true })
@@ -186,5 +195,26 @@ export class ProjectsController {
     @Body() dto: ResponderConvocatoriaDto,
   ) {
     return this.service.updateConvocatoria(req.user.client_id, id, convId, dto.estado);
+  }
+
+  // ── F4: Convocatoria de anfitriones — sugerencia IA + confirmar/enviar ────
+  //   GET  /projects/:id/sugerir-convocatoria → promotores sugeridos por perfil IA
+  //   POST /projects/:id/convocar-anfitriones  → aprueba + crea turnos + envía WA
+
+  @Get(':id/sugerir-convocatoria')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  sugerirConvocatoria(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.sugerirConvocatoria(req.user.client_id, id);
+  }
+
+  @Post(':id/convocar-anfitriones')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'SEND_CONVOCATION', entity: 'Project' })
+  convocarAnfitriones(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConvocarAnfitrionesDto,
+  ) {
+    return this.service.convocarAnfitriones(req.user.client_id, id, req.user.sub, dto.items, dto.comentario);
   }
 }
