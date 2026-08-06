@@ -164,6 +164,23 @@ describe('EvidenceIntakeService', () => {
     expect(store[PHONE]?.evidenceIntake?.activacionId).toBe('act-1');
   });
 
+  it('falls back to a user (Manager/Operador/Supervisor) when neither promoter nor collaborator', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('FROM promoters')) return Promise.resolve([]);
+      if (sql.includes('FROM collaborators')) return Promise.resolve([]);
+      if (sql.includes('FROM users')) return Promise.resolve([{ id: 'user-1' }]);
+      if (sql.includes('FROM activations')) return Promise.resolve([{ id: 'act-1', activation_date: '2026-07-29' }]);
+      if (sql.includes('INSERT INTO checkins')) return Promise.resolve([{ id: 'chk-1' }]);
+      return Promise.resolve([]);
+    });
+
+    await svc.start({ eventoCrudoId: 'evt-user', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'evidence/u.jpg' });
+
+    expect(store[PHONE]?.evidenceIntake?.personaId).toBe('user-1');
+    expect(store[PHONE]?.evidenceIntake?.step).toBe('observacion');
+  });
+
   it('the observacion step inserts a checkin with foto_key + persona_id + observacion and flow F5_EVID', async () => {
     store[PHONE] = {
       state: 'awaiting_evidence', projects: [], base64: '', mimeType: '', caption: '',
