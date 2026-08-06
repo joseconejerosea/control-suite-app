@@ -47,24 +47,34 @@ export class EvidenceIntakeService {
   }): Promise<void> {
     const digits = normalizePhone(opts.phoneNumber);
 
-    // Resolver el promotor por dígitos del teléfono. El `from` de Meta llega 549...
+    // Resolver la persona por dígitos del teléfono. El `from` de Meta llega 549...
     // y el phone guardado tiene '+', espacios, etc. Todo dentro de runWithTenant (RLS).
-    const promoterRows = await runWithTenant(this.ds, opts.clientId, () =>
-      this.ds.query(
+    // Buscamos primero en promotores y, si no está, en colaboradores: los
+    // coordinadores/supervisores (collaborators) también hacen presencia en terreno
+    // y mandan su foto de la activación. checkins.persona_id NO tiene FK a promoters,
+    // así que el id de cualquiera de las dos tablas sirve como persona del check-in.
+    const personaId: string | null = await runWithTenant(this.ds, opts.clientId, async () => {
+      const prom = await this.ds.query(
         `SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
         [opts.clientId, digits],
-      ),
-    ).catch(() => []);
+      );
+      if (prom.length) return prom[0].id;
 
-    if (!promoterRows.length) {
+      const colab = await this.ds.query(
+        `SELECT id FROM collaborators WHERE client_id=$1 AND is_active=true AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
+        [opts.clientId, digits],
+      );
+      return colab.length ? colab[0].id : null;
+    }).catch(() => null);
+
+    if (!personaId) {
       await this.escalate(
         opts.eventoCrudoId, opts.phoneNumber, opts.clientId,
-        'No te encuentro registrado como promotor para asociar esta evidencia. Lo derivo a un operador.',
-        'evidence_unknown_promoter',
+        'No te encuentro registrado como promotor ni colaborador para asociar esta evidencia. Lo derivo a un operador.',
+        'evidence_unknown_persona',
       );
       return;
     }
-    const personaId = promoterRows[0].id;
 
     // Resolución de activación en dos niveles:
     //   Nivel 1 — activaciones activas asignadas al promotor (promoter_id).
