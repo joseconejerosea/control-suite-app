@@ -9,10 +9,24 @@ on:
       - 'frontend/**'
       - 'docker-compose.yml'
       - 'nginx/**'
+  # Manual trigger: fires via the Actions API (not a git webhook), so it still
+  # works when push/PR webhooks are throttled (e.g. GitHub Actions incidents).
+  # Only visible in the UI when this workflow lives on the repo's default branch.
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - main
 
 jobs:
   deploy:
-    if: github.event.pull_request.merged == true
+    # Run on a merged PR OR a manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
@@ -28,7 +42,11 @@ jobs:
             # final y la CI reportaba éxito). pipefail: falla si falla cualquier
             # comando de un pipe, no solo el último.
             set -eo pipefail
-            if [ "${{ github.base_ref }}" = "main" ]; then
+            # On a merged PR, github.base_ref is the target branch (dev|main).
+            # On a manual workflow_dispatch it is empty, so fall back to the
+            # chosen `environment` input. This keeps both trigger paths working.
+            TARGET_REF="${{ github.event.inputs.environment || github.base_ref }}"
+            if [ "$TARGET_REF" = "main" ]; then
               DIR="$HOME/entornos/control-suite-prod"
               PORT=3002
               NODE_ENV=production
@@ -85,7 +103,7 @@ jobs:
             fi
 
             cd "$DIR"
-            git pull origin ${{ github.base_ref }}
+            git pull origin "$TARGET_REF"
 
             cat > backend/.env << EOF
             DB_HOST=$DB_HOST
