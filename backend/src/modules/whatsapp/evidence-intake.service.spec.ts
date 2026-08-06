@@ -144,6 +144,26 @@ describe('EvidenceIntakeService', () => {
     expect(msg).toContain('registrado');
   });
 
+  it('falls back to a collaborator (coordinador) when the sender is NOT a promoter', async () => {
+    // El remitente es colaborador (ej. role_label='coordinator'), no promotor: el
+    // gate del bot lo autoriza y la evidencia debe atribuirse a su id (checkins.persona_id
+    // no tiene FK). Sin promotor → se busca en collaborators → se encuentra colab-1.
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('FROM promoters')) return Promise.resolve([]);
+      if (sql.includes('FROM collaborators')) return Promise.resolve([{ id: 'colab-1' }]);
+      if (sql.includes('FROM activations')) return Promise.resolve([{ id: 'act-1', activation_date: '2026-07-29' }]);
+      if (sql.includes('INSERT INTO checkins')) return Promise.resolve([{ id: 'chk-1' }]);
+      return Promise.resolve([]);
+    });
+
+    await svc.start({ eventoCrudoId: 'evt-colab', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'evidence/c.jpg' });
+
+    expect(store[PHONE]?.evidenceIntake?.personaId).toBe('colab-1');
+    expect(store[PHONE]?.evidenceIntake?.step).toBe('observacion');
+    expect(store[PHONE]?.evidenceIntake?.activacionId).toBe('act-1');
+  });
+
   it('the observacion step inserts a checkin with foto_key + persona_id + observacion and flow F5_EVID', async () => {
     store[PHONE] = {
       state: 'awaiting_evidence', projects: [], base64: '', mimeType: '', caption: '',
