@@ -26,4 +26,9 @@ export class Promoter extends TenantBaseEntity {
     default: 'active',
   })
   status!: 'active' | 'inactive' | 'suspended';
+
+  // Rol/perfil del anfitrión (promotora, anfitriona, supervisor, …). Nullable:
+  // se usa para la auto-sugerencia de convocatoria (match contra perfil_personas).
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  rol!: string | null;
 }

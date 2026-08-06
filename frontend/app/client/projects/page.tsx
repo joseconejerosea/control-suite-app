@@ -93,8 +93,21 @@ export default function ProjectsPage() {
                   <td className="px-4 py-3 text-sm" style={{ color: "var(--muted-foreground)" }}>{fmtDate(p.end_date)}</td>
                   <td className="px-4 py-3 text-sm font-semibold">{fmtMoney(p.budget)}</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => router.push(`/client/projects/editar?id=${p.id}`)} className="text-xs px-2 py-1 rounded"
-                      style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Editar</button>
+                    <div className="flex gap-2">
+                      <button onClick={() => router.push(`/client/projects/editar?id=${p.id}`)} className="text-xs px-2 py-1 rounded"
+                        style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Editar</button>
+                      {(() => {
+                        const terminal = p.status === "closed" || p.status === "archived";
+                        return (
+                          <button
+                            onClick={() => { if (!terminal) router.push(`/client/projects/convocar?id=${p.id}`); }}
+                            disabled={terminal}
+                            title={terminal ? "Proyecto cerrado/archivado: no se puede convocar" : undefined}
+                            className="text-xs px-2 py-1 rounded"
+                            style={{ background: "var(--red-dim, rgba(200,32,44,0.12))", color: "var(--red-light, #f87171)", border: "none", cursor: terminal ? "default" : "pointer", opacity: terminal ? 0.4 : 1 }}>Convocar</button>
+                        );
+                      })()}
+                    </div>
                   </td>
                 </tr>
               ))}

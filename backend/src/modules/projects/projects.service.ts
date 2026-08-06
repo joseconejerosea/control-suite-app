@@ -255,7 +255,7 @@ export class ProjectsService {
     const equipo = await this.dataSource.query(
       `SELECT pe.id, pe.persona_id, pe.rol, pe.costo_dia, pe.dias_asignados,
               pe.fecha_inicio, pe.fecha_fin, pe.activo,
-              p.name AS persona_nombre, p.phone AS persona_phone
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre, p.phone AS persona_phone
          FROM proyecto_equipo pe
          LEFT JOIN promoters p ON p.id = pe.persona_id
         WHERE pe.client_id=$1 AND pe.proyecto_id=$2 AND pe.activo=true
@@ -268,7 +268,7 @@ export class ProjectsService {
       `SELECT c.id, c.persona_id, c.dia, c.estado,
               c.local_nombre, c.local_direccion,
               c.mensaje_enviado_at, c.respuesta_at,
-              p.name AS persona_nombre
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre
          FROM convocatorias c
          LEFT JOIN promoters p ON p.id = c.persona_id
         WHERE c.client_id=$1 AND c.proyecto_id=$2
@@ -348,7 +348,7 @@ export class ProjectsService {
     for (const item of items) {
       // Obtener teléfono del promotor
       const [promotor] = await this.dataSource.query(
-        `SELECT name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
+        `SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), name) AS name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
         [item.persona_id, clientId],
       ).catch(() => []);
 
@@ -366,30 +366,123 @@ export class ProjectsService {
         continue;
       }
 
-      // Enviar WA
-      const ok = await this.wa.enviarConvocatoria({
-        telefono:       promotor.phone,
-        nombrePromotor: promotor.name,
-        proyecto:       proyecto.name,
-        fecha:          item.dia,
-        local:          item.local_nombre    ?? 'Por confirmar',
-        direccion:      item.local_direccion ?? 'Por confirmar',
-      });
+      // El request completo corre dentro de una única tx runWithTenant (commit al
+      // resolver, rollback al lanzar). El envío de WhatsApp es I/O irreversible: si
+      // un throw del send (o del UPDATE siguiente) se propagara, haría rollback de la
+      // aprobación + turnos ya confirmados en la tx DESPUÉS de que WhatsApps de ítems
+      // previos ya se entregaron. Contenemos el throw como error por-ítem para que no
+      // tumbe la transacción entera. (Desacoplar el envío a una cola es un refactor F4
+      // aparte, fuera de alcance.)
+      try {
+        // Enviar WA
+        const ok = await this.wa.enviarConvocatoria({
+          telefono:       promotor.phone,
+          nombrePromotor: promotor.name,
+          proyecto:       proyecto.name,
+          fecha:          item.dia,
+          local:          item.local_nombre    ?? 'Por confirmar',
+          direccion:      item.local_direccion ?? 'Por confirmar',
+        });
 
-      // Actualizar convocatoria en DB
-      await this.dataSource.query(
-        `UPDATE convocatorias
-         SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
-         WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
-        [clientId, projectId, item.persona_id, item.dia],
-      ).catch(() => {});
+        // Actualizar convocatoria en DB
+        await this.dataSource.query(
+          `UPDATE convocatorias
+           SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
+           WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
+          [clientId, projectId, item.persona_id, item.dia],
+        ).catch(() => {});
 
-      if (ok) { enviados++; } else { errores++; }
-      detalle.push({ persona_id: item.persona_id, dia: item.dia, ok });
+        if (ok) { enviados++; } else { errores++; }
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok });
+      } catch (err: any) {
+        errores++;
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: err?.message ?? 'Error al enviar' });
+      }
     }
 
     this.logger.log(`[F4] Convocatoria enviada proyecto=${projectId} enviados=${enviados} errores=${errores}`);
     return { enviados, errores, detalle };
+  }
+
+  // ── F4: Sugerencia de anfitriones desde el perfil que extrajo la IA ────────
+  // Lee config.ia_extracted.perfil_personas (rol + cantidad) y locales, y propone
+  // promotores ACTIVOS con teléfono que matcheen el rol (nullable → match parcial,
+  // case-insensitive). No aprueba ni envía: solo sugiere para revisión humana.
+  async sugerirConvocatoria(clientId: string, projectId: string): Promise<{
+    items: unknown[]; disponibles: unknown[]; dia: string | null; locales: unknown[]; perfiles: unknown[];
+  }> {
+    const [proj] = await this.dataSource.query(
+      `SELECT config, start_date FROM projects WHERE id=$1 AND client_id=$2`,
+      [projectId, clientId],
+    );
+    if (!proj) throw new NotFoundException('Proyecto no encontrado');
+
+    const cfg = typeof proj.config === 'string' ? JSON.parse(proj.config) : (proj.config ?? {});
+    const ia = cfg?.ia_extracted ?? cfg ?? {};
+    const perfiles: any[] = Array.isArray(ia.perfil_personas) ? ia.perfil_personas : [];
+    const locales: any[]  = Array.isArray(ia.locales) ? ia.locales : [];
+    const dia = proj.start_date ? String(proj.start_date).slice(0, 10) : null;
+    const primerLocal = locales[0] ?? null;
+
+    const disponibles = await this.dataSource.query(
+      `SELECT id, COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), name) AS name, phone, rol FROM promoters
+        WHERE client_id=$1 AND status='active' AND phone IS NOT NULL
+        ORDER BY name ASC`,
+      [clientId],
+    );
+
+    const usados = new Set<string>();
+    const items: any[] = [];
+    for (const perfil of perfiles) {
+      const rolPerfil = String(perfil?.rol ?? '').trim().toLowerCase();
+      const cantidad  = Number(perfil?.cantidad) > 0 ? Number(perfil.cantidad) : 1;
+      const matches = (disponibles as any[]).filter(
+        (p) => !usados.has(p.id) && (!rolPerfil || String(p.rol ?? '').toLowerCase().includes(rolPerfil)),
+      );
+      for (const p of matches.slice(0, cantidad)) {
+        usados.add(p.id);
+        items.push({
+          persona_id: p.id, name: p.name, phone: p.phone, rol: p.rol ?? perfil?.rol ?? null,
+          dia, local_nombre: primerLocal?.nombre ?? null, local_direccion: primerLocal?.direccion ?? null,
+        });
+      }
+    }
+
+    return { items, disponibles, dia, locales, perfiles };
+  }
+
+  // ── F4: Confirmar + enviar convocatoria a los anfitriones ──────────────────
+  // El click de "Aprobar y enviar" ES la aprobación humana (gate F4). Reusa
+  // aprobarProyecto (setea el gate) → asignarTurno (crea las convocatorias) →
+  // enviarConvocatoria (manda WhatsApp). Nada nuevo en el envío.
+  async convocarAnfitriones(
+    clientId: string, projectId: string, userId: string,
+    items: ConvocatoriaItem[], comentario?: string,
+  ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    if (!items?.length) throw new BadRequestException('No hay anfitriones para convocar');
+
+    await this.aprobarProyecto(clientId, projectId, userId, comentario);
+
+    // Crear convocatorias (persona × día) antes de enviar. Agrupamos por
+    // persona + local: agrupar sólo por persona_id perdía el local por-día
+    // (tomaba el del primer item y lo aplicaba a todos sus días). Cada
+    // combinación distinta (persona, local) obtiene su propio asignarTurno
+    // con sus propios días y su propio local.
+    const porPersonaLocal = new Map<string, { persona_id: string; dias: string[]; local_nombre?: string; local_direccion?: string }>();
+    for (const it of items) {
+      const key = `${it.persona_id}|${it.local_nombre ?? ''}|${it.local_direccion ?? ''}`;
+      const prev = porPersonaLocal.get(key) ?? { persona_id: it.persona_id, dias: [], local_nombre: it.local_nombre, local_direccion: it.local_direccion };
+      if (it.dia) prev.dias.push(it.dia);
+      porPersonaLocal.set(key, prev);
+    }
+    for (const info of porPersonaLocal.values()) {
+      if (!info.dias.length) continue;
+      await this.asignarTurno(clientId, projectId, {
+        persona_id: info.persona_id, dias: info.dias, local_nombre: info.local_nombre, local_direccion: info.local_direccion,
+      });
+    }
+
+    return this.enviarConvocatoria(clientId, projectId, items, 'ai');
   }
 
   async getConvocatorias(clientId: string, projectId: string): Promise<unknown[]> {
@@ -398,7 +491,7 @@ export class ProjectsService {
               c.local_nombre, c.local_direccion,
               c.mensaje_enviado_at, c.respuesta_texto, c.respuesta_at,
               c.reenvio_count,
-              p.name AS persona_nombre, p.phone AS persona_phone
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre, p.phone AS persona_phone
          FROM convocatorias c
          LEFT JOIN promoters p ON p.id = c.persona_id
         WHERE c.client_id=$1 AND c.proyecto_id=$2
@@ -444,7 +537,7 @@ export class ProjectsService {
     clientId: string, projectId: string, convId: string,
   ): Promise<void> {
     const [row] = await this.dataSource.query(
-      `SELECT c.dia, pr.name AS proyecto_nombre, p.name AS persona_nombre
+      `SELECT c.dia, pr.name AS proyecto_nombre, COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre
          FROM convocatorias c
          LEFT JOIN projects  pr ON pr.id = c.proyecto_id
          LEFT JOIN promoters p  ON p.id  = c.persona_id
