@@ -8,9 +8,9 @@ import { Plus, X, Package, Warehouse, ArrowLeftRight } from "lucide-react";
 const TABS = ["Bodega", "SKUs", "Movimientos", "Devoluciones"];
 
 const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
-  ok:      { background: "rgba(42,157,92,0.12)",  color: "#34b96e" },
+  ok:      { background: "color-mix(in srgb, var(--success) 12%, transparent)",  color: "var(--success)" },
   bajo:    { background: "rgba(245,158,11,0.12)", color: "#f59e0b" },
-  critico: { background: "rgba(200,32,44,0.12)",  color: "#e8353f" },
+  critico: { background: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)" },
 };
 
 function getEstado(cantidad: number): string {
@@ -49,11 +49,11 @@ function BodegaModal({ onClose, onDone, bodegas }: { onClose: () => void; onDone
         <div className="p-5 space-y-3">
           <div><label style={labelStyle}>Nombre *</label><input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Bodega Central" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Dirección *</label><input value={form.direccion} onChange={e => setForm(f => ({ ...f, direccion: e.target.value }))} placeholder="Av. Ejemplo 123, Santiago" style={fieldStyle} /></div>
-          {error && <div style={{ color: "#e8353f", fontSize: 12 }}>{error}</div>}
+          {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
           <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--red)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--primary)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
             {saving ? "Guardando..." : "Crear bodega"}
           </button>
         </div>
@@ -88,11 +88,11 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
           <div><label style={labelStyle}>Nombre *</label><input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Afiche A3" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Codigo SKU</label><input value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} placeholder="MAT-001" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Stock minimo</label><input type="number" value={form.min_stock} onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))} style={fieldStyle} /></div>
-          {error && <div style={{ color: "#e8353f", fontSize: 12 }}>{error}</div>}
+          {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
           <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !form.nombre.trim()} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: form.nombre.trim() ? "var(--red)" : "var(--secondary)", color: form.nombre.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={save} disabled={saving || !form.nombre.trim()} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: form.nombre.trim() ? "var(--primary)" : "var(--secondary)", color: form.nombre.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
             {saving ? "Guardando..." : "Crear SKU"}
           </button>
         </div>
@@ -187,11 +187,11 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
           </div>
           <div><label style={labelStyle}>Cantidad *</label><input type="number" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} placeholder="0" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Observacion</label><input value={form.observacion} onChange={e => setForm(f => ({ ...f, observacion: e.target.value }))} placeholder="Motivo del movimiento..." style={fieldStyle} /></div>
-          {error && <div style={{ color: "#e8353f", fontSize: 12 }}>{error}</div>}
+          {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
           <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--red)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--primary)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
             {saving ? "Guardando..." : "Registrar movimiento"}
           </button>
         </div>
@@ -274,7 +274,7 @@ export default function InventarioPage() {
               <Package size={13} /> + SKU
             </button>
             <button onClick={() => setShowBodegaModal(true)}
-              style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+              style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
               <Warehouse size={13} /> + Bodega
             </button>
           </div>
@@ -282,8 +282,8 @@ export default function InventarioPage() {
 
         {/* Alertas stock */}
         {alertas.length > 0 && (
-          <div style={{ marginBottom: 16, padding: "10px 16px", borderRadius: 10, background: "rgba(200,32,44,0.08)", border: "1px solid rgba(200,32,44,0.25)", fontSize: 13 }}>
-            <span style={{ fontWeight: 600, color: "#e8353f" }}>Alertas stock bajo:</span>
+          <div style={{ marginBottom: 16, padding: "10px 16px", borderRadius: 10, background: "color-mix(in srgb, var(--danger) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 25%, transparent)", fontSize: 13 }}>
+            <span style={{ fontWeight: 600, color: "var(--danger)" }}>Alertas stock bajo:</span>
             <span style={{ color: "var(--muted-foreground)", marginLeft: 8 }}>{alertas.map((a: any) => a.nombre ?? a.sku_nombre).join(" · ")}</span>
           </div>
         )}
@@ -292,7 +292,7 @@ export default function InventarioPage() {
         <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
           {TABS.map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ padding: "10px 18px", fontSize: 14, fontWeight: activeTab === tab ? 600 : 400, borderBottom: activeTab === tab ? "2px solid var(--red)" : "2px solid transparent", color: activeTab === tab ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: -1 }}>
+              style={{ padding: "10px 18px", fontSize: 14, fontWeight: activeTab === tab ? 600 : 400, borderBottom: activeTab === tab ? "2px solid var(--primary)" : "2px solid transparent", color: activeTab === tab ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: -1 }}>
               {tab}
             </button>
           ))}
@@ -353,7 +353,7 @@ export default function InventarioPage() {
                         <td style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500 }}>{s.nombre}</td>
                         <td style={{ padding: "10px 16px", fontSize: 13 }}>{s.min_stock ?? 5}</td>
                         <td style={{ padding: "10px 16px" }}>
-                          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: s.active !== false ? "rgba(42,157,92,0.12)" : "rgba(100,116,139,0.12)", color: s.active !== false ? "#34b96e" : "#94a3b8" }}>
+                          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: s.active !== false ? "color-mix(in srgb, var(--success) 12%, transparent)" : "rgba(100,116,139,0.12)", color: s.active !== false ? "var(--success)" : "#94a3b8" }}>
                             {s.active !== false ? "Activo" : "Inactivo"}
                           </span>
                         </td>
@@ -410,19 +410,19 @@ export default function InventarioPage() {
                 const isOverdue = hours >= 24;
                 const items = typeof d.items === "string" ? JSON.parse(d.items) : (d.items ?? []);
                 const classLabel = d.photo_classification === "looks_correct"
-                  ? { text: "Coincide", bg: "rgba(42,157,92,0.12)", color: "#34b96e" }
+                  ? { text: "Coincide", bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" }
                   : d.photo_classification === "does_not_match"
-                  ? { text: "No coincide", bg: "rgba(200,32,44,0.12)", color: "#e8353f" }
+                  ? { text: "No coincide", bg: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" }
                   : { text: "Sin foto", bg: "rgba(100,116,139,0.12)", color: "#94a3b8" };
 
                 return (
-                  <div key={d.id} className="rounded-xl border p-4" style={{ borderColor: isOverdue ? "rgba(200,32,44,0.4)" : "var(--border)", background: "var(--card)" }}>
+                  <div key={d.id} className="rounded-xl border p-4" style={{ borderColor: isOverdue ? "color-mix(in srgb, var(--danger) 40%, transparent)" : "var(--border)", background: "var(--card)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
                         <div className="font-semibold text-sm">{d.project_name}</div>
                         <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>
                           Persona: {d.persona_id?.slice(0, 8)}... · Solicitado hace {hours}h
-                          {isOverdue && <span style={{ color: "#e8353f", fontWeight: 600, marginLeft: 8 }}>VENCIDO</span>}
+                          {isOverdue && <span style={{ color: "var(--danger)", fontWeight: 600, marginLeft: 8 }}>VENCIDO</span>}
                         </div>
                         <div className="mt-2 text-xs space-y-0.5">
                           {items.map((it: any, i: number) => (
@@ -445,12 +445,12 @@ export default function InventarioPage() {
                                 try { await api.put(`/v1/app/stock/returns/${d.id}/confirm`); fetchAll(); } catch (e) { console.error(e); }
                                 finally { setActionLoading(false); }
                               }}
-                              style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: "rgba(42,157,92,0.15)", color: "#34b96e", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
                               Confirmar
                             </button>
                             <button
                               onClick={() => { setRejectModal(d.id); setRejectReason(""); }}
-                              style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: "rgba(200,32,44,0.15)", color: "#e8353f", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: "color-mix(in srgb, var(--danger) 15%, transparent)", color: "var(--danger)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
                               Rechazar
                             </button>
                           </div>
@@ -480,7 +480,7 @@ export default function InventarioPage() {
                     try { await api.put(`/v1/app/stock/returns/${rejectModal}/reject`, { reason: rejectReason }); setRejectModal(null); fetchAll(); } catch (e) { console.error(e); }
                     finally { setActionLoading(false); }
                   }}
-                  style={{ flex: 2, padding: 9, borderRadius: 8, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
+                  style={{ flex: 2, padding: 9, borderRadius: 8, border: "none", background: "var(--danger)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
                   {actionLoading ? "..." : "Rechazar"}
                 </button>
               </div>

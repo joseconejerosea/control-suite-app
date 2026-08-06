@@ -45,13 +45,13 @@ const STATUSES = [
 
 function statusColor(s: string) {
   const map: Record<string, { bg: string; fg: string }> = {
-    processed:     { bg: "rgba(42,157,92,0.15)", fg: "#34b96e" },
-    approved:      { bg: "rgba(42,157,92,0.15)", fg: "#34b96e" },
+    processed:     { bg: "color-mix(in srgb, var(--success) 12%, transparent)", fg: "var(--success)" },
+    approved:      { bg: "color-mix(in srgb, var(--success) 12%, transparent)", fg: "var(--success)" },
     low_confidence:{ bg: "rgba(245,158,11,0.15)", fg: "#f59e0b" },
     unclassified:  { bg: "var(--secondary)", fg: "var(--muted-foreground)" },
-    rejected:      { bg: "rgba(200,32,44,0.12)", fg: "#e8353f" },
-    escalated:     { bg: "rgba(139,92,246,0.15)", fg: "#a78bfa" },
-    queued:        { bg: "rgba(59,130,246,0.15)", fg: "#60a5fa" },
+    rejected:      { bg: "rgba(79,70,229,0.10)", fg: "var(--danger)" },
+    escalated:     { bg: "rgba(139,92,246,0.15)", fg: "var(--primary)" },
+    queued:        { bg: "rgba(79,70,229,0.10)", fg: "var(--primary)" },
   };
   return map[s] ?? { bg: "var(--secondary)", fg: "var(--muted-foreground)" };
 }
@@ -182,7 +182,7 @@ export default function DocumentosRevisarPage() {
             <h1 style={{ fontSize: 20, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
               Documentos F1
               {pagination.total > 0 && (
-                <span style={{ fontSize: 12, background: "rgba(99,102,241,0.15)", color: "#818cf8", padding: "2px 10px", borderRadius: 20, fontWeight: 600 }}>
+                <span style={{ fontSize: 12, background: "rgba(79,70,229,0.10)", color: "var(--primary)", padding: "2px 10px", borderRadius: 20, fontWeight: 600 }}>
                   {pagination.total}
                 </span>
               )}
@@ -193,7 +193,7 @@ export default function DocumentosRevisarPage() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setShowFilters(!showFilters)}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: `1px solid ${hasActiveFilters ? "#6366f1" : "var(--border)"}`, background: hasActiveFilters ? "rgba(99,102,241,0.1)" : "var(--secondary)", color: hasActiveFilters ? "#818cf8" : "var(--muted-foreground)", cursor: "pointer", fontSize: 13 }}>
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: `1px solid ${hasActiveFilters ? "var(--primary)" : "var(--border)"}`, background: hasActiveFilters ? "rgba(79,70,229,0.10)" : "var(--secondary)", color: hasActiveFilters ? "var(--primary)" : "var(--muted-foreground)", cursor: "pointer", fontSize: 13 }}>
               <Filter size={12} /> Filtros {hasActiveFilters && `(${Object.values(filters).filter(Boolean).length})`}
             </button>
             <button onClick={() => load(pagination.page)}
@@ -205,7 +205,7 @@ export default function DocumentosRevisarPage() {
 
         {/* Message */}
         {message && (
-          <div style={{ marginBottom: 16, padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 500, background: message.type === "success" ? "rgba(42,157,92,0.15)" : "rgba(200,32,44,0.15)", color: message.type === "success" ? "#34b96e" : "#e8353f" }}>
+          <div style={{ marginBottom: 16, padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 500, background: message.type === "success" ? "color-mix(in srgb, var(--success) 12%, transparent)" : "color-mix(in srgb, var(--danger) 12%, transparent)", color: message.type === "success" ? "var(--success)" : "var(--danger)" }}>
             {message.text}
           </div>
         )}
@@ -259,7 +259,7 @@ export default function DocumentosRevisarPage() {
               </div>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 8, gridColumn: "span 2" }}>
                 <button onClick={() => load(1)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 8, border: "none", background: "#6366f1", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
                   <Search size={12} /> Buscar
                 </button>
                 <button onClick={() => { setFilters({ project_id: "", tipo: "", status: "", confidence_min: "", confidence_max: "", date_from: "", date_to: "" }); }}
@@ -296,7 +296,7 @@ export default function DocumentosRevisarPage() {
                 const sc = statusColor(doc.status);
                 return (
                   <div key={doc.id} onClick={() => selectDoc(doc)}
-                    style={{ borderRadius: 12, border: `1px solid ${isSelected ? "#6366f1" : "var(--border)"}`, background: isSelected ? "rgba(99,102,241,0.08)" : "var(--card)", padding: 14, cursor: "pointer", boxShadow: isSelected ? "0 0 0 2px rgba(99,102,241,0.2)" : "none", transition: "all 0.15s" }}>
+                    style={{ borderRadius: 12, border: `1px solid ${isSelected ? "var(--primary)" : "var(--border)"}`, background: isSelected ? "rgba(79,70,229,0.10)" : "var(--card)", padding: 14, cursor: "pointer", boxShadow: isSelected ? "0 0 0 2px rgba(79,70,229,0.20)" : "none", transition: "all 0.15s" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -306,7 +306,7 @@ export default function DocumentosRevisarPage() {
                           {cl?.tipo?.replace(/_/g, " ") ?? "—"} · {cl?.datos_extraidos?.fecha_emision ?? new Date(doc.created_at).toLocaleDateString("es-CL")}
                         </div>
                         {doc.project_name && (
-                          <div style={{ fontSize: 10, color: "#818cf8", marginTop: 3 }}>{doc.project_name}</div>
+                          <div style={{ fontSize: 10, color: "var(--primary)", marginTop: 3 }}>{doc.project_name}</div>
                         )}
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
@@ -380,7 +380,7 @@ export default function DocumentosRevisarPage() {
                             <img src={selected.signed_url} alt="Documento" style={{ maxWidth: "100%", maxHeight: 300, objectFit: "contain" }} />
                           ) : (
                             <a href={selected.signed_url} target="_blank" rel="noopener noreferrer"
-                              style={{ display: "flex", alignItems: "center", gap: 8, padding: 24, color: "#60a5fa", fontSize: 13 }}>
+                              style={{ display: "flex", alignItems: "center", gap: 8, padding: 24, color: "var(--primary)", fontSize: 13 }}>
                               <FileText size={20} /> Abrir documento
                             </a>
                           )}
@@ -410,8 +410,8 @@ export default function DocumentosRevisarPage() {
 
                     {/* Resolver info */}
                     {classif?.resolver_method && (
-                      <div style={{ marginBottom: 16, padding: 10, borderRadius: 8, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#818cf8", marginBottom: 4 }}>Resolucion de proyecto</div>
+                      <div style={{ marginBottom: 16, padding: 10, borderRadius: 8, background: "rgba(79,70,229,0.10)", border: "1px solid rgba(79,70,229,0.20)" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--primary)", marginBottom: 4 }}>Resolucion de proyecto</div>
                         <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                           Metodo: <strong>{classif.resolver_method}</strong> · Confianza: <strong>{classif.resolver_confidence ? Math.round(classif.resolver_confidence * 100) + "%" : "—"}</strong>
                         </div>
@@ -435,7 +435,7 @@ export default function DocumentosRevisarPage() {
                     {/* Clarification history */}
                     {selected.parsed_data?.clarification_requested_at && (
                       <div style={{ marginBottom: 16, padding: 10, borderRadius: 8, background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#a78bfa", marginBottom: 4 }}>Historial de clarificacion</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--primary)", marginBottom: 4 }}>Historial de clarificacion</div>
                         <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                           Solicitada: {new Date(selected.parsed_data.clarification_requested_at).toLocaleString("es-CL")}
                           {selected.parsed_data.clarification_resolved_at && (
@@ -452,12 +452,12 @@ export default function DocumentosRevisarPage() {
                     {!["approved", "rejected"].includes(selected.status) && (
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={handleApprove} disabled={actionLoading === "approve"}
-                          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 14px", borderRadius: 8, border: "none", background: "#34b96e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: actionLoading === "approve" ? 0.6 : 1 }}>
+                          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 14px", borderRadius: 8, border: "none", background: "var(--success)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: actionLoading === "approve" ? 0.6 : 1 }}>
                           <CheckCircle size={14} />
                           {actionLoading === "approve" ? "Aprobando..." : "Aprobar"}
                         </button>
                         <button onClick={() => setShowRejectModal(true)}
-                          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 14px", borderRadius: 8, border: "none", background: "rgba(200,32,44,0.12)", color: "#e8353f", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 14px", borderRadius: 8, border: "none", background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
                           <XCircle size={14} /> Rechazar
                         </button>
                       </div>
@@ -465,13 +465,13 @@ export default function DocumentosRevisarPage() {
 
                     {/* Already approved/rejected */}
                     {selected.status === "approved" && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, background: "rgba(42,157,92,0.1)", color: "#34b96e", fontSize: 13, fontWeight: 600 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", fontSize: 13, fontWeight: 600 }}>
                         <CheckCircle size={14} /> Aprobado {selected.parsed_data?.approved_at ? `el ${new Date(selected.parsed_data.approved_at).toLocaleDateString("es-CL")}` : ""}
                       </div>
                     )}
                     {selected.status === "rejected" && (
-                      <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(200,32,44,0.08)" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e8353f", fontSize: 13, fontWeight: 600 }}>
+                      <div style={{ padding: "10px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--danger) 8%, transparent)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--danger)", fontSize: 13, fontWeight: 600 }}>
                           <XCircle size={14} /> Rechazado
                         </div>
                         {selected.parsed_data?.rejection_reason && (
@@ -506,7 +506,7 @@ export default function DocumentosRevisarPage() {
                 Cancelar
               </button>
               <button onClick={handleReject} disabled={actionLoading === "reject"}
-                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#e8353f", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: actionLoading === "reject" ? 0.6 : 1 }}>
+                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "var(--danger)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: actionLoading === "reject" ? 0.6 : 1 }}>
                 {actionLoading === "reject" ? "Rechazando..." : "Confirmar rechazo"}
               </button>
             </div>

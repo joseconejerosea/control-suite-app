@@ -5,9 +5,9 @@ import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 
 const STATUS_STYLE: Record<string, { background: string; color: string }> = {
-  active:      { background: "rgba(42,157,92,0.12)",  color: "#34b96e" },
-  onboarding:  { background: "rgba(59,130,246,0.12)", color: "#60a5fa" },
-  suspended:   { background: "rgba(200,32,44,0.12)",  color: "#e8353f" },
+  active:      { background: "color-mix(in srgb, var(--success) 12%, transparent)",  color: "var(--success)" },
+  onboarding:  { background: "color-mix(in srgb, var(--info) 12%, transparent)", color: "var(--info)" },
+  suspended:   { background: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)" },
   inactive:    { background: "rgba(100,116,139,0.12)", color: "#94a3b8" },
 };
 
@@ -50,9 +50,9 @@ export default function AdminClientesPage() {
         <div className="grid grid-cols-4 gap-3 mb-6">
           {[
             { label: "Total", value: clients.length, color: "var(--foreground)" },
-            { label: "Activos", value: clients.filter((c: any) => c.status === "active").length, color: "#34b96e" },
-            { label: "Onboarding", value: clients.filter((c: any) => c.status === "onboarding").length, color: "#60a5fa" },
-            { label: "Suspendidos", value: clients.filter((c: any) => c.status === "suspended").length, color: "#e8353f" },
+            { label: "Activos", value: clients.filter((c: any) => c.status === "active").length, color: "var(--success)" },
+            { label: "Onboarding", value: clients.filter((c: any) => c.status === "onboarding").length, color: "var(--info)" },
+            { label: "Suspendidos", value: clients.filter((c: any) => c.status === "suspended").length, color: "var(--danger)" },
           ].map((kpi) => (
             <div key={kpi.label} className="rounded-xl p-4 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="text-2xl font-bold" style={{ color: kpi.color }}>{kpi.value}</div>
@@ -101,8 +101,8 @@ export default function AdminClientesPage() {
                       <button onClick={() => toggleStatus(c.id, c.status)}
                         className="text-xs px-2 py-1 rounded"
                         style={{
-                          background: c.status === "active" ? "rgba(200,32,44,0.12)" : "rgba(42,157,92,0.12)",
-                          color: c.status === "active" ? "#e8353f" : "#34b96e",
+                          background: c.status === "active" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "color-mix(in srgb, var(--success) 12%, transparent)",
+                          color: c.status === "active" ? "var(--danger)" : "var(--success)",
                           border: "none", cursor: "pointer",
                         }}>
                         {c.status === "active" ? "Suspender" : "Activar"}

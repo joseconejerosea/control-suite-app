@@ -5,15 +5,15 @@ import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 
 const PRIORIDAD_STYLE: Record<string, { background: string; color: string }> = {
-  alta:  { background: "rgba(200,32,44,0.12)",   color: "#e8353f" },
+  alta:  { background: "rgba(79,70,229,0.10)",   color: "var(--primary)" },
   media: { background: "rgba(245,158,11,0.12)",  color: "#f59e0b" },
-  baja:  { background: "rgba(42,157,92,0.12)",   color: "#34b96e" },
+  baja:  { background: "color-mix(in srgb, var(--success) 12%, transparent)",   color: "var(--success)" },
 };
 
 const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
-  abierto:    { background: "rgba(59,130,246,0.12)",  color: "#60a5fa" },
-  en_proceso: { background: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
-  cerrado:    { background: "rgba(42,157,92,0.12)",   color: "#34b96e" },
+  abierto:    { background: "color-mix(in srgb, var(--info) 12%, transparent)",  color: "var(--info)" },
+  en_proceso: { background: "rgba(79,70,229,0.12)",  color: "var(--primary)" },
+  cerrado:    { background: "color-mix(in srgb, var(--success) 12%, transparent)",   color: "var(--success)" },
 };
 
 export default function AdminTicketsPage() {
@@ -61,7 +61,7 @@ export default function AdminTicketsPage() {
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
               Tickets de Soporte
-              {abiertos > 0 && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: "var(--red)", color: "#fff" }}>{abiertos}</span>}
+              {abiertos > 0 && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{abiertos}</span>}
             </h1>
             <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Solicitudes de soporte de clientes</p>
           </div>
@@ -69,7 +69,7 @@ export default function AdminTicketsPage() {
             {["", "abierto", "en_proceso", "cerrado"].map(f => (
               <button key={f} onClick={() => setFiltro(f)}
                 className="text-xs px-3 py-1.5 rounded-lg capitalize"
-                style={{ background: filtro === f ? "var(--red-dim)" : "var(--secondary)", color: filtro === f ? "var(--red-light)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
+                style={{ background: filtro === f ? "rgba(79,70,229,0.10)" : "var(--secondary)", color: filtro === f ? "var(--primary)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
                 {f || "Todos"}
               </button>
             ))}
@@ -128,8 +128,8 @@ export default function AdminTicketsPage() {
                 <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--secondary)" }}>{selected.descripcion}</div>
 
                 {selected.respuesta && (
-                  <div className="rounded-lg p-3 mb-4" style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
-                    <div className="text-xs font-semibold mb-1" style={{ color: "#818cf8" }}>Respuesta enviada</div>
+                  <div className="rounded-lg p-3 mb-4" style={{ background: "rgba(79,70,229,0.10)", border: "1px solid rgba(79,70,229,0.20)" }}>
+                    <div className="text-xs font-semibold mb-1" style={{ color: "var(--primary)" }}>Respuesta enviada</div>
                     <div className="text-sm">{selected.respuesta}</div>
                   </div>
                 )}
@@ -140,7 +140,7 @@ export default function AdminTicketsPage() {
                     {["abierto", "en_proceso", "cerrado"].map(s => (
                       <button key={s} onClick={() => cambiarEstado(selected.id, s)}
                         className="text-xs px-3 py-1.5 rounded-lg capitalize"
-                        style={{ background: selected.estado === s ? "var(--red-dim)" : "var(--secondary)", color: selected.estado === s ? "var(--red-light)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
+                        style={{ background: selected.estado === s ? "rgba(79,70,229,0.10)" : "var(--secondary)", color: selected.estado === s ? "var(--primary)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
                         {s.replace("_", " ")}
                       </button>
                     ))}
@@ -152,7 +152,7 @@ export default function AdminTicketsPage() {
                   <textarea value={reply} onChange={e => setReply(e.target.value)} placeholder="Escribe tu respuesta..."
                     style={{ width: "100%", height: 100, borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, padding: 12, resize: "none", outline: "none", boxSizing: "border-box" as any }} />
                   <button onClick={enviarRespuesta} disabled={sending || !reply.trim()}
-                    style={{ marginTop: 8, width: "100%", padding: 10, borderRadius: 10, border: "none", background: reply.trim() ? "var(--red)" : "var(--secondary)", color: reply.trim() ? "#fff" : "var(--muted-foreground)", cursor: reply.trim() ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
+                    style={{ marginTop: 8, width: "100%", padding: 10, borderRadius: 10, border: "none", background: reply.trim() ? "var(--primary)" : "var(--secondary)", color: reply.trim() ? "#fff" : "var(--muted-foreground)", cursor: reply.trim() ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
                     {sending ? "Enviando..." : "Enviar respuesta"}
                   </button>
                 </div>

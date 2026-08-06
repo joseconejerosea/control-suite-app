@@ -6,10 +6,10 @@ import { api } from "@/lib/api";
 
 const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
   borrador:  { background: "rgba(100,116,139,0.15)", color: "#94a3b8" },
-  enviada:   { background: "rgba(59,130,246,0.15)",  color: "#60a5fa" },
-  aprobada:  { background: "rgba(42,157,92,0.15)",   color: "#34b96e" },
+  enviada:   { background: "rgba(59,130,246,0.15)",  color: "var(--primary)" },
+  aprobada:  { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
   pagada:    { background: "rgba(16,185,129,0.15)",  color: "#10b981" },
-  rechazada: { background: "rgba(200,32,44,0.15)",   color: "#e8353f" },
+  rechazada: { background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" },
 };
 
 export default function RendicionesPage() {
@@ -86,8 +86,8 @@ export default function RendicionesPage() {
                 onClick={() => setFiltroEstado(filtroEstado === estado ? "" : estado)}
                 className="rounded-xl p-4 text-left border transition-all"
                 style={{
-                  background: filtroEstado === estado ? "var(--red-dim)" : "var(--card)",
-                  borderColor: filtroEstado === estado ? "var(--red)" : "var(--border)",
+                  background: filtroEstado === estado ? "rgba(79,70,229,0.10)" : "var(--card)",
+                  borderColor: filtroEstado === estado ? "var(--primary)" : "var(--border)",
                 }}
               >
                 <div className="text-2xl font-bold">{kpis[estado] ?? 0}</div>
@@ -130,7 +130,7 @@ export default function RendicionesPage() {
                       {pct != null ? (
                         <div className="flex items-center gap-2">
                           <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--secondary)" }}>
-                            <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: pct > 100 ? "var(--red)" : pct > 80 ? "#f59e0b" : "#34b96e" }} />
+                            <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: pct > 100 ? "var(--danger)" : pct > 80 ? "#f59e0b" : "var(--success)" }} />
                           </div>
                           <span className="text-xs">{pct.toFixed(0)}%</span>
                         </div>
@@ -146,11 +146,11 @@ export default function RendicionesPage() {
                           style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Ver</button>
                         {r.estado === "enviada" && (
                           <button onClick={() => action(r.id, "aprobar")} className="text-xs px-2 py-1 rounded"
-                            style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e", border: "none", cursor: "pointer" }}>Aprobar</button>
+                            style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", border: "none", cursor: "pointer" }}>Aprobar</button>
                         )}
                         {r.estado === "aprobada" && (
                           <button onClick={() => action(r.id, "marcar-pagada")} className="text-xs px-3 py-1 rounded font-semibold"
-                            style={{ background: "#4F46E5", color: "#fff", border: "none", cursor: "pointer" }}>Marcar Pagada</button>
+                            style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>Marcar Pagada</button>
                         )}
                       </div>
                     </td>
@@ -177,7 +177,7 @@ export default function RendicionesPage() {
                       disabled={actionLoading}
                       onClick={() => action(selected.id, "marcar-pagada")}
                       className="text-sm px-4 py-2 rounded-lg font-semibold"
-                      style={{ background: "#4F46E5", color: "#fff", border: "none", cursor: "pointer", opacity: actionLoading ? 0.5 : 1 }}>
+                      style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", opacity: actionLoading ? 0.5 : 1 }}>
                       {actionLoading ? "..." : "Marcar Pagada"}
                     </button>
                   )}
@@ -185,12 +185,12 @@ export default function RendicionesPage() {
                     <>
                       <button disabled={actionLoading} onClick={() => action(selected.id, "aprobar")}
                         className="text-sm px-3 py-2 rounded-lg font-semibold"
-                        style={{ background: "rgba(42,157,92,0.2)", color: "#34b96e", border: "none", cursor: "pointer" }}>
+                        style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", border: "none", cursor: "pointer" }}>
                         {actionLoading ? "..." : "Aprobar"}
                       </button>
                       <button disabled={actionLoading} onClick={() => action(selected.id, "rechazar")}
                         className="text-sm px-3 py-2 rounded-lg font-semibold"
-                        style={{ background: "rgba(200,32,44,0.15)", color: "#e8353f", border: "none", cursor: "pointer" }}>
+                        style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)", border: "none", cursor: "pointer" }}>
                         {actionLoading ? "..." : "Rechazar"}
                       </button>
                     </>

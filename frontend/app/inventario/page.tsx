@@ -8,10 +8,10 @@ import { api } from "@/lib/api";
 const TABS = ["Bodega", "Movimientos"];
 
 const ESTADO_STYLE: Record<string, { bg: string; color: string }> = {
-  ok:      { bg: "rgba(42,157,92,0.12)",  color: "#34b96e" },
-  OK:      { bg: "rgba(42,157,92,0.12)",  color: "#34b96e" },
+  ok:      { bg: "color-mix(in srgb, var(--success) 12%, transparent)",  color: "var(--success)" },
+  OK:      { bg: "color-mix(in srgb, var(--success) 12%, transparent)",  color: "var(--success)" },
   bajo:    { bg: "rgba(245,158,11,0.12)", color: "#f59e0b" },
-  critico: { bg: "rgba(200,32,44,0.12)",  color: "#e8353f" },
+  critico: { bg: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)" },
 };
 
 export default function InventarioPage() {
@@ -87,7 +87,7 @@ export default function InventarioPage() {
                 borderTop: "none",
                 borderLeft: "none",
                 borderRight: "none",
-                borderBottom: activeTab === tab ? "2px solid var(--red)" : "2px solid transparent",
+                borderBottom: activeTab === tab ? "2px solid var(--primary)" : "2px solid transparent",
                 color: activeTab === tab ? "var(--foreground)" : "var(--muted-foreground)",
                 background: "none",
                 cursor: "pointer",
@@ -177,8 +177,8 @@ export default function InventarioPage() {
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
                         style={{
-                          background: m.tipo === "entrada" ? "rgba(42,157,92,0.12)" : "rgba(200,32,44,0.12)",
-                          color: m.tipo === "entrada" ? "#34b96e" : "#e8353f"
+                          background: m.tipo === "entrada" ? "color-mix(in srgb, var(--success) 12%, transparent)" : "rgba(79,70,229,0.10)",
+                          color: m.tipo === "entrada" ? "var(--success)" : "var(--primary)"
                         }}>
                         {m.tipo ?? "—"}
                       </span>

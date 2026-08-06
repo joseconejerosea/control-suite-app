@@ -22,7 +22,7 @@
 - `DashboardShared.tsx` — KPI cards + bar charts (no extra deps)
 
 ### Updated: app/
-- `globals.css` — dark brand theme (red #C8202C / green #2a9d5c / navy #12131a)
+- `globals.css` — light brand theme (primary #4F46E5 / success #10B981 / paper #FAFAF9)
 - `(auth)/login/page.tsx` — professional split-panel login
 - `admin/dashboard/page.tsx` — KPI dashboard
 - `admin/onboarding/page.tsx` —  NEW: 5-step F0 onboarding flow

@@ -47,7 +47,7 @@ export default function EquivalenciasPage() {
             <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Mapeo texto OCR → proveedor homologado</p>
           </div>
           <button onClick={openNew} className="px-4 py-2 rounded-xl text-sm font-semibold"
-            style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+            style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>
             + Nueva
           </button>
         </div>
@@ -76,14 +76,14 @@ export default function EquivalenciasPage() {
                   <td className="px-4 py-3 text-sm font-medium">{item.proveedor_homologado}</td>
                   <td className="px-4 py-3 text-sm" style={{ color: "var(--muted-foreground)" }}>{item.rut_proveedor ?? "—"}</td>
                   <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: "rgba(42,157,92,0.12)", color: "#34b96e" }}>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" }}>
                       {(parseFloat(item.confianza_minima) * 100).toFixed(0)}%
                     </span>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <button onClick={() => openEdit(item)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--secondary)", border: "none", cursor: "pointer" }}>Editar</button>
-                      <button onClick={() => remove(item.id)} className="text-xs px-2 py-1 rounded" style={{ background: "rgba(200,32,44,0.1)", color: "#e8353f", border: "none", cursor: "pointer" }}>Eliminar</button>
+                      <button onClick={() => remove(item.id)} className="text-xs px-2 py-1 rounded" style={{ background: "rgba(239,68,68,0.1)", color: "var(--danger)", border: "none", cursor: "pointer" }}>Eliminar</button>
                     </div>
                   </td>
                 </tr>
@@ -109,7 +109,7 @@ export default function EquivalenciasPage() {
                 <button onClick={() => setModal(false)} className="flex-1 py-2 rounded-lg text-sm"
                   style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>Cancelar</button>
                 <button onClick={save} className="flex-1 py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>Guardar</button>
+                  style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>Guardar</button>
               </div>
             </div>
           </div>

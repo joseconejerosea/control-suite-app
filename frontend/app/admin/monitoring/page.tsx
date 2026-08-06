@@ -38,11 +38,11 @@ export default function MonitoringPage() {
         {!loading && data && (
           <>
             <div className="grid grid-cols-5 gap-4 mb-6">
-              <KPI label="Clientes Activos" value={data.overview?.clients?.active} color="#34b96e" />
-              <KPI label="Activaciones EN VIVO" value={data.overview?.activations?.live} color="#60a5fa" />
+              <KPI label="Clientes Activos" value={data.overview?.clients?.active} color="var(--success)" />
+              <KPI label="Activaciones EN VIVO" value={data.overview?.activations?.live} color="var(--primary)" />
               <KPI label="Eventos 24h" value={data.overview?.events_24h?.total} />
-              <KPI label="Errores 24h" value={data.overview?.events_24h?.failed} color={data.overview?.events_24h?.failed > 0 ? "#e8353f" : "#34b96e"} />
-              <KPI label="Costo AI hoy" value={`$${parseFloat(data.overview?.ai_cost_hoy ?? 0).toFixed(4)}`} color="#f59e0b" />
+              <KPI label="Errores 24h" value={data.overview?.events_24h?.failed} color={data.overview?.events_24h?.failed > 0 ? "var(--danger)" : "var(--success)"} />
+              <KPI label="Costo AI hoy" value={`$${parseFloat(data.overview?.ai_cost_hoy ?? 0).toFixed(4)}`} color="var(--warning)" />
             </div>
 
             {data.flows?.length > 0 && (
@@ -63,11 +63,11 @@ export default function MonitoringPage() {
                         <tr key={f.canal} style={{ borderBottom: "1px solid var(--border)" }}>
                           <td className="px-4 py-2 text-sm font-medium">{f.canal}</td>
                           <td className="px-4 py-2 text-sm">{f.total}</td>
-                          <td className="px-4 py-2 text-sm" style={{ color: "#34b96e" }}>{f.ok}</td>
-                          <td className="px-4 py-2 text-sm" style={{ color: f.failed > 0 ? "#e8353f" : "var(--muted-foreground)" }}>{f.failed}</td>
+                          <td className="px-4 py-2 text-sm" style={{ color: "var(--success)" }}>{f.ok}</td>
+                          <td className="px-4 py-2 text-sm" style={{ color: f.failed > 0 ? "var(--danger)" : "var(--muted-foreground)" }}>{f.failed}</td>
                           <td className="px-4 py-2">
                             <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                              style={{ background: parseFloat(rate as string) >= 90 ? "rgba(42,157,92,0.12)" : "rgba(200,32,44,0.12)", color: parseFloat(rate as string) >= 90 ? "#34b96e" : "#e8353f" }}>
+                              style={{ background: parseFloat(rate as string) >= 90 ? "color-mix(in srgb, var(--success) 12%, transparent)" : "color-mix(in srgb, var(--danger) 12%, transparent)", color: parseFloat(rate as string) >= 90 ? "var(--success)" : "var(--danger)" }}>
                               {rate}%
                             </span>
                           </td>
@@ -94,13 +94,13 @@ export default function MonitoringPage() {
                     <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
                       <td className="px-4 py-2 text-sm font-medium">{c.nombre}</td>
                       <td className="px-4 py-2">
-                        <span className="px-2 py-0.5 rounded-full text-xs" style={{ background: c.status === "active" ? "rgba(42,157,92,0.12)" : "var(--secondary)", color: c.status === "active" ? "#34b96e" : "var(--muted-foreground)" }}>
+                        <span className="px-2 py-0.5 rounded-full text-xs" style={{ background: c.status === "active" ? "color-mix(in srgb, var(--success) 12%, transparent)" : "var(--secondary)", color: c.status === "active" ? "var(--success)" : "var(--muted-foreground)" }}>
                           {c.status}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-sm">{c.activaciones_live}</td>
                       <td className="px-4 py-2 text-sm">{c.eventos_24h}</td>
-                      <td className="px-4 py-2 text-sm" style={{ color: c.errores_24h > 0 ? "#e8353f" : "var(--muted-foreground)" }}>{c.errores_24h}</td>
+                      <td className="px-4 py-2 text-sm" style={{ color: c.errores_24h > 0 ? "var(--danger)" : "var(--muted-foreground)" }}>{c.errores_24h}</td>
                     </tr>
                   ))}
                 </tbody>

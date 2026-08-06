@@ -105,7 +105,7 @@ function ConvocarContent({ projectId }: { projectId: string }) {
         <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Convocatoria enviada</div>
           <div style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16 }}>
-            Enviados: <b style={{ color: "#34b96e" }}>{result.enviados}</b> · Errores: <b style={{ color: result.errores ? "#e8353f" : "var(--foreground)" }}>{result.errores}</b>
+            Enviados: <b style={{ color: "var(--success)" }}>{result.enviados}</b> · Errores: <b style={{ color: result.errores ? "var(--danger)" : "var(--foreground)" }}>{result.errores}</b>
           </div>
           {Array.isArray(result.detalle) && result.detalle.length > 0 && (
             <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
@@ -115,7 +115,7 @@ function ConvocarContent({ projectId }: { projectId: string }) {
             </div>
           )}
           <button onClick={() => router.push("/client/projects")}
-            style={{ marginTop: 20, padding: "10px 18px", borderRadius: 8, border: "none", background: "var(--red, #C8202C)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            style={{ marginTop: 20, padding: "10px 18px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             Volver a proyectos
           </button>
         </div>
@@ -140,7 +140,7 @@ function ConvocarContent({ projectId }: { projectId: string }) {
                   <tr key={it.persona_id} style={{ borderTop: "1px solid var(--border)" }}>
                     <td style={{ padding: "8px 14px", fontWeight: 500 }}>{it.name}</td>
                     <td style={{ padding: "8px 14px", color: "var(--muted-foreground)" }}>{it.rol || "—"}</td>
-                    <td style={{ padding: "8px 14px", color: it.phone ? "var(--foreground)" : "#e8353f" }}>{it.phone || "sin teléfono"}</td>
+                    <td style={{ padding: "8px 14px", color: it.phone ? "var(--foreground)" : "var(--danger)" }}>{it.phone || "sin teléfono"}</td>
                     <td style={{ padding: "8px 14px", width: 150 }}>
                       <input type="date" value={it.dia ?? ""} onChange={(e) => upd(i, { dia: e.target.value })} style={inputStyle} />
                     </td>
@@ -170,7 +170,7 @@ function ConvocarContent({ projectId }: { projectId: string }) {
             </button>
           </div>
 
-          {error && <div style={{ fontSize: 13, padding: "10px 14px", borderRadius: 8, background: "rgba(200,32,44,0.12)", color: "#f87171", marginBottom: 16 }}>{error}</div>}
+          {error && <div style={{ fontSize: 13, padding: "10px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)", marginBottom: 16 }}>{error}</div>}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingBottom: 40 }}>
             <button onClick={() => router.push("/client/projects")}
@@ -178,7 +178,7 @@ function ConvocarContent({ projectId }: { projectId: string }) {
               Cancelar
             </button>
             <button onClick={enviar} disabled={sending || items.length === 0}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 22px", borderRadius: 8, border: "none", background: items.length ? "var(--red, #C8202C)" : "var(--secondary)", color: items.length ? "#fff" : "var(--muted-foreground)", cursor: sending ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: sending ? 0.7 : 1 }}>
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 22px", borderRadius: 8, border: "none", background: items.length ? "var(--primary)" : "var(--secondary)", color: items.length ? "#fff" : "var(--muted-foreground)", cursor: sending ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: sending ? 0.7 : 1 }}>
               <Send size={14} /> {sending ? "Enviando…" : "Aprobar y enviar convocatoria"}
             </button>
           </div>
