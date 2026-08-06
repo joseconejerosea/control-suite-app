@@ -72,11 +72,11 @@ export default function TerrenoPage() {
   const cerradas = activaciones.filter((a: any) => a.status === "completed");
 
   const SEV_COLOR: Record<string, string> = {
-    critica: "#e8353f", alta: "#f97316", media: "#f59e0b", baja: "#94a3b8",
+    critica: "var(--danger)", alta: "#f97316", media: "#f59e0b", baja: "#94a3b8",
   };
 
   const LOC_BADGE: Record<string, { bg: string; color: string; label: string }> = {
-    VERIFIED: { bg: "rgba(42,157,92,0.15)", color: "#34b96e", label: "Verificada" },
+    VERIFIED: { bg: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)", label: "Verificada" },
     MISMATCH: { bg: "rgba(245,115,0,0.15)", color: "#f97316", label: "Desfasada" },
     PENDING:  { bg: "rgba(100,116,139,0.15)", color: "#94a3b8", label: "Pendiente" },
   };
@@ -97,8 +97,8 @@ export default function TerrenoPage() {
           </div>
           <div className="flex items-center gap-3">
             {enVivo.length > 0 && (
-              <div className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold" style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e" }}>
-                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#34b96e" }} />
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)" }}>
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--success)" }} />
                 {enVivo.length} EN VIVO
               </div>
             )}
@@ -117,10 +117,10 @@ export default function TerrenoPage() {
         {!loading && (
           <div className="space-y-6">
             {enVivo.map((a: any) => (
-              <div key={a.id} className="rounded-2xl overflow-hidden border-2" style={{ borderColor: "#34b96e" }}>
-                <div className="px-6 py-4 flex items-center justify-between" style={{ background: "rgba(42,157,92,0.15)" }}>
+              <div key={a.id} className="rounded-2xl overflow-hidden border-2" style={{ borderColor: "var(--success)" }}>
+                <div className="px-6 py-4 flex items-center justify-between" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)" }}>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs px-2 py-1 rounded-full font-semibold" style={{ background: "rgba(42,157,92,0.3)", color: "#34b96e" }}>EN VIVO</span>
+                    <span className="text-xs px-2 py-1 rounded-full font-semibold" style={{ background: "color-mix(in srgb, var(--success) 30%, transparent)", color: "var(--success)" }}>EN VIVO</span>
                     <div>
                       <div className="font-bold">{a.notes ?? `Activación ${a.id.slice(0,8)}`}</div>
                       <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{a.activation_date ?? "—"}</div>
@@ -134,12 +134,12 @@ export default function TerrenoPage() {
                     </button>
                     <button onClick={() => { setSelected(a); setIncModal(true); }}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                      style={{ background: "var(--red-dim)", color: "var(--red-light)", border: "none", cursor: "pointer" }}>
+                      style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "none", cursor: "pointer" }}>
                       Incidencia
                     </button>
                     <button onClick={() => router.push(`/client/terreno-detail?id=${a.id}`)}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                      style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)", cursor: "pointer" }}>
+                      style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "1px solid rgba(79,70,229,0.20)", cursor: "pointer" }}>
                       Reporte
                     </button>
                   </div>
@@ -195,7 +195,7 @@ export default function TerrenoPage() {
                       <button key={t} onClick={() => setDetailTab(t)}
                         className="px-3 py-2 text-sm capitalize"
                         style={{
-                          borderBottom: detailTab === t ? "2px solid var(--red)" : "2px solid transparent",
+                          borderBottom: detailTab === t ? "2px solid var(--primary)" : "2px solid transparent",
                           background: "none", cursor: "pointer", marginBottom: "-1px",
                           color: detailTab === t ? "var(--foreground)" : "var(--muted-foreground)",
                         }}>
@@ -267,18 +267,18 @@ export default function TerrenoPage() {
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => { setSelected(selected); setIncModal(true); }}
                     className="flex-1 py-2 rounded-lg text-sm font-medium"
-                    style={{ background: "var(--red-dim)", color: "var(--red-light)", border: "none", cursor: "pointer" }}>
+                    style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "none", cursor: "pointer" }}>
                     Reportar incidencia
                   </button>
                   <button onClick={() => router.push(`/client/terreno-detail?id=${selected.id}`)}
                     className="flex-1 py-2 rounded-lg text-sm font-medium"
-                    style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)", cursor: "pointer" }}>
+                    style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "1px solid rgba(79,70,229,0.20)", cursor: "pointer" }}>
                     Vista completa
                   </button>
                   {selected.status === "in_progress" && (
                     <button onClick={cerrarActivacion}
                       className="flex-1 py-2 rounded-lg text-sm font-semibold"
-                      style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+                      style={{ background: "var(--danger)", color: "#fff", border: "none", cursor: "pointer" }}>
                       Cerrar
                     </button>
                   )}
@@ -313,7 +313,7 @@ export default function TerrenoPage() {
                   Cancelar
                 </button>
                 <button onClick={reportarIncidencia} disabled={!incText.trim()} className="flex-1 py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", opacity: !incText.trim() ? 0.4 : 1 }}>
+                  style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", opacity: !incText.trim() ? 0.4 : 1 }}>
                   Reportar
                 </button>
               </div>

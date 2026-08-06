@@ -18,11 +18,11 @@ type Preview = {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string }> = {
-    uploaded:   { bg: "rgba(59,130,246,0.15)",  color: "#60a5fa" },
-    processing: { bg: "rgba(139,92,246,0.15)",  color: "#a78bfa" },
+    uploaded:   { bg: "rgba(59,130,246,0.15)",  color: "var(--info)" },
+    processing: { bg: "rgba(139,92,246,0.15)",  color: "var(--primary)" },
     parsed:     { bg: "rgba(245,158,11,0.15)",  color: "#fcd34d" },
-    populated:  { bg: "var(--green-dim)",        color: "var(--green-light)" },
-    error:      { bg: "var(--red-dim)",          color: "var(--red-light)" },
+    populated:  { bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
+    error:      { bg: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)" },
   };
   const s = map[status] ?? { bg: "var(--secondary)", color: "var(--muted-foreground)" };
   return (
@@ -74,12 +74,12 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
 
         <div onClick={() => inputRef.current?.click()}
           className="rounded-xl p-8 text-center cursor-pointer transition-colors mb-4"
-          style={{ border: `2px dashed ${file ? "var(--green)" : "var(--border)"}`, background: file ? "var(--green-dim)" : "var(--secondary)" }}>
+          style={{ border: `2px dashed ${file ? "var(--success)" : "var(--border)"}`, background: file ? "color-mix(in srgb, var(--success) 12%, transparent)" : "var(--secondary)" }}>
           <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.docx,.doc,.pptx,.ppt,.mp4,.mov,.avi" className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           {file ? (
             <div>
-              <CheckCircle size={28} className="mx-auto mb-2" style={{ color: "var(--green)" }} />
+              <CheckCircle size={28} className="mx-auto mb-2" style={{ color: "var(--success)" }} />
               <div className="text-sm font-semibold">{file.name}</div>
               <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>{(file.size / 1024).toFixed(1)} KB</div>
             </div>
@@ -109,13 +109,13 @@ function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
           </select>
         </div>
 
-        {err && <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "var(--red-dim)", color: "var(--red-light)" }}>{err}</div>}
+        {err && <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" }}>{err}</div>}
 
         <div className="flex gap-3">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Cancelar</button>
           <button onClick={submit} disabled={loading || !file}
             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-            style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+            style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>
             {loading ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} /> : <><Upload size={13} /> Subir</>}
           </button>
         </div>
@@ -162,7 +162,7 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
 
         {loading ? (
           <div className="flex items-center justify-center py-16">
-            <span className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: "var(--border)", borderTopColor: "var(--red)" }} />
+            <span className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: "var(--border)", borderTopColor: "var(--primary)" }} />
           </div>
         ) : !preview ? (
           <div className="text-center py-12 text-sm" style={{ color: "var(--muted-foreground)" }}>
@@ -178,7 +178,7 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
                   {Object.entries(mapping).map(([src, tgt]) => (
                     <span key={src} className="px-2.5 py-1 rounded-full text-xs border"
                       style={{ background: "var(--secondary)", borderColor: "var(--border)", fontFamily: "monospace" }}>
-                      {src} → <span style={{ color: "var(--green-light)" }}>{tgt}</span>
+                      {src} → <span style={{ color: "var(--success)" }}>{tgt}</span>
                     </span>
                   ))}
                 </div>
@@ -213,17 +213,17 @@ function PreviewModal({ doc, onClose, onDone }: { doc: Doc; onClose: () => void;
 
             {conf != null && (
               <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>
-                Confianza IA: <span style={{ color: "var(--green-light)", fontWeight: 600 }}>{Math.round(conf * 100)}%</span>
+                Confianza IA: <span style={{ color: "var(--success)", fontWeight: 600 }}>{Math.round(conf * 100)}%</span>
               </div>
             )}
 
-            {err && <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "var(--red-dim)", color: "var(--red-light)" }}>{err}</div>}
+            {err && <div className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" }}>{err}</div>}
 
             <div className="flex gap-3">
               <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Cerrar</button>
               <button onClick={populate} disabled={popping}
                 className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-                style={{ background: "var(--green)", color: "#fff", border: "none", cursor: "pointer" }}>
+                style={{ background: "var(--success)", color: "#fff", border: "none", cursor: "pointer" }}>
                 {popping ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} /> : <><Database size={13} /> Confirmar y poblar</>}
               </button>
             </div>
@@ -268,7 +268,7 @@ export default function DocumentsPage() {
     <AppShell>
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-xl"
-          style={{ background: toast.ok ? "var(--green)" : "var(--red)", color: "#fff" }}>
+          style={{ background: toast.ok ? "var(--success)" : "var(--danger)", color: "#fff" }}>
           {toast.msg}
         </div>
       )}
@@ -281,7 +281,7 @@ export default function DocumentsPage() {
           </div>
           <button onClick={() => setUpload(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(200,32,44,0.3)" }}>
+            style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(79,70,229,0.3)" }}>
             <Upload size={14} /> Subir archivo
           </button>
         </div>
@@ -331,8 +331,8 @@ export default function DocumentsPage() {
                     <td className="px-4 py-3.5 text-sm">
                       {doc.rows_inserted != null ? (
                         <span>
-                          <span style={{ color: "var(--green-light)", fontWeight: 600 }}>{doc.rows_inserted}</span>
-                          {(doc.rows_failed ?? 0) > 0 && <span style={{ color: "var(--red-light)" }}> / {doc.rows_failed} fallidas</span>}
+                          <span style={{ color: "var(--success)", fontWeight: 600 }}>{doc.rows_inserted}</span>
+                          {(doc.rows_failed ?? 0) > 0 && <span style={{ color: "var(--danger)" }}> / {doc.rows_failed} fallidas</span>}
                         </span>
                       ) : "—"}
                     </td>
@@ -356,7 +356,7 @@ export default function DocumentsPage() {
                           </button>
                         )}
                         {doc.status === "populated" && (
-                          <span className="flex items-center gap-1 text-xs" style={{ color: "var(--green-light)" }}>
+                          <span className="flex items-center gap-1 text-xs" style={{ color: "var(--success)" }}>
                             <CheckCircle size={12} /> Listo
                           </span>
                         )}

@@ -190,14 +190,14 @@ export default function DashboardShared() {
   const actData    = (overview?.trends?.activations_by_week ?? []).map((e) => ({ label: e.week, count: e.count }));
 
   const kpis: KPI[] = [
-    { key: "total_projects",        label: "Proyectos",         value: k.total_projects,        color: "var(--red)",   icon: LayoutDashboard, ...KPI_META.total_projects },
-    { key: "active_campaigns",      label: "Campañas activas",  value: k.active_campaigns,      color: "#3b82f6",      icon: Megaphone,       ...KPI_META.active_campaigns },
-    { key: "total_activations",     label: "Activaciones",      value: k.total_activations,     color: "var(--green)", icon: Activity,        ...KPI_META.total_activations },
-    { key: "activations_completed", label: "Completadas",       value: k.activations_completed, color: "var(--green)", icon: TrendingUp,      ...KPI_META.activations_completed },
-    { key: "active_promoters",      label: "Staff activo",      value: k.active_promoters,      color: "#f59e0b",      icon: Users,           ...KPI_META.active_promoters },
-    { key: "total_locations",       label: "Ubicaciones",       value: k.total_locations,       color: "#8b5cf6",      icon: MapPin,          ...KPI_META.total_locations },
-    { key: "events_received_24h",   label: "Eventos (24h)",     value: k.events_received_24h,   color: "#06b6d4",      icon: Clock,           sub: `${k.events_processed_24h ?? 0} procesados`, ...KPI_META.events_received_24h },
-    { key: "documents_populated",   label: "Docs poblados",     value: k.documents_populated,   color: "#f59e0b",      icon: FileText,        sub: `de ${k.documents_uploaded ?? 0} subidos`, ...KPI_META.documents_populated },
+    { key: "total_projects",        label: "Proyectos",         value: k.total_projects,        color: "var(--primary)",      icon: LayoutDashboard, ...KPI_META.total_projects },
+    { key: "active_campaigns",      label: "Campañas activas",  value: k.active_campaigns,      color: "var(--info)",         icon: Megaphone,       ...KPI_META.active_campaigns },
+    { key: "total_activations",     label: "Activaciones",      value: k.total_activations,     color: "var(--success)",      icon: Activity,        ...KPI_META.total_activations },
+    { key: "activations_completed", label: "Completadas",       value: k.activations_completed, color: "var(--success)",      icon: TrendingUp,      ...KPI_META.activations_completed },
+    { key: "active_promoters",      label: "Staff activo",      value: k.active_promoters,      color: "var(--warning)",      icon: Users,           ...KPI_META.active_promoters },
+    { key: "total_locations",       label: "Ubicaciones",       value: k.total_locations,       color: "#8b5cf6",             icon: MapPin,          ...KPI_META.total_locations },
+    { key: "events_received_24h",   label: "Eventos (24h)",     value: k.events_received_24h,   color: "var(--brand-accent)", icon: Clock,           sub: `${k.events_processed_24h ?? 0} procesados`, ...KPI_META.events_received_24h },
+    { key: "documents_populated",   label: "Docs poblados",     value: k.documents_populated,   color: "var(--warning)",      icon: FileText,        sub: `de ${k.documents_uploaded ?? 0} subidos`, ...KPI_META.documents_populated },
   ];
 
   const selectStyle = {
@@ -245,12 +245,12 @@ export default function DashboardShared() {
           <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>
             {period === "day" ? "Últimas 24h" : period === "week" ? "Esta semana" : period === "month" ? "Últimos 30 días" : "Este año"}
           </div>
-          <SimpleBarChart data={eventsData} color="var(--red)" />
+          <SimpleBarChart data={eventsData} color="var(--primary)" />
         </div>
         <div className="rounded-xl p-5 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="text-sm font-semibold mb-1">Activaciones por semana</div>
           <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>Últimas 12 semanas</div>
-          <SimpleBarChart data={actData} color="var(--green)" />
+          <SimpleBarChart data={actData} color="var(--success)" />
         </div>
       </div>
 

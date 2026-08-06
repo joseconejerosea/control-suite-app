@@ -125,7 +125,7 @@ export default function AdminUsuariosPage() {
           {selectedClient && (
             <button onClick={() => { setShowCreate(true); setForm({ email: "", password: "", full_name: "", phone: "", role: "user" }); }}
               className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+              style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>
               + Crear usuario
             </button>
           )}
@@ -143,10 +143,10 @@ export default function AdminUsuariosPage() {
             {/* Error banner */}
             {error && (
               <div className="flex items-center justify-between rounded-xl px-4 py-3 mb-4"
-                style={{ background: "rgba(200,32,44,0.10)", border: "1px solid rgba(200,32,44,0.35)", color: "#e8353f" }}>
+                style={{ background: "color-mix(in srgb, var(--danger) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", color: "var(--danger)" }}>
                 <span className="text-sm">{error}</span>
                 <button onClick={() => setError(null)}
-                  style={{ background: "none", border: "none", color: "#e8353f", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 0 0 12px" }}>
+                  style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 0 0 12px" }}>
                   ×
                 </button>
               </div>
@@ -156,9 +156,9 @@ export default function AdminUsuariosPage() {
             <div className="grid grid-cols-4 gap-3 mb-4">
               {[
                 { label: "Total", value: users.length, color: "var(--foreground)" },
-                { label: "Activos", value: users.filter((u: any) => u.is_active).length, color: "#34b96e" },
+                { label: "Activos", value: users.filter((u: any) => u.is_active).length, color: "var(--success)" },
                 { label: "Managers", value: users.filter((u: any) => u.role === "admin_cliente").length, color: "#818cf8" },
-                { label: "Inactivos", value: users.filter((u: any) => !u.is_active).length, color: "#e8353f" },
+                { label: "Inactivos", value: users.filter((u: any) => !u.is_active).length, color: "var(--danger)" },
               ].map((kpi) => (
                 <div key={kpi.label} className="rounded-xl p-4 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
                   <div className="text-2xl font-bold" style={{ color: kpi.color }}>{kpi.value}</div>
@@ -207,7 +207,7 @@ export default function AdminUsuariosPage() {
                         </td>
                         <td className="px-4 py-3">
                           <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                            style={{ background: u.is_active ? "rgba(42,157,92,0.12)" : "rgba(200,32,44,0.12)", color: u.is_active ? "#34b96e" : "#e8353f" }}>
+                            style={{ background: u.is_active ? "color-mix(in srgb, var(--success) 12%, transparent)" : "color-mix(in srgb, var(--danger) 12%, transparent)", color: u.is_active ? "var(--success)" : "var(--danger)" }}>
                             {u.is_active ? "Activo" : "Inactivo"}
                           </span>
                         </td>
@@ -224,8 +224,8 @@ export default function AdminUsuariosPage() {
                             <button onClick={() => toggleActive(u)}
                               className="text-xs px-2 py-1 rounded"
                               style={{
-                                background: u.is_active ? "rgba(200,32,44,0.12)" : "rgba(42,157,92,0.12)",
-                                color: u.is_active ? "#e8353f" : "#34b96e",
+                                background: u.is_active ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "color-mix(in srgb, var(--success) 12%, transparent)",
+                                color: u.is_active ? "var(--danger)" : "var(--success)",
                                 border: "none", cursor: "pointer",
                               }}>
                               {u.is_active ? "Desactivar" : "Activar"}
@@ -274,7 +274,7 @@ export default function AdminUsuariosPage() {
                 </button>
                 <button onClick={createUser} disabled={!form.email || form.password.length < 8}
                   className="flex-1 py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", opacity: !form.email || form.password.length < 8 ? 0.4 : 1 }}>
+                  style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", opacity: !form.email || form.password.length < 8 ? 0.4 : 1 }}>
                   Crear
                 </button>
               </div>
@@ -312,7 +312,7 @@ export default function AdminUsuariosPage() {
                   Cancelar
                 </button>
                 <button onClick={updateUser} className="flex-1 py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+                  style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>
                   Guardar
                 </button>
               </div>

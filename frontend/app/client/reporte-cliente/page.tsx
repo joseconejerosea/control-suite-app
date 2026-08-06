@@ -53,7 +53,7 @@ function ReporteClienteContent() {
   const incAbiertas = incidencias.filter(i => i.estado === "abierta" || i.estado === "open");
 
   const buildHtml = () => `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
-<style>body{font-family:Arial,sans-serif;color:#1a1a2e;max-width:700px;margin:0 auto;padding:32px}
+<style>body{font-family:Arial,sans-serif;color:#0B1020;max-width:700px;margin:0 auto;padding:32px}
 h1{color:#4F46E5;border-bottom:2px solid #4F46E5;padding-bottom:8px}h2{color:#374151;margin-top:28px;font-size:16px}
 .meta{background:#f3f4f6;border-radius:8px;padding:16px;margin:16px 0}.meta p{margin:4px 0;font-size:14px}
 .badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:bold}
@@ -95,8 +95,8 @@ ${reportes.length === 0 ? "<p style='color:#9ca3af'>Sin reportes</p>" : `<table>
   const statColor = (e?: string) => {
     if (!e) return "#9ca3af";
     const s = e.toLowerCase();
-    if (s.includes("progress") || s.includes("vivo")) return "#34b96e";
-    if (s.includes("complet") || s.includes("cerr")) return "#6366f1";
+    if (s.includes("progress") || s.includes("vivo")) return "var(--success)";
+    if (s.includes("complet") || s.includes("cerr")) return "var(--primary)";
     return "#f59e0b";
   };
 
@@ -112,7 +112,7 @@ ${reportes.length === 0 ? "<p style='color:#9ca3af'>Sin reportes</p>" : `<table>
       </div>
 
       {loading && <div className="text-center py-16" style={{ color: "var(--muted-foreground)" }}><div style={{ fontSize: 32, marginBottom: 8 }}>⏳</div>Cargando activacion...</div>}
-      {!loading && error && !activacion && <div className="rounded-xl border p-6 text-center" style={{ background: "#fee2e2", borderColor: "#fca5a5", color: "#991b1b" }}>{error}</div>}
+      {!loading && error && !activacion && <div className="rounded-xl border p-6 text-center" style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", borderColor: "color-mix(in srgb, var(--danger) 40%, transparent)", color: "var(--danger)" }}>{error}</div>}
 
       {!loading && activacion && (<>
         {/* Info */}
@@ -133,9 +133,9 @@ ${reportes.length === 0 ? "<p style='color:#9ca3af'>Sin reportes</p>" : `<table>
         {/* KPIs */}
         <div className="grid grid-cols-3 gap-4 mb-5">
           {[
-            { label: "Check-ins", value: checkins.length, color: "#34b96e", icon: "✅" },
-            { label: "Incidencias abiertas", value: incAbiertas.length, color: incAbiertas.length > 0 ? "#e8353f" : "#34b96e", icon: "⚠️" },
-            { label: "Reportes de avance", value: reportes.length, color: "#6366f1", icon: "📊" },
+            { label: "Check-ins", value: checkins.length, color: "var(--success)", icon: "✅" },
+            { label: "Incidencias abiertas", value: incAbiertas.length, color: incAbiertas.length > 0 ? "var(--danger)" : "var(--success)", icon: "⚠️" },
+            { label: "Reportes de avance", value: reportes.length, color: "var(--primary)", icon: "📊" },
           ].map(({ label, value, color, icon }) => (
             <div key={label} className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div style={{ fontSize: 18, marginBottom: 4 }}>{icon}</div>
@@ -168,9 +168,9 @@ ${reportes.length === 0 ? "<p style='color:#9ca3af'>Sin reportes</p>" : `<table>
               <thead><tr style={{ color: "var(--muted-foreground)" }}><th style={thStyle}>Severidad</th><th style={thStyle}>Descripcion</th><th style={thStyle}>Estado</th><th style={thStyle}>Fecha</th></tr></thead>
               <tbody>{incidencias.map((inc, i) => (
                 <tr key={inc.id} style={{ borderTop: "1px solid var(--border)", background: i % 2 ? "var(--muted)" : "transparent" }}>
-                  <td style={tdStyle}><span style={{ background: inc.severidad === "alta" ? "#fee2e2" : "#fef3c7", color: inc.severidad === "alta" ? "#991b1b" : "#92400e", borderRadius: 12, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>{inc.severidad}</span></td>
+                  <td style={tdStyle}><span style={{ background: inc.severidad === "alta" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "#fef3c7", color: inc.severidad === "alta" ? "var(--danger)" : "#92400e", borderRadius: 12, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>{inc.severidad}</span></td>
                   <td style={tdStyle}>{inc.descripcion}</td>
-                  <td style={tdStyle}><span style={{ background: inc.estado === "abierta" ? "#fee2e2" : "#d1fae5", color: inc.estado === "abierta" ? "#991b1b" : "#065f46", borderRadius: 12, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>{inc.estado}</span></td>
+                  <td style={tdStyle}><span style={{ background: inc.estado === "abierta" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "color-mix(in srgb, var(--success) 12%, transparent)", color: inc.estado === "abierta" ? "var(--danger)" : "var(--success)", borderRadius: 12, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>{inc.estado}</span></td>
                   <td style={{ ...tdStyle, color: "var(--muted-foreground)" }}>{fmt(inc.created_at)}</td>
                 </tr>
               ))}</tbody>
@@ -195,11 +195,11 @@ ${reportes.length === 0 ? "<p style='color:#9ca3af'>Sin reportes</p>" : `<table>
 
         {/* Send form */}
         {sent ? (
-          <div className="rounded-xl border p-6 text-center" style={{ background: "#d1fae5", borderColor: "#6ee7b7" }}>
+          <div className="rounded-xl border p-6 text-center" style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", borderColor: "color-mix(in srgb, var(--success) 40%, transparent)" }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-            <div style={{ fontWeight: 700, color: "#065f46", fontSize: 16 }}>Reporte enviado correctamente</div>
-            <div style={{ color: "#047857", fontSize: 13, marginTop: 4 }}>Destinatarios: {destinatarios}</div>
-            <button onClick={() => { setSent(false); setApproved(false); }} style={{ marginTop: 16, background: "#065f46", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontSize: 13 }}>Enviar a otro</button>
+            <div style={{ fontWeight: 700, color: "var(--success)", fontSize: 16 }}>Reporte enviado correctamente</div>
+            <div style={{ color: "var(--success)", fontSize: 13, marginTop: 4 }}>Destinatarios: {destinatarios}</div>
+            <button onClick={() => { setSent(false); setApproved(false); }} style={{ marginTop: 16, background: "var(--success)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", cursor: "pointer", fontSize: 13 }}>Enviar a otro</button>
           </div>
         ) : (
           <div className="rounded-xl border p-5" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -237,15 +237,15 @@ ${reportes.length === 0 ? "<p style='color:#9ca3af'>Sin reportes</p>" : `<table>
             )}
 
             {approved && (
-              <div className="rounded-xl p-3 mb-4" style={{ background: "rgba(42,157,92,0.12)", border: "1px solid rgba(42,157,92,0.3)" }}>
-                <div className="text-sm font-medium" style={{ color: "#34b96e" }}>Reporte aprobado — listo para enviar</div>
+              <div className="rounded-xl p-3 mb-4" style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)" }}>
+                <div className="text-sm font-medium" style={{ color: "var(--success)" }}>Reporte aprobado — listo para enviar</div>
               </div>
             )}
 
-            {error && <div style={{ color: "#e8353f", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+            {error && <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
             <button onClick={enviar} disabled={sending || !approved}
-              style={{ width: "100%", padding: "11px", borderRadius: 8, border: "none", background: approved ? "#4F46E5" : "var(--secondary)", color: approved ? "#fff" : "var(--muted-foreground)", cursor: approved ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 600 }}>
+              style={{ width: "100%", padding: "11px", borderRadius: 8, border: "none", background: approved ? "var(--primary)" : "var(--secondary)", color: approved ? "#fff" : "var(--muted-foreground)", cursor: approved ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 600 }}>
               {sending ? "Enviando..." : "Aprobar y enviar"}
             </button>
           </div>

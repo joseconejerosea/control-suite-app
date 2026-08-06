@@ -50,7 +50,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex" style={{ background: "var(--background)" }}>
-      <div className="flex-1 hidden lg:flex flex-col justify-center px-16 border-r" style={{ borderColor: "var(--border)", background: "var(--navy)" }}>
+      <div className="flex-1 hidden lg:flex flex-col justify-center px-16 border-r" style={{ borderColor: "var(--border)", background: "var(--ai-gradient)" }}>
         <div className="absolute inset-0 opacity-30" style={{
           backgroundImage: "linear-gradient(oklch(1 0 0 / 4%) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0 / 4%) 1px, transparent 1px)",
           backgroundSize: "40px 40px",
@@ -58,21 +58,21 @@ export default function LoginPage() {
         }} />
         <div className="relative">
           <div className="flex items-center gap-3 mb-12">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--red)", boxShadow: "0 6px 20px rgba(200,32,44,0.4)" }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--primary)", boxShadow: "0 6px 20px rgba(79,70,229,0.4)" }}>
               <Zap size={20} color="#fff" strokeWidth={2.5} />
             </div>
             <span className="text-lg font-bold">Control Suite</span>
           </div>
           <h1 className="text-4xl font-bold leading-tight mb-4">
             Operations.<br />
-            <span style={{ color: "var(--red)" }}>Unified.</span>
+            <span style={{ color: "#fff" }}>Unified.</span>
           </h1>
           <p className="text-sm leading-relaxed mb-10" style={{ color: "var(--muted-foreground)", maxWidth: 340 }}>
             Complete platform for campaigns, activations, promoters, and AI-powered field operations.
           </p>
           {["Client isolation & role-based access", "AI-powered document ingestion", "Real-time KPI dashboard"].map((f) => (
             <div key={f} className="flex items-center gap-2.5 mb-3 text-sm" style={{ color: "var(--muted-foreground)" }}>
-              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "var(--green)" }} />
+              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#fff" }} />
               {f}
             </div>
           ))}
@@ -82,7 +82,7 @@ export default function LoginPage() {
       <div className="w-full lg:w-96 flex items-center justify-center px-8" style={{ background: "var(--card)" }}>
         <div className="w-full max-w-sm animate-fade-up">
           <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--red)" }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--primary)" }}>
               <Zap size={16} color="#fff" />
             </div>
             <span className="font-bold">Control Suite</span>
@@ -122,14 +122,14 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="text-xs px-3 py-2 rounded-lg" style={{ background: "var(--red-dim)", color: "var(--red-light)" }}>
+              <div className="text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.12)", color: "var(--danger)" }}>
                 {error}
               </div>
             )}
 
             <button type="submit" disabled={loading}
               className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg text-sm font-semibold mt-1 transition-opacity disabled:opacity-50"
-              style={{ background: "var(--red)", color: "#fff", boxShadow: "0 4px 16px rgba(200,32,44,0.3)", border: "none", cursor: "pointer" }}>
+              style={{ background: "var(--primary)", color: "#fff", boxShadow: "0 4px 16px rgba(79,70,229,0.3)", border: "none", cursor: "pointer" }}>
               {loading ? (
                 <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} />
               ) : (

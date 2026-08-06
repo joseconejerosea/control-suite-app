@@ -33,8 +33,8 @@ export default function AuditoriaPage() {
               onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: "rgba(99,102,241,0.12)" }}>
-                  <ShieldCheck size={14} style={{ color: "#6366f1" }} />
+                  style={{ background: "rgba(79,70,229,0.12)" }}>
+                  <ShieldCheck size={14} style={{ color: "var(--primary)" }} />
                 </div>
                 <div>
                   <div className="text-sm font-medium">{log.accion} · <span style={{ color: "var(--muted-foreground)" }}>{log.entidad}</span></div>

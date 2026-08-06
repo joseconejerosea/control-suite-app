@@ -128,8 +128,8 @@ export default function ConfigPage() {
     />
   );
 
-  const badge = (text: string, color = "#2a9d5c") => (
-    <span style={{ fontSize: 11, background: color + "22", color, borderRadius: 99, padding: "2px 8px", fontWeight: 600 }}>{text}</span>
+  const badge = (text: string, color = "var(--success)", bg?: string) => (
+    <span style={{ fontSize: 11, background: bg ?? `color-mix(in srgb, ${color} 12%, transparent)`, color, borderRadius: 99, padding: "2px 8px", fontWeight: 600 }}>{text}</span>
   );
 
   // ── Tabs content ────────────────────────────────────────────────────────────
@@ -152,13 +152,13 @@ export default function ConfigPage() {
         <div style={{ marginTop: 12 }}>
           <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>Plan actual</label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {badge(cuenta.plan || "basic", "#0ea5e9")}
+            {badge(cuenta.plan || "basic", "var(--brand-accent)")}
             <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Contacta a soporte para cambiar de plan</span>
           </div>
         </div>
         <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
           <button onClick={saveCuenta} disabled={saving}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             <Save size={14} /> {saving ? "Guardando..." : "Guardar cambios"}
           </button>
         </div>
@@ -194,8 +194,8 @@ export default function ConfigPage() {
           : canales.map(c => (
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ flex: 1, fontSize: 13 }}>{c.nombre}</span>
-              {badge(c.tipo, c.tipo === "whatsapp" ? "#2a9d5c" : "#0ea5e9")}
-              {badge(c.is_active ? "activo" : "inactivo", c.is_active ? "#2a9d5c" : "#e76f51")}
+              {badge(c.tipo, c.tipo === "whatsapp" ? "var(--success)" : "var(--brand-accent)")}
+              {badge(c.is_active ? "activo" : "inactivo", c.is_active ? "var(--success)" : "var(--danger)")}
             </div>
           ))
         }
@@ -205,7 +205,7 @@ export default function ConfigPage() {
         {sectionTitle("Diccionario OCR (equivalencias)")}
         <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
           Gestiona las equivalencias OCR desde la sección{" "}
-          <a href="/client/equivalencias" style={{ color: "var(--red, #C8202C)", textDecoration: "none", fontWeight: 500 }}>Equivalencias OCR →</a>
+          <a href="/client/equivalencias" style={{ color: "var(--primary)", textDecoration: "none", fontWeight: 500 }}>Equivalencias OCR →</a>
         </div>
       </>)}
 
@@ -285,7 +285,7 @@ export default function ConfigPage() {
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: "7px 7px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: active ? 600 : 400,
                 background: active ? "var(--card)" : "none",
                 color:      active ? "var(--foreground)" : "var(--muted-foreground)",
-                borderBottom: active ? "2px solid var(--red, #C8202C)" : "2px solid transparent",
+                borderBottom: active ? "2px solid var(--primary)" : "2px solid transparent",
               }}>
               <Icon size={14} /> {t.label}
             </button>
@@ -298,7 +298,7 @@ export default function ConfigPage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: 24, right: 24, background: "#1a1a2e", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+        <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--ink)", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
           {toast}
         </div>
       )}

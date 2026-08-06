@@ -141,7 +141,7 @@ export default function UsuariosPage() {
           <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Usuarios</h1>
         </div>
         <button onClick={openCreate}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
           <Plus size={14} /> Agregar usuario
         </button>
       </div>
@@ -182,17 +182,17 @@ export default function UsuariosPage() {
                     {u.role !== "admin_cliente" ? (
                       <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>—</span>
                     ) : recibeAvisos(u) ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, background: "#2a9d5c22", color: "#2a9d5c", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
                         <Bell size={12} /> Recibe avisos
                       </span>
                     ) : (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, background: "#e76f5122", color: "#e76f51", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, background: "rgba(79,70,229,0.10)", color: "var(--primary)", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
                         <BellOff size={12} /> Falta teléfono
                       </span>
                     )}
                   </td>
                   <td style={{ padding: "10px 14px" }}>
-                    <span style={{ fontSize: 11, background: u.is_active ? "#2a9d5c22" : "var(--secondary)", color: u.is_active ? "#2a9d5c" : "var(--muted-foreground)", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
+                    <span style={{ fontSize: 11, background: u.is_active ? "color-mix(in srgb, var(--success) 12%, transparent)" : "var(--secondary)", color: u.is_active ? "var(--success)" : "var(--muted-foreground)", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
                       {u.is_active ? "Activo" : "Inactivo"}
                     </span>
                   </td>
@@ -246,7 +246,7 @@ export default function UsuariosPage() {
               </div>
               <div>
                 <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>
-                  Teléfono {form.role === "admin_cliente" && <span style={{ color: "#e76f51" }}>· necesario para recibir notificaciones</span>}
+                  Teléfono {form.role === "admin_cliente" && <span style={{ color: "var(--primary)" }}>· necesario para recibir notificaciones</span>}
                 </label>
                 {input(form.phone, v => setForm(f => ({ ...f, phone: v })), "+56 9 1234 5678", "tel")}
               </div>
@@ -264,7 +264,7 @@ export default function UsuariosPage() {
                 Cancelar
               </button>
               <button onClick={save} disabled={saving}
-                style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
                 <Save size={14} /> {saving ? "Guardando…" : "Guardar"}
               </button>
             </div>
@@ -273,7 +273,7 @@ export default function UsuariosPage() {
       )}
 
       {toast && (
-        <div style={{ position: "fixed", bottom: 24, right: 24, background: "#1a1a2e", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+        <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--ink)", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
           {toast}
         </div>
       )}

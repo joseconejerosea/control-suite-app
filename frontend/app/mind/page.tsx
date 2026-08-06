@@ -18,7 +18,7 @@ interface Propuesta {
 interface ChatMsg { role: 'user' | 'assistant'; mensaje: string; ts: string; }
 
 const SEV_CONFIG: Record<string, { color: string; icon: string }> = {
-  critica: { color: 'border-red-400 bg-red-50', icon: '🔴' },
+  critica: { color: 'border-[color:var(--danger)] bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)]', icon: '🔴' },
   alta:    { color: 'border-orange-400 bg-orange-50', icon: '🟠' },
   media:   { color: 'border-amber-300 bg-amber-50', icon: '🟡' },
   baja:    { color: 'border-slate-200 bg-slate-50', icon: '⚪' },

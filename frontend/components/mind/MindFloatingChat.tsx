@@ -55,12 +55,12 @@ export function MindFloatingChat() {
         <button
           onClick={() => setOpen(true)}
           className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 transition-transform hover:scale-105"
-          style={{ background: 'linear-gradient(135deg, #4F46E5, #06B6D4)' }}
+          style={{ background: 'var(--ai-gradient)' }}
           title="Control Mind"
         >
           <span className="text-xl">🧠</span>
           {propuestas.length > 0 && open === false && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+            <span className="absolute -top-1 -right-1 w-5 h-5 text-white text-[10px] font-bold rounded-full flex items-center justify-center" style={{ background: 'var(--danger)' }}>
               {propuestas.length}
             </span>
           )}
@@ -75,7 +75,7 @@ export function MindFloatingChat() {
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100"
-               style={{ background: 'linear-gradient(135deg, #4F46E5, #06B6D4)' }}>
+               style={{ background: 'var(--ai-gradient)' }}>
             <div className="flex items-center gap-2 text-white">
               <span>🧠</span>
               <span className="font-semibold text-sm">Control Mind</span>
@@ -117,11 +117,11 @@ export function MindFloatingChat() {
               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {m.role === 'assistant' && (
                   <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] mr-1.5 shrink-0 mt-0.5"
-                       style={{ background: 'linear-gradient(135deg, #4F46E5, #06B6D4)' }}>🧠</div>
+                       style={{ background: 'var(--ai-gradient)' }}>🧠</div>
                 )}
                 <div className={`max-w-[80%] px-3 py-2 rounded-xl text-sm leading-relaxed ${
                   m.role === 'user' ? 'text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'
-                }`} style={m.role === 'user' ? { background: 'linear-gradient(135deg, #4F46E5, #06B6D4)' } : {}}>
+                }`} style={m.role === 'user' ? { background: 'var(--ai-gradient)' } : {}}>
                   {m.role === 'assistant' ? <ChatMarkdown content={m.mensaje} /> : m.mensaje}
                 </div>
               </div>
@@ -161,7 +161,7 @@ export function MindFloatingChat() {
               onClick={() => send()}
               disabled={!input.trim() || sending}
               className="px-3 py-2 text-white rounded-xl text-sm disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #4F46E5, #06B6D4)' }}
+              style={{ background: 'var(--ai-gradient)' }}
             >→</button>
           </div>
         </div>

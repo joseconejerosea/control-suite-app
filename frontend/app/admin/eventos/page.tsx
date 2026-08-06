@@ -29,17 +29,17 @@ type Evento = {
 };
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  processed:             { bg: "#dcfce7", color: "#16a34a", label: "Procesado" },
-  queued:                { bg: "#eff6ff", color: "#3b82f6", label: "En cola" },
-  processing:            { bg: "#eef2ff", color: "#6366f1", label: "Procesando" },
+  processed:             { bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", label: "Procesado" },
+  queued:                { bg: "rgba(59,130,246,0.10)", color: "var(--info)", label: "En cola" },
+  processing:            { bg: "rgba(79,70,229,0.10)", color: "var(--primary)", label: "Procesando" },
   ocr_done:              { bg: "#fefce8", color: "#ca8a04", label: "OCR listo" },
   low_confidence:        { bg: "#fef3c7", color: "#d97706", label: "Baja confianza" },
   unclassified:          { bg: "#fef3c7", color: "#d97706", label: "Sin clasificar" },
-  failed_ocr:            { bg: "#fee2e2", color: "#dc2626", label: "Error OCR" },
-  failed_classification: { bg: "#fee2e2", color: "#dc2626", label: "Error IA" },
-  failed:                { bg: "#fee2e2", color: "#dc2626", label: "Error" },
+  failed_ocr:            { bg: "rgba(220,38,38,0.10)", color: "var(--danger)", label: "Error OCR" },
+  failed_classification: { bg: "rgba(220,38,38,0.10)", color: "var(--danger)", label: "Error IA" },
+  failed:                { bg: "rgba(220,38,38,0.10)", color: "var(--danger)", label: "Error" },
   discarded:             { bg: "#f1f5f9", color: "#94a3b8", label: "Descartado" },
-  reprocessing:          { bg: "#fdf4ff", color: "#a855f7", label: "Reprocesando" },
+  reprocessing:          { bg: "rgba(79,70,229,0.10)", color: "var(--primary)", label: "Reprocesando" },
 };
 
 const REPROCESS_STATUSES = ["failed_ocr", "failed_classification", "low_confidence", "unclassified", "failed"];
@@ -106,7 +106,7 @@ export default function EventosPage() {
 
         {message && (
           <div className="mb-4 px-4 py-3 rounded-lg text-sm font-medium"
-            style={{ background: message.type === "success" ? "#dcfce7" : "#fee2e2", color: message.type === "success" ? "#16a34a" : "#dc2626" }}>
+            style={{ background: message.type === "success" ? "color-mix(in srgb, var(--success) 12%, transparent)" : "rgba(220,38,38,0.10)", color: message.type === "success" ? "var(--success)" : "var(--danger)" }}>
             {message.text}
           </div>
         )}
@@ -148,7 +148,7 @@ export default function EventosPage() {
                       <td className="px-4 py-3 text-xs font-mono text-slate-400">{e.id.slice(0, 8)}…</td>
                       <td className="px-4 py-3">
                         <span className="text-xs px-2 py-0.5 rounded font-medium capitalize"
-                          style={{ background: e.canal === "email" ? "#eef2ff" : e.canal === "whatsapp" ? "#dcfce7" : "#f1f5f9", color: e.canal === "email" ? "#6366f1" : e.canal === "whatsapp" ? "#16a34a" : "#64748b" }}>
+                          style={{ background: e.canal === "email" ? "rgba(79,70,229,0.10)" : e.canal === "whatsapp" ? "color-mix(in srgb, var(--success) 12%, transparent)" : "#f1f5f9", color: e.canal === "email" ? "var(--primary)" : e.canal === "whatsapp" ? "var(--success)" : "#64748b" }}>
                           {e.canal}
                         </span>
                       </td>
@@ -167,7 +167,7 @@ export default function EventosPage() {
                       {/* error_message is sanitized at the write point (queue processors):
                           it only ever carries a safe, neutral-Spanish category string,
                           never raw Supabase/SQL detail. Rendered as-is with a "—" fallback. */}
-                      <td className="px-4 py-3 text-xs text-red-500 max-w-[150px] truncate" title={e.error_message ?? ""}>
+                      <td className="px-4 py-3 text-xs max-w-[150px] truncate" style={{ color: "var(--danger)" }} title={e.error_message ?? ""}>
                         {e.error_message ?? "—"}
                       </td>
                       <td className="px-4 py-3">
@@ -185,7 +185,7 @@ export default function EventosPage() {
                             <button
                               onClick={() => handleDiscard(e.id)}
                               disabled={actionLoading === e.id + "_discard"}
-                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50">
+                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:brightness-95 disabled:opacity-50" style={{ color: "var(--danger)", background: "rgba(220,38,38,0.08)" }}>
                               <Trash2 size={11} />
                               Descartar
                             </button>

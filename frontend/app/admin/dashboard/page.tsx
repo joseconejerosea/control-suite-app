@@ -29,12 +29,12 @@ export default function AdminDashboardPage() {
   const o = overview ?? {};
 
   const kpis = [
-    { label: "Clientes activos",   value: o.clients?.active ?? "—",    color: "#6366f1" },
-    { label: "Eventos (24h)",      value: o.events_24h?.total ?? "—",  color: "#34b96e" },
+    { label: "Clientes activos",   value: o.clients?.active ?? "—",    color: "var(--primary)" },
+    { label: "Eventos (24h)",      value: o.events_24h?.total ?? "—",  color: "var(--success)" },
     { label: "Activaciones live",  value: o.activations?.live ?? "—",  color: "#f59e0b" },
-    { label: "Docs (24h)",         value: o.docs_24h?.total ?? "—",    color: "#60a5fa" },
-    { label: "Errores (24h)",      value: o.events_24h?.failed ?? "—", color: "#a78bfa" },
-    { label: "Costo AI hoy",       value: o.ai_cost_hoy != null ? `$${Number(o.ai_cost_hoy).toFixed(4)}` : "—", color: "#e8353f" },
+    { label: "Docs (24h)",         value: o.docs_24h?.total ?? "—",    color: "var(--primary)" },
+    { label: "Errores (24h)",      value: o.events_24h?.failed ?? "—", color: "var(--primary)" },
+    { label: "Costo AI hoy",       value: o.ai_cost_hoy != null ? `$${Number(o.ai_cost_hoy).toFixed(4)}` : "—", color: "var(--primary)" },
   ];
 
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("es-CL") : "—";
@@ -86,7 +86,7 @@ export default function AdminDashboardPage() {
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{fmtDate(c.created_at)}</td>
                       <td className="px-4 py-3">
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold capitalize"
-                          style={{ background: c.status === "active" ? "rgba(42,157,92,0.15)" : "rgba(200,32,44,0.15)", color: c.status === "active" ? "#34b96e" : "#e8353f" }}>
+                          style={{ background: c.status === "active" ? "color-mix(in srgb, var(--success) 15%, transparent)" : "rgba(79,70,229,0.15)", color: c.status === "active" ? "var(--success)" : "var(--primary)" }}>
                           {c.status ?? "—"}
                         </span>
                       </td>

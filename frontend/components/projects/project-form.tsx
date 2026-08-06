@@ -289,7 +289,7 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
             <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.pptx,.ppt" style={{ display: "none" }}
               onChange={(e) => setAiFile(e.target.files?.[0] ?? null)} />
             <button onClick={processAIFile} disabled={!aiFile || aiLoading}
-              style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: aiFile ? "var(--red, #C8202C)" : "var(--secondary)", color: aiFile ? "#fff" : "var(--muted-foreground)", cursor: aiFile && !aiLoading ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
+              style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: aiFile ? "var(--primary)" : "var(--secondary)", color: aiFile ? "#fff" : "var(--muted-foreground)", cursor: aiFile && !aiLoading ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
               {aiLoading ? "Procesando…" : "Procesar con IA"}
             </button>
             {(aiFile || aiInboxId) && (
@@ -381,7 +381,7 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
         </div>
       ))}
 
-      {error && <div style={{ fontSize: 13, padding: "10px 14px", borderRadius: 8, background: "rgba(200,32,44,0.12)", color: "#f87171", marginBottom: 16 }}>{error}</div>}
+      {error && <div style={{ fontSize: 13, padding: "10px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)", marginBottom: 16 }}>{error}</div>}
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingBottom: 40 }}>
         <button onClick={() => router.push("/client/projects")}
@@ -389,7 +389,7 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
           Cancelar
         </button>
         <button onClick={submit} disabled={saving || !form.name.trim()}
-          style={{ padding: "10px 22px", borderRadius: 8, border: "none", background: form.name.trim() ? "var(--red, #C8202C)" : "var(--secondary)", color: form.name.trim() ? "#fff" : "var(--muted-foreground)", cursor: saving ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+          style={{ padding: "10px 22px", borderRadius: 8, border: "none", background: form.name.trim() ? "var(--primary)" : "var(--secondary)", color: form.name.trim() ? "#fff" : "var(--muted-foreground)", cursor: saving ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
           {saving ? "Guardando…" : mode === "create" ? "Crear proyecto" : "Guardar cambios"}
         </button>
       </div>

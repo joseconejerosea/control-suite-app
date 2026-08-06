@@ -8,14 +8,14 @@ import { api } from "@/lib/api";
 const POLL_INTERVAL = 30_000;
 
 const SEV_STYLE: Record<string, { background: string; color: string }> = {
-  critica: { background: "rgba(200,32,44,0.15)", color: "#e8353f" },
+  critica: { background: "color-mix(in srgb, var(--danger) 15%, transparent)", color: "var(--danger)" },
   alta:    { background: "rgba(245,115,0,0.15)",  color: "#f97316" },
   media:   { background: "rgba(245,158,11,0.15)", color: "#f59e0b" },
   baja:    { background: "rgba(100,116,139,0.15)", color: "#94a3b8" },
 };
 
 const LOC_BADGE: Record<string, { bg: string; color: string; label: string }> = {
-  VERIFIED: { bg: "rgba(42,157,92,0.15)", color: "#34b96e", label: "Verificada" },
+  VERIFIED: { bg: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)", label: "Verificada" },
   MISMATCH: { bg: "rgba(245,115,0,0.15)", color: "#f97316", label: "Desfasada" },
   PENDING:  { bg: "rgba(100,116,139,0.15)", color: "#94a3b8", label: "Pendiente" },
 };
@@ -108,18 +108,18 @@ function TerrenoDetail() {
             <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>{lastPoll.toLocaleTimeString("es-CL")}</span>
             <button onClick={generarReporte} disabled={generando}
               className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)", cursor: generando ? "wait" : "pointer", opacity: generando ? 0.5 : 1 }}>
+              style={{ background: "rgba(79,70,229,0.15)", color: "var(--primary)", border: "1px solid rgba(79,70,229,0.3)", cursor: generando ? "wait" : "pointer", opacity: generando ? 0.5 : 1 }}>
               {generando ? "Generando..." : "Generar Reporte IA"}
             </button>
           </div>
         </div>
 
         {reporte && (
-          <div className="rounded-xl border p-4 mb-6" style={{ background: "rgba(99,102,241,0.08)", borderColor: "rgba(99,102,241,0.3)" }}>
+          <div className="rounded-xl border p-4 mb-6" style={{ background: "rgba(79,70,229,0.08)", borderColor: "rgba(79,70,229,0.3)" }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold" style={{ color: "#818cf8" }}>Último reporte generado</span>
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e" }}>
+                <span className="text-sm font-semibold" style={{ color: "var(--primary)" }}>Último reporte generado</span>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)" }}>
                   {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.calificacion ?? "—"}
                 </span>
               </div>
@@ -139,12 +139,12 @@ function TerrenoDetail() {
           {TABS.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: tab === t.key ? "var(--red)" : "var(--secondary)", color: tab === t.key ? "#fff" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
+              style={{ background: tab === t.key ? "var(--primary)" : "var(--secondary)", color: tab === t.key ? "#fff" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
               {t.label}
             </button>
           ))}
           <button onClick={() => setIncModal(true)} className="ml-auto px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ background: "rgba(200,32,44,0.1)", color: "#e8353f", border: "none", cursor: "pointer" }}>
+            style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "none", cursor: "pointer" }}>
             Reportar
           </button>
         </div>
@@ -156,7 +156,7 @@ function TerrenoDetail() {
             {checkins.length === 0 ? <div className="text-center py-12" style={{ color: "var(--muted-foreground)" }}>Sin check-ins</div>
             : checkins.map((c: any) => (
               <div key={c.id} className="rounded-xl border p-4 flex gap-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-                <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e", fontSize: 18 }}>✓</div>
+                <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)", fontSize: 18 }}>✓</div>
                 <div>
                   <div className="text-sm font-medium">{c.persona_id?.slice(0,8)}...</div>
                   <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{new Date(c.ts).toLocaleString("es-CL")}</div>
@@ -179,7 +179,7 @@ function TerrenoDetail() {
                   </div>
                   {inc.estado === "abierta" && (
                     <button onClick={() => resolverIncidencia(inc.id)} className="text-xs px-2 py-1 rounded"
-                      style={{ background: "rgba(42,157,92,0.12)", color: "#34b96e", border: "none", cursor: "pointer" }}>Resolver</button>
+                      style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", border: "none", cursor: "pointer" }}>Resolver</button>
                   )}
                 </div>
                 <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{new Date(inc.created_at).toLocaleString("es-CL")} · {inc.estado}</div>
@@ -257,7 +257,7 @@ function TerrenoDetail() {
                 <button onClick={() => setIncModal(false)} className="flex-1 py-2 rounded-lg text-sm"
                   style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>Cancelar</button>
                 <button onClick={reportarIncidencia} disabled={!incForm.descripcion.trim()} className="flex-1 py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", opacity: !incForm.descripcion.trim() ? 0.4 : 1 }}>Reportar</button>
+                  style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", opacity: !incForm.descripcion.trim() ? 0.4 : 1 }}>Reportar</button>
               </div>
             </div>
           </div>

@@ -41,21 +41,21 @@ function Badge({ value, map }: { value: string; map: Record<string, { bg: string
 export const StatusBadge = (v: unknown) => {
   const val = String(v ?? "");
   const map: Record<string, { bg: string; color: string }> = {
-    active:       { bg: "var(--green-dim)",        color: "var(--green-light)" },
+    active:       { bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
     paused:       { bg: "rgba(245,158,11,0.15)",   color: "#f59e0b" },
     archived:     { bg: "var(--secondary)",        color: "var(--muted-foreground)" },
-    draft:        { bg: "rgba(139,92,246,0.15)",   color: "#a78bfa" },
+    draft:        { bg: "rgba(79,70,229,0.12)",     color: "var(--primary)" },
     ended:        { bg: "var(--secondary)",        color: "var(--muted-foreground)" },
     inactive:     { bg: "var(--secondary)",        color: "var(--muted-foreground)" },
-    uploaded:     { bg: "rgba(59,130,246,0.15)",   color: "#60a5fa" },
-    processing:   { bg: "rgba(139,92,246,0.15)",   color: "#a78bfa" },
+    uploaded:     { bg: "rgba(79,70,229,0.15)",    color: "var(--primary)" },
+    processing:   { bg: "rgba(79,70,229,0.12)",     color: "var(--primary)" },
     parsed:       { bg: "rgba(245,158,11,0.15)",   color: "#fcd34d" },
-    populated:    { bg: "var(--green-dim)",        color: "var(--green-light)" },
-    error:        { bg: "var(--red-dim)",          color: "var(--red-light)" },
-    observer:     { bg: "rgba(59,130,246,0.12)",   color: "#60a5fa" },
+    populated:    { bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
+    error:        { bg: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" },
+    observer:     { bg: "rgba(79,70,229,0.12)",    color: "var(--primary)" },
     supervisor:   { bg: "rgba(245,158,11,0.12)",   color: "#f59e0b" },
-    coordinator:  { bg: "rgba(139,92,246,0.12)",   color: "#a78bfa" },
-    brand_manager:{ bg: "var(--green-dim)",        color: "var(--green-light)" },
+    coordinator:  { bg: "rgba(79,70,229,0.12)",     color: "var(--primary)" },
+    brand_manager:{ bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
   };
   return <Badge value={val} map={map} />;
 };
@@ -120,7 +120,7 @@ function Modal({ title, onClose, onSave, loading, fields, form, setForm }: {
           </button>
           <button onClick={onSave} disabled={loading}
             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-            style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer" }}>
+            style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer" }}>
             {loading
               ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} />
               : "Save"}
@@ -201,7 +201,7 @@ export default function CrudTable({ title, subtitle, endpoint, columns, fields, 
     <div className="animate-fade-up">
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-xl"
-          style={{ background: toast.ok ? "var(--green)" : "var(--red)", color: "#fff" }}>
+          style={{ background: toast.ok ? "var(--success)" : "var(--danger)", color: "#fff" }}>
           {toast.msg}
         </div>
       )}
@@ -213,7 +213,7 @@ export default function CrudTable({ title, subtitle, endpoint, columns, fields, 
         </div>
         <button onClick={openCreate}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(200,32,44,0.3)" }}>
+          style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(79,70,229,0.3)" }}>
           <Plus size={14} /> New {title.replace(/s$/, "")}
         </button>
       </div>

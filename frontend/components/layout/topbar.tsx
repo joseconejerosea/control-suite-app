@@ -50,7 +50,7 @@ export default function Topbar() {
 
   return (
     <header className="h-14 flex items-center justify-between px-6 border-b flex-shrink-0"
-      style={{ background: "var(--navy)", borderColor: "var(--border)" }}>
+      style={{ background: "var(--paper)", borderColor: "var(--line)" }}>
       <h1 className="font-semibold text-sm">{title}</h1>
 
       <div className="flex items-center gap-3">
@@ -58,12 +58,12 @@ export default function Topbar() {
         <button className="relative p-2 rounded-lg transition-colors"
           style={{ background: "var(--secondary)", border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}>
           <Bell size={15} />
-          <span className="absolute top-1 right-1 w-2 h-2 rounded-full" style={{ background: "var(--red)" }} />
+          <span className="absolute top-1 right-1 w-2 h-2 rounded-full" style={{ background: "var(--danger)" }} />
         </button>
 
         {/* User avatar */}
         <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold"
-          style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff" }}>
+          style={{ background: "var(--ai-gradient)", color: "#fff" }}>
           {initials}
         </div>
 

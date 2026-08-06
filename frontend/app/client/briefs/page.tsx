@@ -6,10 +6,10 @@ import { api } from "@/lib/api";
 
 const STATUS_STYLE: Record<string, { background: string; color: string }> = {
   PENDING:    { background: "rgba(100,116,139,0.15)", color: "#94a3b8" },
-  PROCESSING: { background: "rgba(59,130,246,0.15)",  color: "#60a5fa" },
+  PROCESSING: { background: "rgba(79,70,229,0.10)",   color: "var(--primary)" },
   READY:      { background: "rgba(245,158,11,0.15)",  color: "#f59e0b" },
-  APPROVED:   { background: "rgba(42,157,92,0.15)",   color: "#34b96e" },
-  REJECTED:   { background: "rgba(200,32,44,0.15)",   color: "#e8353f" },
+  APPROVED:   { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
+  REJECTED:   { background: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)" },
 };
 
 const fieldStyle = { width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none" };
@@ -135,12 +135,12 @@ export default function BriefsInboxPage() {
                   <div className="flex gap-2">
                     <button disabled={actionLoading} onClick={() => approve(selected.id)}
                       className="text-sm px-4 py-2 rounded-lg font-semibold"
-                      style={{ background: "rgba(42,157,92,0.2)", color: "#34b96e", border: "none", cursor: "pointer" }}>
+                      style={{ background: "color-mix(in srgb, var(--success) 20%, transparent)", color: "var(--success)", border: "none", cursor: "pointer" }}>
                       {actionLoading ? "..." : "Aprobar y crear proyecto"}
                     </button>
                     <button onClick={() => setShowReject(true)}
                       className="text-sm px-4 py-2 rounded-lg font-semibold"
-                      style={{ background: "rgba(200,32,44,0.15)", color: "#e8353f", border: "none", cursor: "pointer" }}>
+                      style={{ background: "color-mix(in srgb, var(--danger) 15%, transparent)", color: "var(--danger)", border: "none", cursor: "pointer" }}>
                       Rechazar
                     </button>
                   </div>
@@ -218,7 +218,7 @@ export default function BriefsInboxPage() {
                     )}
 
                     {ext.notas_ia && (
-                      <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(59,130,246,0.08)", color: "#60a5fa" }}>
+                      <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(79,70,229,0.08)", color: "var(--primary)" }}>
                         <span className="font-semibold">Notas IA:</span> {ext.notas_ia}
                       </div>
                     )}
@@ -230,7 +230,7 @@ export default function BriefsInboxPage() {
                     )}
 
                     {Object.keys(missing ?? {}).length > 0 && (
-                      <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(200,32,44,0.08)", color: "#e8353f" }}>
+                      <div className="rounded-lg p-3 text-xs" style={{ background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--danger)" }}>
                         <span className="font-semibold">Campos faltantes:</span> {JSON.stringify(missing)}
                       </div>
                     )}
@@ -249,7 +249,7 @@ export default function BriefsInboxPage() {
                     <div className="flex gap-2 mt-4">
                       <button onClick={() => setShowReject(false)} style={{ flex: 1, padding: 9, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
                       <button disabled={actionLoading} onClick={() => reject(selected.id)}
-                        style={{ flex: 2, padding: 9, borderRadius: 8, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
+                        style={{ flex: 2, padding: 9, borderRadius: 8, border: "none", background: "var(--danger)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
                         {actionLoading ? "..." : "Rechazar"}
                       </button>
                     </div>

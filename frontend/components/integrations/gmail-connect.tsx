@@ -94,7 +94,7 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
       ) : status.connected ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, background: "#2a9d5c22", color: "#2a9d5c", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", borderRadius: 99, padding: "3px 9px", fontWeight: 600 }}>
               <Check size={12} /> Conectado
             </span>
             <span style={{ fontSize: 13, color: "var(--foreground)" }}>
@@ -112,7 +112,7 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
             Conectá la casilla para importar comprobantes y exportar a Sheets automáticamente.
           </span>
           <button onClick={connect} disabled={working}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: working ? "default" : "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", opacity: working ? 0.7 : 1 }}>
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--primary)", color: "#fff", border: "none", cursor: working ? "default" : "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", opacity: working ? 0.7 : 1 }}>
             {working ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} Conectar Gmail
           </button>
         </div>

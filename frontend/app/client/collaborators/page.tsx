@@ -18,7 +18,7 @@ export default function CollaboratorsPage() {
           { key: "role_label", label: "Rol",   render: StatusBadge },
           { key: "is_active",  label: "Activo",
             render: (v) => <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-              style={{ background: v ? "var(--green-dim)" : "var(--secondary)", color: v ? "var(--green-light)" : "var(--muted-foreground)" }}>
+              style={{ background: v ? "color-mix(in srgb, var(--success) 12%, transparent)" : "var(--secondary)", color: v ? "var(--success)" : "var(--muted-foreground)" }}>
               {v ? "Sí" : "No"}
             </span> },
         ]}

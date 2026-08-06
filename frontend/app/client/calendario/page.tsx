@@ -6,11 +6,11 @@ import { api } from "@/lib/api";
 
 const ESTADO_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   pendiente:   { bg: "rgba(100,116,139,0.25)", color: "#94a3b8", label: "Pend" },
-  enviada:     { bg: "rgba(59,130,246,0.25)",  color: "#60a5fa", label: "Env" },
-  confirmada:  { bg: "rgba(42,157,92,0.3)",    color: "#34b96e", label: "OK" },
-  rechazada:   { bg: "rgba(200,32,44,0.25)",   color: "#e8353f", label: "Rech" },
+  enviada:     { bg: "rgba(79,70,229,0.25)",   color: "var(--primary)", label: "Env" },
+  confirmada:  { bg: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", label: "OK" },
+  rechazada:   { bg: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)", label: "Rech" },
   reemplazada: { bg: "rgba(245,158,11,0.25)",  color: "#f59e0b", label: "Reemp" },
-  no_show:     { bg: "rgba(200,32,44,0.35)",   color: "#e8353f", label: "No show" },
+  no_show:     { bg: "color-mix(in srgb, var(--danger) 18%, transparent)",  color: "var(--danger)", label: "No show" },
 };
 
 const fieldStyle = { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any };
@@ -68,11 +68,11 @@ function TurnoModal({ projectId, promoters, onClose, onDone }: { projectId: stri
             <label style={labelStyle}>Dirección</label>
             <input value={form.local_direccion} onChange={e => setForm(f => ({ ...f, local_direccion: e.target.value }))} placeholder="Av. Ejemplo 123" style={fieldStyle} />
           </div>
-          {error && <div style={{ color: "#e8353f", fontSize: 12 }}>{error}</div>}
+          {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
           <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--red)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--primary)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
             {saving ? "Guardando..." : "Asignar"}
           </button>
         </div>
@@ -175,7 +175,7 @@ export default function CalendarioPage() {
   const btn = (label: string, onClick: () => void, opts: { primary?: boolean; disabled?: boolean } = {}) => (
     <button onClick={onClick} disabled={opts.disabled || busy}
       style={{ padding: "8px 14px", borderRadius: 10, border: opts.primary ? "none" : "1px solid var(--border)",
-        background: opts.primary ? (opts.disabled ? "var(--secondary)" : "var(--red)") : "var(--secondary)",
+        background: opts.primary ? (opts.disabled ? "var(--secondary)" : "var(--primary)") : "var(--secondary)",
         color: opts.primary && !opts.disabled ? "#fff" : "var(--foreground)",
         cursor: opts.disabled || busy ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, opacity: opts.disabled ? 0.6 : 1 }}>
       {label}
@@ -210,7 +210,7 @@ export default function CalendarioPage() {
         {selectedProject && (
           <div className="flex items-center gap-3 mb-5 flex-wrap">
             <span className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-              style={aprobado ? { background: "rgba(42,157,92,0.15)", color: "#34b96e" } : { background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+              style={aprobado ? { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" } : { background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
               {aprobado ? "Aprobado ✓" : "Pendiente de aprobación"}
             </span>
             {!aprobado && btn("Aprobar proyecto", aprobar, { primary: true })}
@@ -365,7 +365,7 @@ export default function CalendarioPage() {
         )}
 
         {toast && (
-          <div style={{ position: "fixed", bottom: 24, right: 24, background: "#1a1a2e", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+          <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--ink)", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
             {toast}
           </div>
         )}

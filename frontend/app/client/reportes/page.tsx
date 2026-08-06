@@ -36,7 +36,7 @@ type StageStatus = "pending" | "running" | "completed" | "failed";
 interface DisplayStage { name: string; label: string; status: StageStatus; }
 
 const stageColors: Record<StageStatus, string> = {
-  completed: "#34b96e", running: "#6366f1", failed: "#e8353f", pending: "var(--muted-foreground)",
+  completed: "var(--success)", running: "var(--primary)", failed: "var(--danger)", pending: "var(--muted-foreground)",
 };
 
 function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => void; onDone: () => void }) {
@@ -135,8 +135,8 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
           <div>
             <div className="font-bold text-base flex items-center gap-2">
               Subir documento
-              <span className="text-xs px-2 py-0.5 rounded font-semibold" style={{ background: "var(--red)", color: "#fff" }}>{targetLabel}</span>
-              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(99,102,241,0.2)", color: "#818cf8" }}>IA</span>
+              <span className="text-xs px-2 py-0.5 rounded font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{targetLabel}</span>
+              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(79,70,229,0.15)", color: "var(--primary)" }}>IA</span>
             </div>
             <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>La IA lee, clasifica y agrega al reporte correcto</div>
           </div>
@@ -147,11 +147,11 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
         <div className="px-5 pt-4 flex items-center gap-2">
           {[{ n: 1, label: "Subir" }, { n: 2, label: "Procesar" }, { n: 3, label: "Revisar" }, { n: 4, label: "Listo" }].map((s, i) => (
             <div key={s.n} className="flex items-center gap-2 flex-1">
-              <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "#6366f1" : "var(--secondary)", color: stage >= s.n ? "#fff" : "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: stage >= s.n ? "var(--primary)" : "var(--secondary)", color: stage >= s.n ? "#fff" : "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
                 {stage > s.n ? <Check size={12} /> : s.n}
               </div>
               <span style={{ fontSize: 12, fontWeight: stage === s.n ? 600 : 400, color: stage === s.n ? "var(--foreground)" : "var(--muted-foreground)" }}>{s.label}</span>
-              {i < 3 && <div style={{ flex: 1, height: 1, background: stage > s.n ? "#6366f1" : "var(--border)" }} />}
+              {i < 3 && <div style={{ flex: 1, height: 1, background: stage > s.n ? "var(--primary)" : "var(--border)" }} />}
             </div>
           ))}
         </div>
@@ -174,22 +174,22 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
                   <button onClick={() => setFile(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 12 }}>Cambiar</button>
                 </div>
               )}
-              {error && <div style={{ color: "#e8353f", fontSize: 13, marginTop: 12 }}>{error}</div>}
+              {error && <div style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{error}</div>}
             </div>
           )}
 
           {stage === 2 && (
             <div className="rounded-xl p-5" style={{ background: "var(--secondary)", border: "1px solid var(--border)" }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366f1" }} />
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--primary)" }} />
                 Procesando con IA · pipeline en tiempo real
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {pipelineStages.map(ps => (
-                  <div key={ps.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8, background: "var(--card)", border: `1px solid ${ps.status === "running" ? "#6366f1" : ps.status === "completed" ? "#34b96e" : ps.status === "failed" ? "#e8353f" : "var(--border)"}` }}>
-                    {ps.status === "completed" && <Check size={16} style={{ color: "#34b96e" }} />}
-                    {ps.status === "running" && <Loader2 size={16} className="animate-spin" style={{ color: "#6366f1" }} />}
-                    {ps.status === "failed" && <AlertCircle size={16} style={{ color: "#e8353f" }} />}
+                  <div key={ps.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8, background: "var(--card)", border: `1px solid ${ps.status === "running" ? "var(--primary)" : ps.status === "completed" ? "var(--success)" : ps.status === "failed" ? "var(--danger)" : "var(--border)"}` }}>
+                    {ps.status === "completed" && <Check size={16} style={{ color: "var(--success)" }} />}
+                    {ps.status === "running" && <Loader2 size={16} className="animate-spin" style={{ color: "var(--primary)" }} />}
+                    {ps.status === "failed" && <AlertCircle size={16} style={{ color: "var(--danger)" }} />}
                     {ps.status === "pending" && <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--border)" }} />}
                     <span style={{ fontSize: 13, fontWeight: 500 }}>{ps.label}</span>
                   </div>
@@ -200,12 +200,12 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
 
           {stage === 3 && (
             <div>
-              <div style={{ borderRadius: 10, border: "1px solid rgba(42,157,92,0.4)", padding: 16, background: "rgba(42,157,92,0.1)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#34b96e", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ borderRadius: 10, border: "1px solid color-mix(in srgb, var(--success) 40%, transparent)", padding: 16, background: "color-mix(in srgb, var(--success) 10%, transparent)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--success)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <Check size={18} color="#fff" />
                 </div>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: "#34b96e" }}>Clasificado como <strong>{classifData?.destino ?? editedData.destino ?? "—"}</strong></div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: "var(--success)" }}>Clasificado como <strong>{classifData?.destino ?? editedData.destino ?? "—"}</strong></div>
                   <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{classifData?.tipo ?? editedData.tipo ?? "—"} · {classifData?.categoria ?? editedData.categoria ?? "—"}{confidencePct > 0 && ` · ${confidencePct}% confianza`}</div>
                 </div>
               </div>
@@ -218,8 +218,8 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
 
           {stage === 4 && (
             <div style={{ textAlign: "center", padding: "48px 0" }}>
-              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(42,157,92,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                <Check size={32} style={{ color: "#34b96e" }} />
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "color-mix(in srgb, var(--success) 15%, transparent)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <Check size={32} style={{ color: "var(--success)" }} />
               </div>
               <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Documento guardado</div>
               <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>El reporte se actualizara en breve.</div>
@@ -234,12 +234,12 @@ function UploadModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
             <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
             {stage === 1 && (
               <button onClick={handleUpload} disabled={!file || uploading}
-                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: !file ? "var(--secondary)" : "#6366f1", color: !file ? "var(--muted-foreground)" : "#fff", cursor: !file ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: !file ? "var(--secondary)" : "var(--primary)", color: !file ? "var(--muted-foreground)" : "#fff", cursor: !file ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                 {uploading ? <><Loader2 size={14} className="animate-spin" />Subiendo...</> : <><Upload size={14} />Subir y procesar</>}
               </button>
             )}
             {stage === 3 && (
-              <button onClick={handleConfirm} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#34b96e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={handleConfirm} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "var(--success)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                 <Check size={14} /> Confirmar y guardar
               </button>
             )}
@@ -296,11 +296,11 @@ function ManualModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
               </select>
             </div>
           </div>
-          {error && <div style={{ color: "#e8353f", fontSize: 13, marginTop: 12 }}>{error}</div>}
+          {error && <div style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{error}</div>}
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t" style={{ borderColor: "var(--border)", background: "var(--secondary)" }}>
           <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
-          <button onClick={save} disabled={saving} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#6366f1", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+          <button onClick={save} disabled={saving} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
             {saving ? "Guardando..." : "Guardar"}
           </button>
         </div>
@@ -311,9 +311,9 @@ function ManualModal({ target, onClose, onDone }: { target: Tab; onClose: () => 
 
 function SourceBadge({ source }: { source: string }) {
   const map: Record<string, { background: string; color: string }> = {
-    email:    { background: "rgba(99,102,241,0.15)",  color: "#818cf8" },
-    whatsapp: { background: "rgba(42,157,92,0.15)",   color: "#34b96e" },
-    manual:   { background: "var(--secondary)",        color: "var(--muted-foreground)" },
+    email:    { background: "rgba(79,70,229,0.12)",                               color: "var(--primary)" },
+    whatsapp: { background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)" },
+    manual:   { background: "var(--secondary)",                                    color: "var(--muted-foreground)" },
   };
   const s = map[source] ?? map.manual;
   return <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600, background: s.background, color: s.color, textTransform: "capitalize" }}>{source}</span>;
@@ -356,7 +356,7 @@ export default function ReportesPage() {
   const ActionBar = ({ tabKey }: { tabKey: Tab }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
       <button onClick={() => setUploadTarget(tabKey)}
-        style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#6366f1", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+        style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
         <Upload size={13} /> Subir doc IA
       </button>
       <button onClick={() => setManualTarget(tabKey)}
@@ -406,7 +406,7 @@ export default function ReportesPage() {
         <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
           {(["gastos", "ventas", "costos"] as Tab[]).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ padding: "10px 18px", fontSize: 14, fontWeight: activeTab === tab ? 600 : 400, borderBottom: activeTab === tab ? "2px solid var(--red)" : "2px solid transparent", color: activeTab === tab ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: -1, textTransform: "capitalize" }}>
+              style={{ padding: "10px 18px", fontSize: 14, fontWeight: activeTab === tab ? 600 : 400, borderBottom: activeTab === tab ? "2px solid var(--primary)" : "2px solid transparent", color: activeTab === tab ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: -1, textTransform: "capitalize" }}>
               {tab}
             </button>
           ))}
@@ -416,16 +416,16 @@ export default function ReportesPage() {
         {activeTab === "gastos" && (
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
-              <KpiCard label="Total gastos" value={formatCLP(report?.expenses?.total_amount ?? null)} color="#e8353f" />
+              <KpiCard label="Total gastos" value={formatCLP(report?.expenses?.total_amount ?? null)} color="var(--danger)" />
               <KpiCard label="Registros" value={String(report?.expenses?.total_count ?? 0)} />
-              <KpiCard label="Confianza IA" value="—" color="#34b96e" />
+              <KpiCard label="Confianza IA" value="—" color="var(--success)" />
             </div>
             <ActionBar tabKey="gastos" />
             {renderTable(expenses, [
               { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
               { label: "Descripcion", render: r => <span style={{ fontWeight: 500 }}>{r.description ?? "—"}</span> },
               { label: "Proveedor", render: r => r.vendor_name ?? "—" },
-              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "#e8353f" }}>{r.amount ? `−${formatCLP(r.amount)}` : "—"}</span> },
+              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "var(--danger)" }}>{r.amount ? `−${formatCLP(r.amount)}` : "—"}</span> },
               { label: "Origen", render: r => <SourceBadge source={r.source} /> },
               { label: "Confianza", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.confidence_score ? `${Math.round(r.confidence_score * 100)}%` : "—"}</span> },
             ])}
@@ -443,14 +443,14 @@ export default function ReportesPage() {
                             <span style={{ fontWeight: 600 }}>{count}</span>
                           </div>
                           <div style={{ height: 4, borderRadius: 4, background: "var(--secondary)" }}>
-                            <div style={{ height: "100%", borderRadius: 4, background: src === "email" ? "#818cf8" : src === "whatsapp" ? "#34b96e" : "var(--muted-foreground)", width: expenses.length ? `${count / expenses.length * 100}%` : "0%" }} />
+                            <div style={{ height: "100%", borderRadius: 4, background: src === "email" ? "var(--primary)" : src === "whatsapp" ? "var(--success)" : "var(--muted-foreground)", width: expenses.length ? `${count / expenses.length * 100}%` : "0%" }} />
                           </div>
                         </div>
                       );
                     })}
                   </div>
                 )},
-                { label: "Total", content: <div style={{ fontSize: 28, fontWeight: 800, color: "#e8353f" }}>{formatCLP(report?.expenses?.total_amount ?? null)}</div> },
+                { label: "Total", content: <div style={{ fontSize: 28, fontWeight: 800, color: "var(--danger)" }}>{formatCLP(report?.expenses?.total_amount ?? null)}</div> },
                 { label: "Alertas IA", content: <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Documentos con confianza baja apareceran aqui para revision.</div> },
               ].map(({ label, content }) => (
                 <div key={label} className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -466,7 +466,7 @@ export default function ReportesPage() {
         {activeTab === "ventas" && (
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
-              <KpiCard label="Total ventas" value={formatCLP(report?.sales?.total_amount ?? null)} color="#34b96e" />
+              <KpiCard label="Total ventas" value={formatCLP(report?.sales?.total_amount ?? null)} color="var(--success)" />
               <KpiCard label="Facturas" value={String(report?.sales?.total_count ?? 0)} />
               <KpiCard label="Por cobrar" value="—" color="#f59e0b" />
             </div>
@@ -475,8 +475,8 @@ export default function ReportesPage() {
               { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
               { label: "N Factura", render: r => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.numero_documento ?? "—"}</span> },
               { label: "Cliente", render: r => <span style={{ fontWeight: 500 }}>{r.vendor_name ?? r.description ?? "—"}</span> },
-              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "#34b96e" }}>+{formatCLP(r.amount)}</span> },
-              { label: "Estado", render: r => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: r.status === "approved" ? "rgba(42,157,92,0.15)" : "rgba(245,158,11,0.15)", color: r.status === "approved" ? "#34b96e" : "#f59e0b" }}>{r.status}</span> },
+              { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "var(--success)" }}>+{formatCLP(r.amount)}</span> },
+              { label: "Estado", render: r => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: r.status === "approved" ? "color-mix(in srgb, var(--success) 15%, transparent)" : "rgba(245,158,11,0.15)", color: r.status === "approved" ? "var(--success)" : "#f59e0b" }}>{r.status}</span> },
               { label: "Origen", render: r => <SourceBadge source={r.source} /> },
             ])}
           </div>
@@ -488,7 +488,7 @@ export default function ReportesPage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
               <KpiCard label="Total costos" value={formatCLP(report?.costs?.total_amount ?? null)} color="#f59e0b" />
               <KpiCard label="Registros" value={String(report?.costs?.total_count ?? 0)} />
-              <KpiCard label="Margen bruto" value="—" color="#34b96e" />
+              <KpiCard label="Margen bruto" value="—" color="var(--success)" />
             </div>
             <ActionBar tabKey="costos" />
             {renderTable(costs, [

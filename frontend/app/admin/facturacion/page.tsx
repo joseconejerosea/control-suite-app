@@ -10,17 +10,17 @@ const MOCK_FACTURAS = [
 ];
 
 const ESTADO_STYLE: Record<string, { bg: string; color: string }> = {
-  pagada:    { bg: "rgba(42,157,92,0.12)",  color: "#34b96e" },
+  pagada:    { bg: "color-mix(in srgb, var(--success) 12%, transparent)",  color: "var(--success)" },
   pendiente: { bg: "rgba(245,158,11,0.12)", color: "#f59e0b" },
-  vencida:   { bg: "rgba(200,32,44,0.12)",  color: "#e8353f" },
+  vencida:   { bg: "color-mix(in srgb, var(--danger) 12%, transparent)",   color: "var(--danger)" },
 };
 
 export default function FacturacionPage() {
   const kpis = [
-    { label: "Clientes activos",   value: "10",        icon: Users,       color: "#6366f1" },
-    { label: "Ingresos del mes",   value: "$4.150.000", icon: DollarSign,  color: "#34b96e" },
+    { label: "Clientes activos",   value: "10",        icon: Users,       color: "var(--primary)" },
+    { label: "Ingresos del mes",   value: "$4.150.000", icon: DollarSign,  color: "var(--success)" },
     { label: "Facturas pendientes",value: "2",          icon: CreditCard,  color: "#f59e0b" },
-    { label: "Crecimiento",        value: "+12%",       icon: TrendingUp,  color: "#60a5fa" },
+    { label: "Crecimiento",        value: "+12%",       icon: TrendingUp,  color: "var(--primary)" },
   ];
 
   return (

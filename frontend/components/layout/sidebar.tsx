@@ -85,9 +85,9 @@ export default function Sidebar() {
     : role === "admin" ? ADMIN_SECTIONS : CLIENT_SECTIONS;
 
   return (
-    <aside className="flex flex-col w-60 flex-shrink-0 border-r" style={{ background: "var(--navy)", borderColor: "var(--border)" }}>
+    <aside className="flex flex-col w-60 flex-shrink-0 border-r" style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}>
       <div className="flex items-center gap-2.5 px-4 py-5 border-b" style={{ borderColor: "var(--border)" }}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--red)", boxShadow: "0 4px 14px rgba(200,32,44,0.35)" }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--primary)", boxShadow: "0 4px 14px rgba(79,70,229,0.35)" }}>
           <Zap size={15} color="#fff" strokeWidth={2.5} />
         </div>
         <div>
@@ -137,10 +137,10 @@ export default function Sidebar() {
               return (
                 <Link key={item.href} href={item.href}
                   className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"
-                  style={{ background: active ? "var(--red-dim)" : "transparent", color: active ? "var(--red-light)" : "var(--muted-foreground)", fontWeight: active ? 600 : 400, textDecoration: "none" }}>
+                  style={{ background: active ? "linear-gradient(90deg, rgba(79,70,229,0.10), rgba(79,70,229,0))" : "transparent", color: active ? "var(--primary)" : "var(--muted-foreground)", fontWeight: active ? 600 : 400, textDecoration: "none", boxShadow: active ? "inset 2px 0 0 var(--primary)" : "none" }}>
                   <Icon size={15} strokeWidth={active ? 2.5 : 1.8} />
                   <span className="flex-1">{item.label}</span>
-                  {item.badge && <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--red)", color: "#fff" }}>{item.badge}</span>}
+                  {item.badge && <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{item.badge}</span>}
                   {active && <ChevronRight size={12} />}
                 </Link>
               );

@@ -17,7 +17,7 @@ type Project = {
 };
 
 const STATUS_STYLE: Record<string, { background: string; color: string }> = {
-  active:   { background: "rgba(42,157,92,0.15)",  color: "#34b96e" },
+  active:   { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
   paused:   { background: "rgba(245,158,11,0.15)", color: "#f59e0b" },
   archived: { background: "rgba(100,116,139,0.15)",color: "#94a3b8" },
   closed:   { background: "rgba(100,116,139,0.15)",color: "#94a3b8" },
@@ -60,7 +60,7 @@ export default function ProjectsPage() {
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar proyectos..."
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", width: 200 }} />
             <button onClick={() => router.push("/client/projects/nuevo")}
-              style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
               + Nuevo proyecto
             </button>
           </div>
@@ -104,7 +104,7 @@ export default function ProjectsPage() {
                             disabled={terminal}
                             title={terminal ? "Proyecto cerrado/archivado: no se puede convocar" : undefined}
                             className="text-xs px-2 py-1 rounded"
-                            style={{ background: "var(--red-dim, rgba(200,32,44,0.12))", color: "var(--red-light, #f87171)", border: "none", cursor: terminal ? "default" : "pointer", opacity: terminal ? 0.4 : 1 }}>Convocar</button>
+                            style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "none", cursor: terminal ? "default" : "pointer", opacity: terminal ? 0.4 : 1 }}>Convocar</button>
                         );
                       })()}
                     </div>
