@@ -18,6 +18,7 @@ import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientIsolationGuard } from '../../common/guards/client-isolation.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 
 @Controller('activations')
@@ -46,6 +47,7 @@ export class ActivationsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @AuditAction({ action: 'CREATE_ACTIVATION', entity: 'Activation' })
   create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateActivationDto,
@@ -54,6 +56,7 @@ export class ActivationsController {
   }
 
   @Patch(':id')
+  @AuditAction({ action: 'UPDATE_ACTIVATION', entity: 'Activation' })
   update(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -64,6 +67,7 @@ export class ActivationsController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @AuditAction({ action: 'DELETE_ACTIVATION', entity: 'Activation' })
   remove(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

@@ -1,9 +1,15 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { MetricsService } from './metrics.service';
-import { SkipThrottle } from '@nestjs/throttler/dist/throttler.decorator';
+import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
-@SkipThrottle()
+// C6 — /metrics expone labels client_id de TODOS los tenants (enumeración +
+// volumen de negocio). Reservado a super_admin.
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(UserRole.SUPERADMIN)
 @Controller('metrics')
 export class MetricsController {
   constructor(private readonly metricsService: MetricsService) {}

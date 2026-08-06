@@ -51,4 +51,7 @@ export class Activation extends TenantBaseEntity {
 
   @Column({ type: 'boolean', default: false })
   cierre_incompleto!: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  location!: { address: string; lat: number; lng: number; radiusMeters: number } | null;
 }

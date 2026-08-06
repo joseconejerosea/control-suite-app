@@ -1,16 +1,8 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('access_token') : '');
-const apiFetch = async (path: string, opts?: RequestInit) => {
-  const r = await fetch(`${API}${path}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}`, ...opts?.headers },
-  });
-  return r.json();
-};
+import { api } from '@/lib/api';
+import { ChatMarkdown } from '@/components/mind/ChatMarkdown';
 
 interface Propuesta {
   id: string;
@@ -26,7 +18,7 @@ interface Propuesta {
 interface ChatMsg { role: 'user' | 'assistant'; mensaje: string; ts: string; }
 
 const SEV_CONFIG: Record<string, { color: string; icon: string }> = {
-  critica: { color: 'border-red-400 bg-red-50', icon: '🔴' },
+  critica: { color: 'border-[color:var(--danger)] bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)]', icon: '🔴' },
   alta:    { color: 'border-orange-400 bg-orange-50', icon: '🟠' },
   media:   { color: 'border-amber-300 bg-amber-50', icon: '🟡' },
   baja:    { color: 'border-slate-200 bg-slate-50', icon: '⚪' },
@@ -45,9 +37,9 @@ export default function MindPage() {
 
   useEffect(() => {
     Promise.all([
-      apiFetch('/v1/app/mind/propuestas'),
-      apiFetch('/v1/app/mind/propuestas/dashboard'),
-      apiFetch('/v1/app/mind/chat/history?limit=30'),
+      api.get<any>('/v1/app/mind/propuestas').catch(() => ({ data: [] })),
+      api.get<any>('/v1/app/mind/propuestas/dashboard').catch(() => ({ data: null })),
+      api.get<any>('/v1/app/mind/chat/history?limit=30').catch(() => ({ data: [] })),
     ]).then(([p, d, h]) => {
       setPropuestas(p.data ?? p);
       setDashboard(d.data ?? d);
@@ -69,10 +61,7 @@ export default function MindPage() {
     setHistory((h) => [...h, userMsg]);
 
     try {
-      const res = await apiFetch('/v1/app/mind/chat', {
-        method: 'POST',
-        body: JSON.stringify({ mensaje: texto }),
-      });
+      const res = await api.post<any>('/v1/app/mind/chat', { mensaje: texto });
       const reply = res.data?.reply ?? res.reply ?? '...';
       setHistory((h) => [...h, { role: 'assistant', mensaje: reply, ts: new Date().toISOString() }]);
     } catch {
@@ -82,12 +71,12 @@ export default function MindPage() {
   };
 
   const aprobar = async (id: string) => {
-    await apiFetch(`/v1/app/mind/propuestas/${id}/aprobar`, { method: 'POST', body: JSON.stringify({}) });
+    await api.post(`/v1/app/mind/propuestas/${id}/aprobar`, {});
     setPropuestas((p) => p.map((x) => x.id === id ? { ...x, estado: 'aprobada' } : x));
   };
 
   const rechazar = async (id: string) => {
-    await apiFetch(`/v1/app/mind/propuestas/${id}/rechazar`, { method: 'POST', body: JSON.stringify({ motivo: 'Descartado por el usuario' }) });
+    await api.post(`/v1/app/mind/propuestas/${id}/rechazar`, { motivo: 'Descartado por el usuario' });
     setPropuestas((p) => p.filter((x) => x.id !== id));
   };
 
@@ -214,7 +203,7 @@ export default function MindPage() {
                     ? 'bg-indigo-600 text-white rounded-br-sm'
                     : 'bg-slate-100 text-slate-800 rounded-bl-sm'
                 }`}>
-                  {msg.mensaje}
+                  {msg.role === 'assistant' ? <ChatMarkdown content={msg.mensaje} /> : msg.mensaje}
                 </div>
               </div>
             ))}

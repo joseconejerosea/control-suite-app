@@ -14,18 +14,19 @@ export class SheetsService {
   ) {}
 
   // ─── Get OAuth client with saved tokens ───────────────────────────────────
-  private async getAuthClient(): Promise<any> {
+  private async getAuthClient(clientId: string): Promise<any> {
     const oAuth2Client = new google.auth.OAuth2(
       this.config.get('GMAIL_CLIENT_ID'),
       this.config.get('GMAIL_CLIENT_SECRET'),
       this.config.get('GMAIL_REDIRECT_URI'),
     );
 
+    // C3 — tokens per-tenant (ya no el buzón global GMAIL_EMAIL).
     const rows = await this.dataSource.query(
-      `SELECT tokens FROM gmail_tokens WHERE email = $1 LIMIT 1`,
-      [this.config.get('GMAIL_EMAIL')],
+      `SELECT tokens FROM gmail_tokens WHERE client_id = $1 AND tokens IS NOT NULL ORDER BY updated_at DESC LIMIT 1`,
+      [clientId],
     );
-    if (!rows.length) throw new Error('No Gmail OAuth tokens found. Connect Gmail first.');
+    if (!rows.length) throw new Error('No Gmail OAuth tokens found for this client. Connect Gmail first.');
 
     const tokens = typeof rows[0].tokens === 'string'
       ? JSON.parse(rows[0].tokens)
@@ -37,18 +38,18 @@ export class SheetsService {
 
   // ─── Get Sheet ID for a client ────────────────────────────────────────────
   private async getSheetId(clientId: string): Promise<string | null> {
-    // First check client config_f1
+    // First check client config (la columna es `config`, no `config_f1`)
     const clientRows = await this.dataSource.query(
-      `SELECT config_f1 FROM clients WHERE id = $1 LIMIT 1`,
+      `SELECT config FROM clients WHERE id = $1 LIMIT 1`,
       [clientId],
     );
-    if (clientRows.length && clientRows[0].config_f1?.sheets_id) {
-      return clientRows[0].config_f1.sheets_id;
+    if (clientRows.length && clientRows[0].config?.sheets_id) {
+      return clientRows[0].config.sheets_id;
     }
 
-    // Fallback: check canal_entrada config
+    // Fallback: check canal_entrada config (la columna es `is_active`, no `activo`)
     const canalRows = await this.dataSource.query(
-      `SELECT config FROM canal_entrada WHERE client_id = $1 AND activo = true LIMIT 1`,
+      `SELECT config FROM canal_entrada WHERE client_id = $1 AND is_active = true LIMIT 1`,
       [clientId],
     );
     if (canalRows.length && canalRows[0].config?.sheets_id) {
@@ -117,7 +118,7 @@ export class SheetsService {
         return;
       }
 
-      const auth = await this.getAuthClient();
+      const auth = await this.getAuthClient(clientId);
       const sheets = google.sheets({ version: 'v4', auth });
 
       await this.ensureTabs(sheets, sheetId);

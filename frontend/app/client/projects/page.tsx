@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 
@@ -12,33 +13,26 @@ type Project = {
   start_date?: string;
   end_date?: string;
   budget?: number;
+  objectives?: string;
 };
 
 const STATUS_STYLE: Record<string, { background: string; color: string }> = {
-  active:   { background: "rgba(42,157,92,0.15)",  color: "#34b96e" },
+  active:   { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
   paused:   { background: "rgba(245,158,11,0.15)", color: "#f59e0b" },
   archived: { background: "rgba(100,116,139,0.15)",color: "#94a3b8" },
+  closed:   { background: "rgba(100,116,139,0.15)",color: "#94a3b8" },
 };
 
-const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString("es-CL") : "—";
-const fmtMoney = (v?: number) => v ? `$${Number(v).toLocaleString("es-CL")}` : "—";
+// Las fechas de proyecto son date-only (columnas DATE, medianoche UTC). Sin timeZone:"UTC"
+// se renderizan en hora local (Chile UTC-4) y caen al día anterior. Forzar UTC evita el corrimiento.
+const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString("es-CL", { timeZone: "UTC" }) : "—";
+const fmtMoney = (v?: number) => v != null ? `$${Number(v).toLocaleString("es-CL")}` : "—";
 
 export default function ProjectsPage() {
-  const [projects, setProjects]   = useState<Project[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [search, setSearch]       = useState("");
-  const [showForm, setShowForm]   = useState(false);
-  const [showAI, setShowAI]       = useState(false);
-  const [selected, setSelected]   = useState<Project | null>(null);
-  const [form, setForm]           = useState({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" });
-  const [saving, setSaving]       = useState(false);
-
-  // AI upload states
-  const [aiFile, setAiFile]       = useState<File | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult]   = useState<any>(null);
-  const [aiApproved, setAiApproved] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState("");
 
   const fetchProjects = () => {
     setLoading(true);
@@ -54,119 +48,20 @@ export default function ProjectsPage() {
     !search || p.name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const save = async () => {
-    if (!form.name.trim()) return;
-    setSaving(true);
-    try {
-      if (selected) {
-        await api.patch(`/projects/${selected.id}`, { ...form, budget: form.budget ? parseFloat(form.budget) : undefined });
-      } else {
-        await api.post("/projects", { ...form, budget: form.budget ? parseFloat(form.budget) : undefined });
-      }
-      setShowForm(false);
-      setSelected(null);
-      setForm({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" });
-      fetchProjects();
-    } catch (e) { console.error(e); }
-    finally { setSaving(false); }
-  };
-
-  const openEdit = (p: Project) => {
-    setSelected(p);
-    setForm({ name: p.name, description: p.description ?? "", status: p.status, start_date: p.start_date ?? "", end_date: p.end_date ?? "", budget: p.budget ? String(p.budget) : "" });
-    setShowForm(true);
-  };
-
-  const processAIFile = async () => {
-    if (!aiFile) return;
-    setAiLoading(true);
-    setAiResult(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", aiFile);
-      const r = await api.post<any>("/documents/upload", fd);
-      const docId = r?.data?.id ?? r?.id;
-      if (docId) {
-        await new Promise(res => setTimeout(res, 2000));
-        const parsed = await api.post<any>(`/documents/${docId}/parse`, {});
-        const d = parsed?.data ?? parsed;
-        setAiResult({
-          name: d?.nombre_proyecto ?? d?.project_name ?? aiFile.name.replace(/\.[^/.]+$/, ""),
-          description: d?.descripcion ?? d?.description ?? "Proyecto extraido por AI desde documento",
-          start_date: d?.fecha_inicio ?? d?.start_date ?? "",
-          end_date: d?.fecha_fin ?? d?.end_date ?? "",
-          budget: d?.presupuesto ?? d?.budget ?? "",
-          raw: d,
-        });
-      }
-    } catch (e) {
-      setAiResult({
-        name: aiFile.name.replace(/\.[^/.]+$/, ""),
-        description: "Proyecto creado desde documento — completa los campos manualmente.",
-        start_date: "", end_date: "", budget: "", raw: null,
-      });
-    } finally { setAiLoading(false); }
-  };
-
-  const approveAI = async () => {
-    if (!aiResult) return;
-    setSaving(true);
-    try {
-      await api.post("/projects", {
-        name: aiResult.name,
-        description: aiResult.description,
-        status: "active",
-        start_date: aiResult.start_date || undefined,
-        end_date: aiResult.end_date || undefined,
-        budget: aiResult.budget ? parseFloat(String(aiResult.budget)) : undefined,
-      });
-      setShowAI(false);
-      setAiFile(null);
-      setAiResult(null);
-      setAiApproved(false);
-      fetchProjects();
-    } catch (e) { console.error(e); }
-    finally { setSaving(false); }
-  };
-
-  const inp = (field: string, label: string, type = "text", opts?: any) => (
-    <div key={field}>
-      <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--muted-foreground)" }}>{label}</label>
-      {type === "textarea" ? (
-        <textarea value={(form as any)[field]} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))}
-          placeholder={opts?.placeholder} rows={3}
-          style={{ width: "100%", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, padding: "9px 12px", outline: "none", resize: "vertical", boxSizing: "border-box" as any }} />
-      ) : type === "select" ? (
-        <select value={(form as any)[field]} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))}
-          style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none" }}>
-          {opts?.options?.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      ) : (
-        <input type={type} value={(form as any)[field]} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))}
-          placeholder={opts?.placeholder}
-          style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any }} />
-      )}
-    </div>
-  );
-
   return (
     <AppShell>
       <div className="animate-fade-up">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold">Projects</h1>
-            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Group campaigns and activations under a logical container</p>
+            <h1 className="text-xl font-bold">Proyectos</h1>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Agrupa campañas y activaciones bajo un contenedor lógico</p>
           </div>
           <div className="flex gap-2">
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects..."
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar proyectos..."
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", width: 200 }} />
-            <button onClick={() => { setShowAI(true); setAiResult(null); setAiFile(null); }}
-              style={{ padding: "9px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
-              AI desde doc
-            </button>
-            <button onClick={() => { setShowForm(true); setSelected(null); setForm({ name: "", description: "", status: "active", start_date: "", end_date: "", budget: "" }); }}
-              style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-              + New Project
+            <button onClick={() => router.push("/client/projects/nuevo")}
+              style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              + Nuevo proyecto
             </button>
           </div>
         </div>
@@ -176,16 +71,16 @@ export default function ProjectsPage() {
           <table className="w-full border-collapse">
             <thead style={{ background: "var(--secondary)" }}>
               <tr>
-                {["Name", "Status", "Start Date", "End Date", "Budget", "Actions"].map(h => (
+                {["Nombre", "Estado", "Inicio", "Fin", "Presupuesto", "Acciones"].map(h => (
                   <th key={h} className="px-4 py-3 text-left" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Loading...</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>Cargando...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>No projects found.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm" style={{ color: "var(--muted-foreground)" }}>No hay proyectos.</td></tr>
               ) : filtered.map(p => (
                 <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}
                   onMouseEnter={e => (e.currentTarget.style.background = "var(--secondary)")}
@@ -198,117 +93,27 @@ export default function ProjectsPage() {
                   <td className="px-4 py-3 text-sm" style={{ color: "var(--muted-foreground)" }}>{fmtDate(p.end_date)}</td>
                   <td className="px-4 py-3 text-sm font-semibold">{fmtMoney(p.budget)}</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => openEdit(p)} className="text-xs px-2 py-1 rounded"
-                      style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Edit</button>
+                    <div className="flex gap-2">
+                      <button onClick={() => router.push(`/client/projects/editar?id=${p.id}`)} className="text-xs px-2 py-1 rounded"
+                        style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Editar</button>
+                      {(() => {
+                        const terminal = p.status === "closed" || p.status === "archived";
+                        return (
+                          <button
+                            onClick={() => { if (!terminal) router.push(`/client/projects/convocar?id=${p.id}`); }}
+                            disabled={terminal}
+                            title={terminal ? "Proyecto cerrado/archivado: no se puede convocar" : undefined}
+                            className="text-xs px-2 py-1 rounded"
+                            style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "none", cursor: terminal ? "default" : "pointer", opacity: terminal ? 0.4 : 1 }}>Convocar</button>
+                        );
+                      })()}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-
-        {/* Manual Form Modal */}
-        {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setShowForm(false)}>
-            <div className="rounded-2xl border p-6 w-full max-w-md" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-lg">{selected ? "Edit Project" : "New Project"}</h3>
-                <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20 }}>✕</button>
-              </div>
-              <div className="space-y-3">
-                {inp("name", "Project Name *", "text", { placeholder: "Q3 BTL Campaign" })}
-                {inp("description", "Description", "textarea", { placeholder: "Optional description" })}
-                {inp("status", "Status", "select", { options: [{ value: "active", label: "Active" }, { value: "paused", label: "Paused" }, { value: "archived", label: "Archived" }] })}
-                <div className="grid grid-cols-2 gap-3">
-                  {inp("start_date", "Start Date", "date")}
-                  {inp("end_date", "End Date", "date")}
-                </div>
-                {inp("budget", "Budget (CLP)", "number", { placeholder: "5000000" })}
-              </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancel</button>
-                <button onClick={save} disabled={saving || !form.name.trim()}
-                  style={{ flex: 2, padding: "10px", borderRadius: 8, border: "none", background: form.name.trim() ? "var(--red)" : "var(--secondary)", color: form.name.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
-                  {saving ? "Saving..." : selected ? "Save Changes" : "Create Project"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* AI Upload Modal */}
-        {showAI && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setShowAI(false)}>
-            <div className="rounded-2xl border p-6 w-full max-w-lg" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-lg">Crear proyecto desde documento</h3>
-                  <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>PDF, Excel, Word, PPT — AI extrae la info del proyecto</p>
-                </div>
-                <button onClick={() => setShowAI(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 20 }}>✕</button>
-              </div>
-
-              {!aiResult && (
-                <div>
-                  <div
-                    onClick={() => fileRef.current?.click()}
-                    style={{ border: "2px dashed var(--border)", borderRadius: 12, padding: 32, textAlign: "center", cursor: "pointer", marginBottom: 16 }}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setAiFile(f); }}>
-                    <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>
-                    <div className="font-medium text-sm mb-1">{aiFile ? aiFile.name : "Arrastra el documento aqui"}</div>
-                    <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>PDF, Excel, Word, PowerPoint</div>
-                    <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.ppt" style={{ display: "none" }} onChange={e => setAiFile(e.target.files?.[0] ?? null)} />
-                  </div>
-                  <button onClick={processAIFile} disabled={!aiFile || aiLoading}
-                    style={{ width: "100%", padding: "11px", borderRadius: 10, border: "none", background: aiFile ? "var(--red)" : "var(--secondary)", color: aiFile ? "#fff" : "var(--muted-foreground)", cursor: aiFile ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 600 }}>
-                    {aiLoading ? "AI procesando documento..." : "Procesar con AI"}
-                  </button>
-                </div>
-              )}
-
-              {aiResult && (
-                <div>
-                  {/* Yellow approval banner - as per PDF spec */}
-                  <div className="rounded-xl p-4 mb-4" style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)" }}>
-                    <div className="font-semibold text-sm" style={{ color: "#f59e0b" }}>Revision requerida antes de crear</div>
-                    <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>Verifica que los datos extraidos por AI son correctos antes de aprobar.</div>
-                  </div>
-
-                  <div className="space-y-3 mb-4">
-                    {[
-                      { label: "Nombre del proyecto", key: "name" },
-                      { label: "Descripcion", key: "description" },
-                      { label: "Fecha inicio", key: "start_date" },
-                      { label: "Fecha fin", key: "end_date" },
-                      { label: "Presupuesto", key: "budget" },
-                    ].map(({ label, key }) => (
-                      <div key={key}>
-                        <label className="text-xs font-medium block mb-1" style={{ color: "var(--muted-foreground)" }}>{label}</label>
-                        <input
-                          value={aiResult[key] ?? ""}
-                          onChange={e => setAiResult((prev: any) => ({ ...prev, [key]: e.target.value }))}
-                          style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button onClick={() => { setAiResult(null); setAiFile(null); }}
-                      style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>
-                      Reintentar
-                    </button>
-                    <button onClick={approveAI} disabled={saving}
-                      style={{ flex: 2, padding: "10px", borderRadius: 8, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
-                      {saving ? "Creando..." : "Aprobar y crear proyecto"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </AppShell>
   );

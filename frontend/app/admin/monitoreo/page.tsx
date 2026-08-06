@@ -25,12 +25,12 @@ export default function MonitoreoPage() {
   useEffect(() => { load(); }, [load]);
 
   const kpis = [
-    { label: "Eventos (24h)",        value: overview?.events_received_24h ?? "—",   color: "#6366f1" },
-    { label: "Procesados (24h)",     value: overview?.events_processed_24h ?? "—",  color: "#34b96e" },
+    { label: "Eventos (24h)",        value: overview?.events_received_24h ?? "—",   color: "var(--primary)" },
+    { label: "Procesados (24h)",     value: overview?.events_processed_24h ?? "—",  color: "var(--success)" },
     { label: "Activaciones live",    value: overview?.live_activations ?? "—",      color: "#f59e0b" },
-    { label: "Tasa de exito",        value: overview?.success_rate ? `${overview.success_rate}%` : "—", color: "#60a5fa" },
-    { label: "Latencia avg (ms)",    value: overview?.avg_latency_ms ?? "—",        color: "#a78bfa" },
-    { label: "Clientes activos",     value: overview?.active_clients ?? clients.length || "—", color: "#34b96e" },
+    { label: "Tasa de exito",        value: overview?.success_rate ? `${overview.success_rate}%` : "—", color: "var(--primary)" },
+    { label: "Latencia avg (ms)",    value: overview?.avg_latency_ms ?? "—",        color: "var(--primary)" },
+    { label: "Clientes activos",     value: (overview?.active_clients ?? clients.length) || "—", color: "var(--success)" },
   ];
 
   const flows = [
@@ -87,7 +87,7 @@ export default function MonitoreoPage() {
                       </div>
                     </div>
                     <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                      style={{ background: ok ? "rgba(42,157,92,0.15)" : "rgba(200,32,44,0.15)", color: ok ? "#34b96e" : "#e8353f" }}>
+                      style={{ background: ok ? "color-mix(in srgb, var(--success) 12%, transparent)" : "color-mix(in srgb, var(--danger) 12%, transparent)", color: ok ? "var(--success)" : "var(--danger)" }}>
                       {ok ? "Operacional" : "Atencion"}
                     </span>
                   </div>
@@ -116,7 +116,7 @@ export default function MonitoreoPage() {
                       <td className="px-4 py-3 text-sm">{c.documentos ?? "—"}</td>
                       <td className="px-4 py-3">
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                          style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e" }}>Activo</span>
+                          style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" }}>Activo</span>
                       </td>
                     </tr>
                   ))}

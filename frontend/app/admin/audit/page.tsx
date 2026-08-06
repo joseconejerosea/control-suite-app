@@ -26,11 +26,19 @@ export default function AuditPage() {
 
   const fmtUSD = (v: any) => v ? `$${parseFloat(String(v)).toFixed(4)}` : "$0.0000";
 
+  // El backend devuelve { total: { total_usd, total_input, total_output, total_calls },
+  // byClient, byFlow, byDay }. Acá lo mapeamos a lo que renderiza la UI.
+  const total       = data?.total ?? {};
+  const totalCalls  = Number(total.total_calls) || 0;
+  const totalCost   = Number(total.total_usd) || 0;
+  const totalTokens = (Number(total.total_input) || 0) + (Number(total.total_output) || 0);
+  const avgPerCall  = totalCalls > 0 ? totalCost / totalCalls : 0;
+
   const summaryKpis = [
-    { label: "Total AI Cost", value: fmtUSD(data?.total_cost_usd), color: "#6366f1" },
-    { label: "Claude calls", value: data?.total_calls ?? "—", color: "#f59e0b" },
-    { label: "Tokens usados", value: data?.total_tokens ? `${(data.total_tokens / 1000).toFixed(1)}K` : "—", color: "#34b96e" },
-    { label: "Avg per call", value: fmtUSD(data?.avg_cost_per_call), color: "#60a5fa" },
+    { label: "Total AI Cost", value: fmtUSD(totalCost), color: "var(--primary)" },
+    { label: "Claude calls", value: totalCalls, color: "var(--warning)" },
+    { label: "Tokens usados", value: totalTokens ? `${(totalTokens / 1000).toFixed(1)}K` : "0", color: "var(--success)" },
+    { label: "Avg per call", value: fmtUSD(avgPerCall), color: "var(--primary)" },
   ];
 
   return (
@@ -57,7 +65,7 @@ export default function AuditPage() {
           {[["costs", "Costos AI"], ["actions", "Log de Acciones"]].map(([t, label]) => (
             <button key={t} onClick={() => setTab(t as any)}
               className="px-4 py-2.5 text-sm font-medium"
-              style={{ borderBottom: tab === t ? "2px solid var(--red)" : "2px solid transparent", color: tab === t ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: "-1px" }}>
+              style={{ borderBottom: tab === t ? "2px solid var(--primary)" : "2px solid transparent", color: tab === t ? "var(--foreground)" : "var(--muted-foreground)", background: "none", cursor: "pointer", marginBottom: "-1px" }}>
               {label}
             </button>
           ))}
@@ -77,7 +85,7 @@ export default function AuditPage() {
           </div>
 
           {/* Per client breakdown */}
-          {data?.by_client?.length > 0 && (
+          {data?.byClient?.length > 0 && (
             <div className="rounded-xl border mb-5" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: 14 }}>Costo por cliente</div>
               <table className="w-full border-collapse">
@@ -87,15 +95,15 @@ export default function AuditPage() {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {data.by_client.map((c: any, i: number) => (
+                  {data.byClient.map((c: any, i: number) => (
                     <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td className="px-4 py-3 text-sm font-medium">{c.client_name ?? c.client_id?.slice(0, 8)}</td>
+                      <td className="px-4 py-3 text-sm font-medium">{c.nombre ?? c.client_id?.slice(0, 8)}</td>
                       <td className="px-4 py-3 text-sm">{c.calls ?? "—"}</td>
                       <td className="px-4 py-3 text-sm">{c.tokens ? `${(c.tokens / 1000).toFixed(1)}K` : "—"}</td>
-                      <td className="px-4 py-3 text-sm font-semibold">{fmtUSD(c.cost_usd)}</td>
+                      <td className="px-4 py-3 text-sm font-semibold">{fmtUSD(c.costo)}</td>
                       <td className="px-4 py-3">
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                          style={{ background: (c.margin ?? 0) >= 0 ? "rgba(42,157,92,0.15)" : "rgba(200,32,44,0.15)", color: (c.margin ?? 0) >= 0 ? "#34b96e" : "#e8353f" }}>
+                          style={{ background: (c.margin ?? 0) >= 0 ? "color-mix(in srgb, var(--success) 15%, transparent)" : "color-mix(in srgb, var(--danger) 12%, transparent)", color: (c.margin ?? 0) >= 0 ? "var(--success)" : "var(--danger)" }}>
                           {c.margin != null ? `${c.margin > 0 ? "+" : ""}${c.margin}%` : "—"}
                         </span>
                       </td>
@@ -107,7 +115,7 @@ export default function AuditPage() {
           )}
 
           {/* Per flow */}
-          {data?.by_flow?.length > 0 && (
+          {data?.byFlow?.length > 0 && (
             <div className="rounded-xl border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: 14 }}>Costo por flow</div>
               <table className="w-full border-collapse">
@@ -117,11 +125,11 @@ export default function AuditPage() {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {data.by_flow.map((f: any, i: number) => (
+                  {data.byFlow.map((f: any, i: number) => (
                     <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
                       <td className="px-4 py-3 text-sm font-medium uppercase">{f.flow}</td>
                       <td className="px-4 py-3 text-sm">{f.calls}</td>
-                      <td className="px-4 py-3 text-sm font-semibold">{fmtUSD(f.cost_usd)}</td>
+                      <td className="px-4 py-3 text-sm font-semibold">{fmtUSD(f.costo)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -129,7 +137,7 @@ export default function AuditPage() {
             </div>
           )}
 
-          {!data && (
+          {totalCalls === 0 && (
             <div className="text-center py-12 rounded-xl border" style={{ background: "var(--card)", borderColor: "var(--border)", color: "var(--muted-foreground)" }}>
               <div style={{ fontSize: 36, marginBottom: 12 }}>📊</div>
               <div>Sin datos de costos AI para el periodo seleccionado</div>

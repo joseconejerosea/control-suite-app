@@ -33,7 +33,13 @@ export class WebhookSignatureGuard implements CanActivate {
     // For Meta WhatsApp webhooks, use META_APP_SECRET directly
     if (isMetaWebhook) {
       const metaAppSecret = this.configService.get<string>('META_APP_SECRET') ?? '';
-      
+      if (!metaAppSecret) {
+        this.logger.error(
+          '[WebhookSignatureGuard] META_APP_SECRET no configurado — rechazando webhook (fail-closed).',
+        );
+        throw new UnauthorizedException('Webhook signature verification not configured');
+      }
+
       const signatureHeader = request.headers['x-hub-signature-256'] as string;
       const receivedSig = signatureHeader.startsWith('sha256=')
         ? signatureHeader.slice(7)
@@ -76,6 +82,13 @@ export class WebhookSignatureGuard implements CanActivate {
         const msg = err instanceof Error ? err.message : 'unknown';
         this.logger.warn(`[WebhookSignatureGuard] Could not load channel config: ${msg}`);
       }
+    }
+
+    if (!secret) {
+      this.logger.error(
+        '[WebhookSignatureGuard] Sin secreto de webhook (ni de canal ni WEBHOOK_SECRET) — rechazando (fail-closed).',
+      );
+      throw new UnauthorizedException('Webhook signature verification not configured');
     }
 
     const signatureHeader: string =

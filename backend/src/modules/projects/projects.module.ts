@@ -6,6 +6,7 @@ import { ProjectsService } from './projects.service';
 import { AuthModule } from '../auth/auth.module';
 import { ClientsModule } from '../clients/clients.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { MovimientosPopModule } from '../movimientos-pop/movimientos-pop.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
     AuthModule,
     ClientsModule,
     WhatsAppModule,
+    MovimientosPopModule,
   ],
   controllers: [ProjectsController],
   providers:   [ProjectsService],

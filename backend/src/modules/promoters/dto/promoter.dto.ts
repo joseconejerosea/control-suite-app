@@ -40,6 +40,11 @@ export class CreatePromoterDto {
   @IsIn(['active', 'inactive', 'suspended'])
   @IsOptional()
   status?: 'active' | 'inactive' | 'suspended';
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  rol?: string;
 }
 
 export class UpdatePromoterDto extends PartialType(CreatePromoterDto) {} 

@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control Suite BTL · Mapa de Procesos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0C1A26;--steel:#14425E;--steel-soft:#356285;--machine:#0E7490;--machine-bg:#E3F0F2;
+    --human:#B45309;--human-bg:#FBEEDD;--ok:#15803D;--ok-bg:#E6F1E9;--fail:#B4282A;--fail-bg:#F6E5E4;
+    --event:#3A2D5C;--event-bg:#ECE8F3;--paper:#F5F6F3;--surface:#FFFFFF;--line:#D6DCE0;--line-soft:#E6EAEC;
+    --muted:#566570;--muted-2:#7E8A92;
+    --display:'Space Grotesk',sans-serif;--body:'Inter',sans-serif;--mono:'IBM Plex Mono',monospace;--maxw:1140px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.flow.active,.flow.active .node{animation:none}}
+  body{font-family:var(--body);color:var(--ink);background:var(--paper);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  ::selection{background:var(--steel);color:#fff}
+
+  .progress{position:fixed;top:0;left:0;height:2px;width:0%;background:linear-gradient(90deg,var(--machine),var(--steel));z-index:120;transition:width .12s linear}
+
+  header{position:sticky;top:0;z-index:100;background:rgba(245,246,243,.86);backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--line)}
+  .bar{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:.85rem 1.5rem}
+  .brand{display:flex;align-items:center;gap:.7rem;min-width:0}
+  .brand .mark{width:30px;height:30px;border-radius:7px;flex:none;background:var(--steel);position:relative}
+  .brand .mark::before,.brand .mark::after{content:"";position:absolute;background:#fff;border-radius:1px}
+  .brand .mark::before{left:8px;top:8px;width:8px;height:8px;opacity:.55}
+  .brand .mark::after{right:7px;bottom:7px;width:8px;height:8px;background:var(--machine)}
+  .brand b{font-family:var(--display);font-weight:600;font-size:.95rem;letter-spacing:-.01em;white-space:nowrap}
+  .brand span{font-family:var(--mono);font-size:.66rem;color:var(--muted-2);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+  nav{display:flex;align-items:center;gap:.3rem}
+  .tabs{display:flex;align-items:center;gap:.22rem;flex-wrap:wrap;justify-content:flex-end}
+  .tabs button{font-family:var(--mono);font-size:.78rem;font-weight:500;color:var(--muted);background:none;border:none;cursor:pointer;padding:.38rem .62rem;border-radius:6px;transition:color .18s,background .18s,box-shadow .18s}
+  .tabs button:hover{color:var(--ink);background:#fff}
+  .tabs button.active{color:var(--steel);background:#fff;box-shadow:inset 0 0 0 1px var(--steel-soft);font-weight:600}
+  .nav-print{font-family:var(--mono);font-size:.72rem;font-weight:500;color:#fff;background:var(--ink);border:none;border-radius:6px;cursor:pointer;padding:.45rem .7rem;margin-left:.4rem;transition:background .18s}
+  .nav-print:hover{background:var(--steel)}
+
+  main{max-width:var(--maxw);margin:0 auto;padding:0 1.5rem}
+
+  .hero{padding:5rem 0 3.2rem;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--machine);font-weight:600;margin-bottom:1.4rem}
+  .hero h1{font-family:var(--display);font-weight:600;letter-spacing:-.025em;line-height:1.04;font-size:clamp(2.3rem,5.4vw,3.9rem);max-width:16ch}
+  .hero h1 em{font-style:normal;color:var(--human)}
+  .hero p.lead{margin-top:1.6rem;max-width:62ch;font-size:1.07rem;color:var(--muted)}
+  .hero p.lead b{color:var(--ink);font-weight:600}
+  .hero code{font-family:var(--mono);font-size:.85em}
+  .meta-row{display:flex;flex-wrap:wrap;gap:.5rem 2.2rem;margin-top:2.4rem;font-family:var(--mono);font-size:.74rem;color:var(--muted-2)}
+  .meta-row span b{color:var(--steel);font-weight:600}
+
+  .legend{margin-top:3rem;padding:1.4rem 1.5rem;background:var(--surface);border:1px solid var(--line);border-radius:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1.1rem 1.5rem}
+  .legend h4{grid-column:1/-1;font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);font-weight:600;margin-bottom:.2rem}
+  .lg{display:flex;align-items:flex-start;gap:.6rem}
+  .lg .chip{width:14px;height:14px;border-radius:5px;flex:none;margin-top:.18rem;border:1px solid rgba(0,0,0,.08)}
+  .lg .t{font-size:.82rem;line-height:1.35}
+  .lg .t b{display:block;font-weight:600;color:var(--ink);font-size:.84rem}
+  .lg .t span{color:var(--muted)}
+
+  .index{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:.9rem;margin:3rem 0 1rem}
+  .ix{display:block;width:100%;text-align:left;cursor:pointer;font:inherit;appearance:none;-webkit-appearance:none;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:1.15rem 1.2rem;transition:transform .2s,box-shadow .2s,border-color .2s}
+  .ix:hover{transform:translateY(-3px);box-shadow:0 12px 28px -16px rgba(12,26,38,.35);border-color:var(--steel-soft)}
+  .ix .code{font-family:var(--mono);font-weight:600;font-size:1.55rem;color:var(--steel);letter-spacing:-.02em}
+  .ix .nm{font-family:var(--display);font-weight:600;font-size:.96rem;margin-top:.35rem;line-height:1.2}
+  .ix .ds{font-size:.78rem;color:var(--muted);margin-top:.45rem}
+  .ix .gate-tag{display:inline-block;margin-top:.7rem;font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--human);background:var(--human-bg);padding:.18rem .42rem;border-radius:5px}
+  .ix .gate-tag.none{color:var(--muted-2);background:var(--line-soft)}
+
+  .flow{display:none;padding:2.6rem 0 3.5rem;scroll-margin-top:84px}
+  .flow.active{display:block;animation:fadeflow .3s ease}
+  @keyframes fadeflow{from{opacity:0}to{opacity:1}}
+  .flow-head{display:flex;gap:1.6rem;align-items:flex-start}
+  .flow-code{font-family:var(--mono);font-weight:600;font-size:clamp(2.6rem,7vw,4.4rem);line-height:.85;color:var(--steel);letter-spacing:-.04em;flex:none;padding-top:.1rem}
+  .flow-code .live{display:block;font-size:.6rem;letter-spacing:.16em;color:var(--machine);margin-top:.7rem;font-weight:600}
+  .flow-titles h2{font-family:var(--display);font-weight:600;font-size:clamp(1.45rem,3.2vw,2rem);letter-spacing:-.02em;line-height:1.1}
+  .flow-titles .purpose{margin-top:.7rem;max-width:64ch;color:var(--muted);font-size:1rem}
+  .tags{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:1.15rem}
+  .tag{font-family:var(--mono);font-size:.7rem;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:.28rem .65rem}
+  .tag b{color:var(--ink);font-weight:600}
+  .tag code,.card p code,.branch code,.dblock code,.accept code{font-family:var(--mono);font-size:.84em;color:var(--steel);background:var(--line-soft);padding:.04rem .3rem;border-radius:4px}
+
+  /* ── BPMN (vertical) ── */
+  .bpmn-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1.2rem 1.3rem 1.1rem;margin-top:2.4rem;break-inside:avoid}
+  .bpmn-card .bh{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.7rem}
+  .bpmn-card h4{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-2);font-weight:600;display:flex;align-items:center;gap:.45rem;margin:0}
+  .bpmn-card h4::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--machine)}
+  .bpmn-legend{display:flex;gap:.8rem;flex-wrap:wrap;font-family:var(--mono);font-size:.63rem;color:var(--muted)}
+  .bpmn-legend span{display:inline-flex;align-items:center;gap:.3rem}
+  .bpmn-legend i{width:11px;height:11px;border-radius:3px;display:inline-block;border:1.5px solid rgba(0,0,0,.1)}
+  .bpmn-wrap{display:flex;justify-content:center;padding:.3rem 0}
+  .bpmn-wrap svg{display:block;max-width:100%;height:auto}
+  .bp-edge{fill:none;stroke:var(--muted);stroke-width:1.5;marker-end:url(#ah)}
+  .bp-start{fill:#fff;stroke:var(--ok);stroke-width:2}
+  .bp-end{fill:#fff;stroke:var(--ink);stroke-width:3.4}
+  .bp-enderr{fill:var(--fail-bg);stroke:var(--fail);stroke-width:3}
+  .bp-gw{fill:#fff;stroke:var(--ink);stroke-width:1.6}
+  .bp-gw-x{stroke:var(--ink);stroke-width:1.8;fill:none;stroke-linecap:round}
+  .bp-task{fill:#fff;stroke:var(--steel);stroke-width:1.6}
+  .bp-machine{fill:#fff;stroke:var(--machine);stroke-width:1.6}
+  .bp-event{fill:#fff;stroke:var(--event);stroke-width:1.6;stroke-dasharray:5 3}
+  .bp-gate{fill:var(--human-bg);stroke:var(--human);stroke-width:1.9}
+  .bp-output{fill:#fff;stroke:var(--steel);stroke-width:1.6}
+  .bp-ic-m{fill:var(--machine)}
+  .bp-ic-e{fill:var(--event)}
+  .bp-ic-h circle{fill:var(--human)}
+  .bp-ic-h path{fill:none;stroke:var(--human);stroke-width:1.4}
+  text.bp-t{font-family:var(--display);font-size:11px;font-weight:600;fill:var(--ink);text-anchor:middle}
+  text.bp-sub{font-family:var(--mono);font-size:8.5px;fill:var(--muted);text-anchor:middle}
+  text.bp-ext{font-family:var(--mono);font-size:9px;fill:var(--muted);text-anchor:middle;font-weight:500}
+  text.bp-enderr-t{fill:var(--fail)!important}
+  .bp-elabel rect{fill:#fff;stroke:var(--line);stroke-width:1}
+  .bp-elabel text{font-family:var(--mono);font-size:8.5px;text-anchor:middle;font-weight:600}
+
+  .stepper-h{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-2);font-weight:600;margin:2.4rem 0 -.2rem}
+
+  .rail{position:relative;margin-top:1.4rem;padding-left:2.6rem}
+  .rail::before{content:"";position:absolute;left:13px;top:8px;bottom:8px;width:2px;background:var(--line)}
+  .node{position:relative;padding-bottom:1.4rem}
+  .node:last-child{padding-bottom:0}
+  .flow.active .node{animation:rise .5s ease backwards}
+  .flow.active .node:nth-child(1){animation-delay:.03s}.flow.active .node:nth-child(2){animation-delay:.06s}
+  .flow.active .node:nth-child(3){animation-delay:.09s}.flow.active .node:nth-child(4){animation-delay:.12s}
+  .flow.active .node:nth-child(5){animation-delay:.15s}.flow.active .node:nth-child(6){animation-delay:.18s}
+  .flow.active .node:nth-child(7){animation-delay:.21s}.flow.active .node:nth-child(8){animation-delay:.24s}
+  .flow.active .node:nth-child(9){animation-delay:.27s}.flow.active .node:nth-child(10){animation-delay:.30s}
+  .flow.active .node:nth-child(11){animation-delay:.33s}.flow.active .node:nth-child(12){animation-delay:.36s}
+  @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .marker{position:absolute;left:-2.6rem;top:.15rem;width:28px;height:28px;border-radius:50%;background:var(--surface);border:2px solid var(--steel);display:flex;align-items:center;justify-content:center;color:var(--steel);z-index:2}
+  .marker svg{width:14px;height:14px}
+  .node[data-type="event"] .marker{border-color:var(--event);color:var(--event)}
+  .node[data-type="machine"] .marker{border-color:var(--machine);color:var(--machine)}
+  .node[data-type="decision"] .marker{border-radius:6px;transform:rotate(45deg);border-color:var(--ink);color:var(--ink)}
+  .node[data-type="decision"] .marker svg{transform:rotate(-45deg)}
+  .node[data-type="gate"] .marker{border-color:var(--human);color:var(--human);background:var(--human-bg)}
+  .node[data-type="output"] .marker{border-color:var(--steel);color:#fff;background:var(--steel)}
+  .node[data-type="state"] .marker{border-color:var(--ok);color:var(--ok)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.05rem 1.2rem}
+  .node[data-type="event"] .card{border-left:3px solid var(--event)}
+  .node[data-type="machine"] .card{border-left:3px solid var(--machine)}
+  .node[data-type="gate"] .card{border:1.5px solid var(--human);background:var(--human-bg);box-shadow:0 6px 22px -14px rgba(180,83,9,.5)}
+  .node[data-type="output"] .card{border-left:3px solid var(--steel)}
+  .step-no{font-family:var(--mono);font-size:.68rem;font-weight:600;color:var(--muted-2);letter-spacing:.08em}
+  .node[data-type="gate"] .step-no{color:var(--human)}
+  .card h3{font-family:var(--display);font-weight:600;font-size:1.02rem;margin:.15rem 0 .4rem;letter-spacing:-.01em;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+  .card h3 .kind{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:.16rem .4rem;border-radius:4px;color:#fff;flex:none}
+  .kind.machine{background:var(--machine)}.kind.gate{background:var(--human)}.kind.event{background:var(--event)}
+  .card p{font-size:.9rem;color:var(--muted);line-height:1.55}
+  .node[data-type="gate"] .card p{color:#7a4a14}
+  .node[data-type="gate"] .card p code{color:var(--human);background:#f6e2c8}
+  .branches{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:.7rem;margin-top:.85rem}
+  .branch{border-radius:9px;padding:.65rem .8rem;font-size:.83rem;line-height:1.4}
+  .branch .bl{font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;display:block;margin-bottom:.28rem}
+  .branch.yes{background:var(--ok-bg);border:1px solid #BFE0C9}.branch.yes .bl{color:var(--ok)}
+  .branch.no{background:var(--machine-bg);border:1px solid #C4DEE2}.branch.no .bl{color:var(--machine)}
+  .branch.alt{background:var(--human-bg);border:1px solid #EAD2AC}.branch.alt .bl{color:var(--human)}
+  .branch.err{background:var(--fail-bg);border:1px solid #E7C4C2}.branch.err .bl{color:var(--fail)}
+
+  .details{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:2.4rem}
+  .dblock{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.15rem 1.25rem}
+  .dblock h4{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-2);font-weight:600;margin-bottom:.8rem;display:flex;align-items:center;gap:.45rem}
+  .dblock h4::before{content:"";width:7px;height:7px;border-radius:2px;background:var(--steel)}
+  .dblock.ep h4::before{background:var(--machine)}.dblock.edge h4::before{background:var(--human)}
+  .dblock ul{list-style:none;display:flex;flex-direction:column;gap:.55rem}
+  .dblock li{font-size:.85rem;color:var(--muted);line-height:1.45;padding-left:.95rem;position:relative}
+  .dblock li::before{content:"";position:absolute;left:0;top:.55rem;width:5px;height:5px;border-radius:50%;background:var(--line)}
+  .dblock li b{color:var(--ink);font-weight:600}
+  .dblock.ep li{font-family:var(--mono);font-size:.76rem;padding-left:0}
+  .dblock.ep li::before{display:none}
+  .dblock.ep .verb{font-weight:600;color:var(--machine)}.dblock.ep .path{color:var(--ink)}
+  .accept{margin-top:1.4rem;display:flex;gap:.9rem;align-items:flex-start;background:linear-gradient(180deg,#fff,#fbfcfa);border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:12px;padding:1.1rem 1.3rem}
+  .accept .ic{flex:none;width:26px;height:26px;border-radius:7px;background:var(--ok-bg);color:var(--ok);display:flex;align-items:center;justify-content:center;margin-top:.1rem}
+  .accept .ic svg{width:15px;height:15px}
+  .accept .tx b{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ok);font-weight:600;display:block;margin-bottom:.2rem}
+  .accept .tx p{font-size:.92rem;color:var(--ink)}
+  .outscope{margin-top:.9rem;font-size:.8rem;color:var(--muted-2);font-family:var(--mono)}
+  .outscope b{color:var(--muted);font-weight:600}
+
+  footer{padding:3.5rem 0 4rem}
+  .invariant{background:var(--ink);color:#fff;border-radius:16px;padding:2.2rem;display:flex;gap:1.4rem;align-items:flex-start}
+  .invariant .badge{flex:none;width:46px;height:46px;border-radius:11px;background:var(--human);display:flex;align-items:center;justify-content:center}
+  .invariant .badge svg{width:24px;height:24px;color:#fff}
+  .invariant h3{font-family:var(--display);font-weight:600;font-size:1.2rem;letter-spacing:-.01em}
+  .invariant p{margin-top:.5rem;color:#B9C5CD;font-size:.94rem;max-width:70ch}
+  .invariant p code{font-family:var(--mono);color:#fff;background:rgba(255,255,255,.1);padding:.05rem .35rem;border-radius:4px;font-size:.85em}
+  .invariant p b{color:#fff}
+  .source{margin-top:1.8rem;font-family:var(--mono);font-size:.74rem;color:var(--muted-2);display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+  .source b{color:var(--muted);font-weight:600}
+
+  /* ── Vista comercial (no técnica) ── */
+  .tabs button.tab-com{color:var(--human);box-shadow:inset 0 0 0 1px #EAD2AC}
+  .tabs button.tab-com.active{color:#fff;background:var(--human);box-shadow:none}
+  .com-wrap .com-intro{padding:2.6rem 0 1rem}
+  .com-intro .eyebrow{color:var(--human)}
+  .com-intro h2{font-family:var(--display);font-weight:600;letter-spacing:-.02em;line-height:1.06;font-size:clamp(1.9rem,4.4vw,3rem);max-width:18ch}
+  .com-intro h2 em{font-style:normal;color:var(--human)}
+  .com-intro p{margin-top:1.1rem;max-width:64ch;color:var(--muted);font-size:1.05rem}
+  .com-flow{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:1.6rem 1.7rem 1.7rem;margin-top:1.6rem;break-inside:avoid}
+  .com-flow.big{border-left:4px solid var(--human)}
+  .com-fhead{display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap}
+  .com-fhead .cc{font-family:var(--mono);font-weight:600;font-size:1.3rem;color:var(--steel);letter-spacing:-.02em}
+  .com-fhead h3{font-family:var(--display);font-weight:600;font-size:1.3rem;letter-spacing:-.015em}
+  .com-fhead .cx{margin-left:auto;font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--human);background:var(--human-bg);padding:.22rem .5rem;border-radius:6px}
+  .com-pain{display:flex;gap:.6rem;align-items:flex-start;margin-top:.9rem;background:var(--paper);border-radius:10px;padding:.7rem .85rem}
+  .com-pain .pic{flex:none;color:var(--fail);margin-top:.05rem}
+  .com-pain .pic svg{width:17px;height:17px;display:block}
+  .com-pain p{font-size:.92rem;color:var(--muted);font-style:italic}
+  .jlabel{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-2);font-weight:600;margin:1.5rem 0 .2rem}
+  .journey{display:flex;align-items:flex-start;gap:.2rem;overflow-x:auto;padding:1rem .2rem .4rem;scrollbar-width:thin}
+  .jstep{flex:none;width:124px;text-align:center;position:relative}
+  .jstep .jic{width:46px;height:46px;border-radius:13px;margin:0 auto .55rem;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--line);background:#fff}
+  .jstep .jic svg{width:22px;height:22px}
+  .jstep.field .jic{border-color:var(--steel);color:var(--steel)}
+  .jstep.channel .jic{border-color:#1FA855;color:#1FA855;background:#E9F7EF}
+  .jstep.system .jic{border-color:var(--machine);color:var(--machine);background:var(--machine-bg)}
+  .jstep.human .jic{border-color:var(--human);color:var(--human);background:var(--human-bg)}
+  .jstep.alert .jic{border-color:#C2680C;color:#C2680C;background:#FBEEDD}
+  .jstep.result .jic{border-color:var(--ok);color:var(--ok);background:var(--ok-bg)}
+  .jstep .jt{font-family:var(--display);font-weight:600;font-size:.82rem;line-height:1.2}
+  .jstep .js{font-size:.72rem;color:var(--muted);line-height:1.3;margin-top:.2rem}
+  .jstep .jconn{position:absolute;top:23px;right:-12px;width:24px;height:2px;background:var(--line)}
+  .jstep .jconn::after{content:"";position:absolute;right:-1px;top:-3px;width:0;height:0;border-left:6px solid var(--line);border-top:4px solid transparent;border-bottom:4px solid transparent}
+  .jstep:last-child .jconn{display:none}
+  .checkgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.9rem;margin-top:1.5rem}
+  .checkcol{background:var(--paper);border:1px solid var(--line-soft);border-radius:11px;padding:.9rem 1rem}
+  .checkcol h5{display:flex;align-items:center;gap:.45rem;font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;font-weight:600;margin-bottom:.6rem}
+  .checkcol h5 svg{width:14px;height:14px}
+  .checkcol.cap h5{color:var(--steel)}.checkcol.cre h5{color:var(--machine)}.checkcol.not h5{color:#C2680C}.checkcol.pro h5{color:var(--ok)}
+  .checkcol ul{list-style:none;display:flex;flex-direction:column;gap:.4rem}
+  .checkcol li{font-size:.82rem;color:var(--muted);line-height:1.4;padding-left:.85rem;position:relative}
+  .checkcol li::before{content:"";position:absolute;left:0;top:.5rem;width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.4}
+  .checkcol.cap li{color:#3d5566}.checkcol.cre li{color:#3a6470}.checkcol.not li{color:#7a4a14}.checkcol.pro li{color:#2f5e3f}
+  .com-value{margin-top:1.4rem;display:flex;gap:.85rem;align-items:center;background:linear-gradient(180deg,#fff,#f7faf8);border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:12px;padding:1rem 1.2rem}
+  .com-value .vic{flex:none;width:30px;height:30px;border-radius:9px;background:var(--ok-bg);color:var(--ok);display:flex;align-items:center;justify-content:center}
+  .com-value .vic svg{width:17px;height:17px}
+  .com-value p{font-size:.96rem;color:var(--ink);font-weight:500}
+  .com-value p b{color:var(--ok);font-weight:700}
+
+  @media (max-width:780px){
+    nav .tabs{display:none}
+    .details{grid-template-columns:1fr}
+    .flow-head{flex-direction:column;gap:.8rem}
+    .invariant{flex-direction:column}
+  }
+  @media print{
+    :root{--paper:#fff}
+    .progress,header,.index,.nav-print{display:none!important}
+    body{background:#fff}
+    .hero{padding-top:1rem}
+    .flow{display:block!important;page-break-before:always;break-before:page;padding:1rem 0}
+    .flow:first-of-type{page-break-before:avoid}
+    .bpmn-card,.node,.accept,.dblock{break-inside:avoid}
+    .ix:hover{box-shadow:none;transform:none}
+    a[href]{color:inherit;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<header>
+  <div class="bar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div><b>Control Suite BTL</b><br><span>Mapa de procesos · v2</span></div>
+    </div>
+    <nav id="nav">
+      <div class="tabs" id="tabs"></div>
+      <button class="nav-print" onclick="window.print()">Exportar PDF</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="eyebrow">Especificación funcional · comportamiento por flujo</div>
+    <h1>Cinco flujos. Una ley: nada consecuente se ejecuta sin un <em>humano</em>.</h1>
+    <p class="lead">Cada flujo está trazado de extremo a extremo: la ingesta (webhook, verificación HMAC, persistencia, clasificación), el procesamiento, y <b>todas</b> las ramas de éxito, rechazo y error. El color distingue <b>dónde actúa el sistema</b> de <b>dónde decide una persona</b>. Todo evento persiste en <code>eventos_crudos</code> antes de procesarse; WhatsApp y correo son solo canales de entrada.</p>
+    <div class="meta-row">
+      <span>Plataforma <b>SaaS B2B multi-tenant</b></span>
+      <span>Stack <b>NestJS · Prisma · PostgreSQL · BullMQ</b></span>
+      <span>Frontend <b>Next.js 14 · Tailwind</b></span>
+      <span>Aislamiento <b>por tenant (JWT)</b></span>
+    </div>
+    <div class="legend">
+      <h4>Notación</h4>
+      <div class="lg"><span class="chip" style="background:var(--ok)"></span><span class="t"><b>Inicio</b><span>Evento de entrada</span></span></div>
+      <div class="lg"><span class="chip" style="background:#fff;box-shadow:inset 0 0 0 2px var(--event)"></span><span class="t"><b>eventos_crudos</b><span>Persistencia obligatoria</span></span></div>
+      <div class="lg"><span class="chip" style="background:var(--machine)"></span><span class="t"><b>Sistema / IA</b><span>Acción automática</span></span></div>
+      <div class="lg"><span class="chip" style="background:#fff;box-shadow:inset 0 0 0 2px var(--ink);transform:rotate(45deg)"></span><span class="t"><b>Decisión</b><span>Gateway exclusivo</span></span></div>
+      <div class="lg"><span class="chip" style="background:var(--human)"></span><span class="t"><b>Validación humana</b><span>Gate obligatorio</span></span></div>
+      <div class="lg"><span class="chip" style="background:var(--fail)"></span><span class="t"><b>Fin con rechazo / error</b><span>Rama no feliz</span></span></div>
+    </div>
+    <div class="index" id="index"></div>
+  </section>
+
+  <div id="flows"></div>
+
+  <footer>
+    <div class="invariant">
+      <div class="badge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div>
+      <div>
+        <h3>Invariante de IA</h3>
+        <p>Claude pre-clasifica, recomienda y redacta. <b>Nunca</b> auto-confirma una acción que requiere validación humana: aprobar un documento (F1), aprobar una rendición (F2), enviar una convocatoria (F4) o enviar un reporte al cliente (F5). El sistema propone; la persona dispone y queda registrada en <code>approvedBy</code> / <code>reportApprovedBy</code>.</p>
+        <div class="source">
+          <span><b>Fuente de verdad:</b> ARCHITECTURE.md · CLAUDE.md · PROJECT_OVERVIEW.md · FLOWS.md</span>
+          <span><b>Documento:</b> Mapa de procesos v2 (exhaustivo)</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<script>
+/* ───────── Iconos del stepper ───────── */
+const ICON = {
+  input:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>',
+  event:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>',
+  machine:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/><circle cx="12" cy="12" r="3.4"/></svg>',
+  decision:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6l6 6 6-6V3"/><path d="M12 15v6"/></svg>',
+  gate:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>',
+  output:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
+  state:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+};
+const KIND_LABEL = { machine:'sistema · ia', gate:'gate humano', event:'evento' };
+
+/* ───────── BPMN vertical: datos exhaustivos por flujo ───────── */
+/* tipos: start · event · machine · task · gateway · gate · output · end · enderr   |  lane: -1 izq, 0 centro, +1 der */
+const BPMN_DATA = {
+  f1:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Documento enviado'],sub:'WhatsApp · correo · manual'},
+    {id:'hmac',type:'gateway',row:1,lane:0,label:['Webhook','¿HMAC válido?']},
+    {id:'e401',type:'enderr',row:2,lane:1,label:['401 · descartado']},
+    {id:'ev',type:'event',row:2,lane:0,label:['eventos_crudos'],sub:'PENDING + tenant'},
+    {id:'res',type:'machine',row:3,lane:0,label:['Resolver emisor'],sub:'teléfono / correo'},
+    {id:'greg',type:'gateway',row:4,lane:0,label:['¿emisor en','el proyecto?']},
+    {id:'urg',type:'gate',row:5,lane:1,label:['Alta urgente'],sub:'operador lo registra'},
+    {id:'pc',type:'machine',row:6,lane:0,label:['Asocia proyecto','+ cliente']},
+    {id:'wk',type:'machine',row:7,lane:0,label:['Worker clasifica'],sub:'flow = F1'},
+    {id:'doc',type:'task',row:8,lane:0,label:['Crear Document'],sub:'+ subir a R2'},
+    {id:'ocr',type:'machine',row:9,lane:0,label:['OCR · Google Vision'],sub:'ocrConfidence'},
+    {id:'gconf',type:'gateway',row:10,lane:0,label:['¿confianza','OCR?']},
+    {id:'efail',type:'enderr',row:11,lane:1,label:['FAILED · reenvío']},
+    {id:'cla',type:'machine',row:11,lane:-1,label:['Claude valida'],sub:'c/ supervisor'},
+    {id:'done',type:'task',row:11,lane:0,label:['ocrStatus = DONE'],sub:'PENDING_REVIEW'},
+    {id:'gcla',type:'gateway',row:12,lane:-1,label:['¿supervisor','responde?']},
+    {id:'nr',type:'task',row:13,lane:-2,label:['NEEDS_REVIEW'],sub:'visible al operador'},
+    {id:'fix',type:'task',row:13,lane:-1,label:['Corrige ocrData']},
+    {id:'evd',type:'event',row:14,lane:0,label:['eventos_crudos'],sub:'→ DONE'},
+    {id:'gate',type:'gate',row:15,lane:0,label:['Operador revisa'],sub:'aprueba / rechaza'},
+    {id:'gap',type:'gateway',row:16,lane:0,label:['¿aprueba?']},
+    {id:'rej',type:'enderr',row:17,lane:1,label:['REJECTED']},
+    {id:'app',type:'end',row:17,lane:0,label:['APPROVED']}
+  ], edges:[
+    {from:'s',to:'hmac'},{from:'hmac',to:'e401',label:'No'},{from:'hmac',to:'ev',label:'Sí'},
+    {from:'ev',to:'res'},{from:'res',to:'greg'},{from:'greg',to:'urg',label:'no reg.'},{from:'greg',to:'pc',label:'sí'},{from:'urg',to:'pc'},
+    {from:'pc',to:'wk'},{from:'wk',to:'doc'},{from:'doc',to:'ocr'},{from:'ocr',to:'gconf'},
+    {from:'gconf',to:'efail',label:'ilegible'},{from:'gconf',to:'cla',label:'< 0.85'},{from:'gconf',to:'done',label:'≥ 0.85'},
+    {from:'cla',to:'gcla'},{from:'gcla',to:'nr',label:'No'},{from:'gcla',to:'fix',label:'Sí'},
+    {from:'fix',to:'evd'},{from:'nr',to:'evd'},{from:'done',to:'evd'},
+    {from:'evd',to:'gate'},{from:'gate',to:'gap'},{from:'gap',to:'rej',label:'No'},{from:'gap',to:'app',label:'Sí'}
+  ]},
+  f2:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Boleta enviada'],sub:'WhatsApp · correo · manual'},
+    {id:'hmac',type:'gateway',row:1,lane:0,label:['Webhook','¿HMAC válido?']},
+    {id:'e401',type:'enderr',row:2,lane:1,label:['401 · descartado']},
+    {id:'ev',type:'event',row:2,lane:0,label:['eventos_crudos'],sub:'PENDING + tenant'},
+    {id:'res',type:'machine',row:3,lane:0,label:['Resolver emisor'],sub:'teléfono / correo'},
+    {id:'greg',type:'gateway',row:4,lane:0,label:['¿emisor en','el proyecto?']},
+    {id:'urg',type:'gate',row:5,lane:1,label:['Alta urgente'],sub:'operador lo registra'},
+    {id:'pc',type:'machine',row:6,lane:0,label:['Asocia proyecto','+ cliente']},
+    {id:'wk',type:'machine',row:7,lane:0,label:['Worker clasifica'],sub:'flow = F2'},
+    {id:'ocr',type:'machine',row:8,lane:0,label:['OCR boleta'],sub:'monto·fecha·prov.'},
+    {id:'gconf',type:'gateway',row:9,lane:0,label:['¿confianza','≥ 0.85?']},
+    {id:'cla',type:'machine',row:10,lane:-1,label:['Claude valida'],sub:'c/ supervisor'},
+    {id:'ok',type:'task',row:10,lane:0,label:['Datos OK']},
+    {id:'fix',type:'task',row:11,lane:-1,label:['Corrige datos']},
+    {id:'evd',type:'event',row:12,lane:0,label:['eventos_crudos'],sub:'→ DONE'},
+    {id:'an',type:'machine',row:13,lane:0,label:['Claude: categoría'],sub:'+ flag anomalía'},
+    {id:'grend',type:'gateway',row:14,lane:0,label:['¿rendición','abierta?']},
+    {id:'crea',type:'task',row:15,lane:-1,label:['Crea rendición'],sub:'weekStart→weekEnd'},
+    {id:'asoc',type:'task',row:15,lane:0,label:['Asocia gasto'],sub:'renditionId·total'},
+    {id:'cron',type:'machine',row:16,lane:0,label:['Cron lunes 00:00'],sub:'OPEN→SUBMITTED'},
+    {id:'noti',type:'task',row:17,lane:0,label:['Notifica operador']},
+    {id:'gate',type:'gate',row:18,lane:0,label:['Operador aprueba'],sub:'rendición completa'},
+    {id:'gap',type:'gateway',row:19,lane:0,label:['¿aprueba?']},
+    {id:'rej',type:'enderr',row:20,lane:1,label:['REJECTED'],sub:'motivo→superv.'},
+    {id:'out',type:'output',row:20,lane:0,label:['Confirma + PDF'],sub:'WhatsApp'},
+    {id:'end',type:'end',row:21,lane:0,label:['APPROVED']}
+  ], edges:[
+    {from:'s',to:'hmac'},{from:'hmac',to:'e401',label:'No'},{from:'hmac',to:'ev',label:'Sí'},
+    {from:'ev',to:'res'},{from:'res',to:'greg'},{from:'greg',to:'urg',label:'no reg.'},{from:'greg',to:'pc',label:'sí'},{from:'urg',to:'pc'},
+    {from:'pc',to:'wk'},{from:'wk',to:'ocr'},{from:'ocr',to:'gconf'},
+    {from:'gconf',to:'cla',label:'No'},{from:'gconf',to:'ok',label:'Sí'},{from:'cla',to:'fix'},
+    {from:'fix',to:'evd'},{from:'ok',to:'evd'},{from:'evd',to:'an'},{from:'an',to:'grend'},
+    {from:'grend',to:'crea',label:'No'},{from:'grend',to:'asoc',label:'Sí'},
+    {from:'crea',to:'cron'},{from:'asoc',to:'cron'},{from:'cron',to:'noti'},{from:'noti',to:'gate'},
+    {from:'gate',to:'gap'},{from:'gap',to:'rej',label:'No'},{from:'gap',to:'out',label:'Sí'},{from:'out',to:'end'}
+  ]},
+  f3:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Gestión de inventario'],sub:'dashboard · sin webhook'},
+    {id:'wh',type:'task',row:1,lane:0,label:['Cargar bodegas'],sub:'dirección obligatoria'},
+    {id:'gini',type:'gateway',row:2,lane:0,label:['¿cargar stock','inicial?']},
+    {id:'it',type:'task',row:3,lane:-1,label:['Cargar ítems POP'],sub:'minStock'},
+    {id:'idg',type:'machine',row:4,lane:-1,label:['ID auto + correlativo'],sub:'por cada pieza'},
+    {id:'vw',type:'task',row:5,lane:0,label:['Bodega virtual'],sub:'SQL VIEW (lectura)'},
+    {id:'mov',type:'task',row:6,lane:0,label:['Registrar movimiento'],sub:'vincula bodega por dirección'},
+    {id:'gguard',type:'gateway',row:7,lane:0,label:['¿mismo tenant','y bodega válida?']},
+    {id:'eguard',type:'enderr',row:8,lane:1,label:['Bloqueado'],sub:'ClientIsolationGuard'},
+    {id:'gval',type:'gateway',row:8,lane:0,label:['¿stock','válido?']},
+    {id:'eneg',type:'enderr',row:9,lane:1,label:['Rechazado'],sub:'usar ADJUSTMENT'},
+    {id:'apply',type:'machine',row:9,lane:0,label:['Ajusta PopStock'],sub:'atómico · par si TRANSFER'},
+    {id:'sm',type:'task',row:10,lane:0,label:['StockMovement'],sub:'responsable · fecha · proyecto'},
+    {id:'gmin',type:'gateway',row:11,lane:0,label:['¿stock <','mínimo?']},
+    {id:'alert',type:'machine',row:12,lane:-1,label:['Alerta proactiva'],sub:'al operador'},
+    {id:'end',type:'end',row:13,lane:0,label:['Inventario actualizado']}
+  ], edges:[
+    {from:'s',to:'wh'},{from:'wh',to:'gini'},{from:'gini',to:'it',label:'sí'},{from:'gini',to:'vw',label:'no'},
+    {from:'it',to:'idg'},{from:'idg',to:'vw'},{from:'vw',to:'mov'},{from:'mov',to:'gguard'},
+    {from:'gguard',to:'eguard',label:'No'},{from:'gguard',to:'gval',label:'Sí'},
+    {from:'gval',to:'eneg',label:'No'},{from:'gval',to:'apply',label:'Sí'},{from:'apply',to:'sm'},{from:'sm',to:'gmin'},
+    {from:'gmin',to:'alert',label:'Sí'},{from:'alert',to:'end'},{from:'gmin',to:'end',label:'No'}
+  ]},
+  f4:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Nuevo proyecto'],sub:'SETUP'},
+    {id:'gini',type:'gateway',row:1,lane:0,label:['¿en blanco','o archivo?']},
+    {id:'file',type:'task',row:2,lane:1,label:['Sube archivo'],sub:'cualquier tipo'},
+    {id:'aird',type:'machine',row:3,lane:1,label:['IA lee el archivo']},
+    {id:'build',type:'machine',row:4,lane:0,label:['IA arma el proyecto'],sub:'asignaciones·tiempos·días·recursos'},
+    {id:'conv',type:'task',row:5,lane:0,label:['Convocatoria + calendario'],sub:'DRAFT · PersonDay'},
+    {id:'pa',type:'task',row:6,lane:0,label:['Pasa a revisión'],sub:'PENDING_APPROVAL'},
+    {id:'gate',type:'gate',row:7,lane:0,label:['Operador aprueba envío'],sub:'solo ajusta · banner'},
+    {id:'gap',type:'gateway',row:8,lane:0,label:['¿aprueba?']},
+    {id:'eno',type:'enderr',row:9,lane:1,label:['No enviada'],sub:'vuelve a DRAFT'},
+    {id:'send',type:'machine',row:9,lane:0,label:['Envío WhatsApp'],sub:'SENT · lock 5m'},
+    {id:'rsp',type:'event',row:10,lane:0,label:['Personal responde'],sub:'WhatsApp entrante'},
+    {id:'hmac',type:'gateway',row:11,lane:0,label:['Webhook','¿HMAC válido?']},
+    {id:'e401',type:'enderr',row:12,lane:1,label:['401 · descartado']},
+    {id:'ev',type:'event',row:12,lane:0,label:['eventos_crudos'],sub:'PENDING + tenant'},
+    {id:'res',type:'machine',row:13,lane:0,label:['Resolver emisor'],sub:'teléfono / correo'},
+    {id:'greg',type:'gateway',row:14,lane:0,label:['¿emisor en','el proyecto?']},
+    {id:'urg',type:'gate',row:15,lane:1,label:['Alta urgente'],sub:'operador lo registra'},
+    {id:'pc',type:'machine',row:16,lane:0,label:['Asocia proyecto','+ cliente']},
+    {id:'clf',type:'machine',row:17,lane:0,label:['Claude clasifica'],sub:'respuesta'},
+    {id:'gcf',type:'gateway',row:18,lane:0,label:['¿confirma?']},
+    {id:'rej',type:'task',row:19,lane:-1,label:['REJECTED'],sub:'AssignStatus'},
+    {id:'amb',type:'machine',row:19,lane:1,label:['Claude infiere'],sub:'máx 2 → escala'},
+    {id:'cfm',type:'task',row:19,lane:0,label:['CONFIRMED'],sub:'AssignStatus'},
+    {id:'msg',type:'task',row:20,lane:0,label:['ConvocationMessage'],sub:'INBOUND'},
+    {id:'gall',type:'gateway',row:21,lane:0,label:['¿todos','respondieron?']},
+    {id:'wait',type:'task',row:22,lane:1,label:['Espera respuestas'],sub:'(sigue abierta)'},
+    {id:'noti',type:'task',row:22,lane:0,label:['Notifica operador']},
+    {id:'clo',type:'task',row:23,lane:0,label:['Convocatoria CLOSED']},
+    {id:'gns',type:'gateway',row:24,lane:0,label:['¿confirmado','se presenta?']},
+    {id:'ns',type:'enderr',row:25,lane:1,label:['NO_SHOW'],sub:'día de activación'},
+    {id:'end',type:'end',row:25,lane:0,label:['Personal presente']}
+  ], edges:[
+    {from:'s',to:'gini'},{from:'gini',to:'file',label:'archivo'},{from:'gini',to:'build',label:'en blanco'},
+    {from:'file',to:'aird'},{from:'aird',to:'build'},{from:'build',to:'conv'},{from:'conv',to:'pa'},{from:'pa',to:'gate'},{from:'gate',to:'gap'},
+    {from:'gap',to:'eno',label:'No'},{from:'gap',to:'send',label:'Sí'},
+    {from:'send',to:'rsp'},{from:'rsp',to:'hmac'},{from:'hmac',to:'e401',label:'No'},{from:'hmac',to:'ev',label:'Sí'},
+    {from:'ev',to:'res'},{from:'res',to:'greg'},{from:'greg',to:'urg',label:'no reg.'},{from:'greg',to:'pc',label:'sí'},{from:'urg',to:'pc'},
+    {from:'pc',to:'clf'},{from:'clf',to:'gcf'},
+    {from:'gcf',to:'rej',label:'Rechaza'},{from:'gcf',to:'amb',label:'Ambiguo'},{from:'gcf',to:'cfm',label:'Confirma'},
+    {from:'rej',to:'msg'},{from:'amb',to:'msg'},{from:'cfm',to:'msg'},{from:'msg',to:'gall'},
+    {from:'gall',to:'wait',label:'No'},{from:'gall',to:'noti',label:'Sí'},{from:'noti',to:'clo'},
+    {from:'clo',to:'gns'},{from:'gns',to:'ns',label:'No'},{from:'gns',to:'end',label:'Sí'}
+  ]},
+  f5:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Activación'],sub:'SCHEDULED'},
+    {id:'ip',type:'task',row:1,lane:0,label:['Inicia activación'],sub:'IN_PROGRESS · live'},
+    {id:'nov',type:'event',row:2,lane:0,label:['Novedad de terreno'],sub:'WhatsApp + foto'},
+    {id:'hmac',type:'gateway',row:3,lane:0,label:['Webhook','¿HMAC válido?']},
+    {id:'e401',type:'enderr',row:4,lane:1,label:['401 · descartado']},
+    {id:'ev',type:'event',row:4,lane:0,label:['eventos_crudos'],sub:'PENDING + tenant'},
+    {id:'res',type:'machine',row:5,lane:0,label:['Resolver emisor'],sub:'teléfono / correo'},
+    {id:'greg',type:'gateway',row:6,lane:0,label:['¿emisor en','el proyecto?']},
+    {id:'urg',type:'gate',row:7,lane:1,label:['Alta urgente'],sub:'operador lo registra'},
+    {id:'pc',type:'machine',row:8,lane:0,label:['Asocia proyecto','+ cliente']},
+    {id:'wk',type:'machine',row:9,lane:0,label:['Worker clasifica'],sub:'novedad de terreno'},
+    {id:'ae',type:'task',row:10,lane:0,label:['ActivationEvent'],sub:'content·mediaUrl(R2)'},
+    {id:'n1',type:'event',row:11,lane:0,label:['Notifica al operador'],sub:'en cada novedad'},
+    {id:'gcan',type:'gateway',row:12,lane:0,label:['¿activación','cancelada?']},
+    {id:'ecan',type:'enderr',row:13,lane:1,label:['CANCELLED'],sub:'sin reporte'},
+    {id:'draft',type:'machine',row:13,lane:0,label:['Claude analista'],sub:'borrador reportData'},
+    {id:'prev',type:'task',row:14,lane:0,label:['Preview reporte'],sub:'ClientReportPreview'},
+    {id:'n2',type:'event',row:15,lane:0,label:['Notifica'],sub:'borrador listo'},
+    {id:'gate',type:'gate',row:16,lane:0,label:['Operador valida envío'],sub:'HumanValidationBanner'},
+    {id:'gap',type:'gateway',row:17,lane:0,label:['¿valida?']},
+    {id:'eno',type:'enderr',row:18,lane:-1,label:['No enviado'],sub:'editar borrador'},
+    {id:'send',type:'machine',row:18,lane:0,label:['Envía reporte'],sub:'email · reportSentAt'},
+    {id:'n3',type:'event',row:19,lane:0,label:['Notifica'],sub:'reporte enviado'},
+    {id:'evd',type:'event',row:20,lane:0,label:['eventos_crudos'],sub:'→ DONE'},
+    {id:'end',type:'end',row:21,lane:0,label:['Activación COMPLETED']}
+  ], edges:[
+    {from:'s',to:'ip'},{from:'ip',to:'nov'},{from:'nov',to:'hmac'},{from:'hmac',to:'e401',label:'No'},{from:'hmac',to:'ev',label:'Sí'},
+    {from:'ev',to:'res'},{from:'res',to:'greg'},{from:'greg',to:'urg',label:'no reg.'},{from:'greg',to:'pc',label:'sí'},{from:'urg',to:'pc'},
+    {from:'pc',to:'wk'},{from:'wk',to:'ae'},{from:'ae',to:'n1'},{from:'n1',to:'gcan'},
+    {from:'gcan',to:'ecan',label:'Sí'},{from:'gcan',to:'draft',label:'No'},{from:'draft',to:'prev'},{from:'prev',to:'n2'},{from:'n2',to:'gate'},
+    {from:'gate',to:'gap'},{from:'gap',to:'eno',label:'No'},{from:'gap',to:'send',label:'Sí'},{from:'send',to:'n3'},{from:'n3',to:'evd'},{from:'evd',to:'end'}
+  ]}
+};
+
+function buildBPMN(fid, src, opts){
+  const d=(src||BPMN_DATA)[fid]; if(!d) return '';
+  const PAD=36, NW=150, NH=50, ROWH=92, COLX=196, GW=46, SR=15, ER=17;
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const lanes=d.nodes.map(n=>n.lane), rows=d.nodes.map(n=>n.row);
+  const minLane=Math.min(...lanes), maxLane=Math.max(...lanes), maxRow=Math.max(...rows);
+  const W=PAD*2+NW+(maxLane-minLane)*COLX, H=PAD*2+NH+maxRow*ROWH+18;
+  const M={};
+  d.nodes.forEach(n=>{ M[n.id]={...n, x:PAD+NW/2+(n.lane-minLane)*COLX, y:PAD+NH/2+n.row*ROWH}; });
+  const hV=n=> (n.type==='start'?SR:(n.type==='end'||n.type==='enderr')?ER:n.type==='gateway'?GW/2:NH/2);
+  const hH=n=> (n.type==='start'?SR:(n.type==='end'||n.type==='enderr')?ER:n.type==='gateway'?GW/2:NW/2);
+  const TP=n=>({x:M[n].x,y:M[n].y-hV(M[n])}), BT=n=>({x:M[n].x,y:M[n].y+hV(M[n])});
+  const LF=n=>({x:M[n].x-hH(M[n]),y:M[n].y}), RT=n=>({x:M[n].x+hH(M[n]),y:M[n].y});
+
+  let edges='', elabels='';
+  d.edges.forEach(e=>{
+    const a=M[e.from], b=M[e.to]; let path, lx, ly;
+    if(a.lane===b.lane){
+      const s=BT(e.from), t=TP(e.to);
+      path=`M ${s.x} ${s.y} L ${t.x} ${t.y}`; lx=s.x; ly=t.y-15;
+    } else if(a.type==='gateway'){
+      const dir=b.lane>a.lane?1:-1, s=dir>0?RT(e.from):LF(e.from);
+      if(a.row===b.row){ const t=dir>0?LF(e.to):RT(e.to); path=`M ${s.x} ${s.y} L ${t.x} ${t.y}`; lx=(s.x+t.x)/2; ly=s.y-8; }
+      else{ const t=TP(e.to); path=`M ${s.x} ${s.y} L ${b.x} ${s.y} L ${b.x} ${t.y}`; lx=(s.x+b.x)/2; ly=s.y-8; }
+    } else {
+      const s=BT(e.from), t=TP(e.to), midY=t.y-16;
+      path=`M ${s.x} ${s.y} L ${s.x} ${midY} L ${t.x} ${midY} L ${t.x} ${t.y}`; lx=(s.x+t.x)/2; ly=midY-7;
+    }
+    edges+=`<path d="${path}" class="bp-edge"/>`;
+    if(e.label){ const w=Math.max(22, esc(e.label).length*5.4+8);
+      elabels+=`<g class="bp-elabel" transform="translate(${lx},${ly})"><rect x="${-w/2}" y="-8" width="${w}" height="16" rx="8"/><text x="0" y="3.2" style="fill:var(--steel)">${esc(e.label)}</text></g>`; }
+  });
+
+  let nodes='';
+  d.nodes.forEach(n=>{
+    const x=M[n.id].x, y=M[n.id].y; let g='';
+    if(n.type==='start'||n.type==='end'||n.type==='enderr'){
+      const r=n.type==='start'?SR:ER, cls=n.type==='enderr'?'bp-enderr':('bp-'+n.type);
+      g+=`<circle cx="${x}" cy="${y}" r="${r}" class="${cls}"/>`;
+      const tcls=n.type==='enderr'?'bp-ext bp-enderr-t':'bp-ext', ly=y+r+13;
+      g+=(n.label||[]).map((ln,i)=>`<text class="${tcls}" x="${x}" y="${ly+i*11}">${esc(ln)}</text>`).join('');
+      if(n.sub) g+=`<text class="bp-sub" x="${x}" y="${ly+(n.label||[]).length*11}">${esc(n.sub)}</text>`;
+    } else if(n.type==='gateway'){
+      const h=GW/2;
+      g+=`<polygon points="${x},${y-h} ${x+h},${y} ${x},${y+h} ${x-h},${y}" class="bp-gw"/>`;
+      g+=`<path d="M ${x-6} ${y-6} L ${x+6} ${y+6} M ${x+6} ${y-6} L ${x-6} ${y+6}" class="bp-gw-x"/>`;
+      const ly=y+h+12;
+      g+=(n.label||[]).map((ln,i)=>`<text class="bp-ext" x="${x}" y="${ly+i*11}">${esc(ln)}</text>`).join('');
+    } else {
+      const cls=n.type==='gate'?'bp-gate':n.type==='machine'?'bp-machine':n.type==='event'?'bp-event':n.type==='output'?'bp-output':'bp-task';
+      g+=`<rect x="${x-NW/2}" y="${y-NH/2}" width="${NW}" height="${NH}" rx="10" class="${cls}"/>`;
+      if(n.type==='machine') g+=`<circle cx="${x-NW/2+12}" cy="${y-NH/2+12}" r="3" class="bp-ic-m"/>`;
+      if(n.type==='event') g+=`<rect x="${x-NW/2+8}" y="${y-NH/2+8}" width="7" height="7" rx="1.5" class="bp-ic-e"/>`;
+      if(n.type==='gate') g+=`<g class="bp-ic-h" transform="translate(${x-NW/2+8},${y-NH/2+7})"><circle cx="4.5" cy="3.5" r="2.4"/><path d="M0 11 c0-3.2 9-3.2 9 0"/></g>`;
+      const main=n.label||[], hasSub=!!n.sub, total=main.length+(hasSub?1:0), LH=12.5;
+      let sy=y-((total-1)*LH)/2+4;
+      main.forEach((ln,i)=>{ g+=`<text class="bp-t" x="${x}" y="${sy+i*LH}">${esc(ln)}</text>`; });
+      if(hasSub) g+=`<text class="bp-sub" x="${x}" y="${sy+main.length*LH+.5}">${esc(n.sub)}</text>`;
+    }
+    nodes+=`<g>${g}</g>`;
+  });
+
+  return `<div class="bpmn-card">
+    <div class="bh"><h4>${(opts&&opts.title)||'Diagrama BPMN del proceso'}</h4>
+      <div class="bpmn-legend">
+        <span><i style="background:var(--ok);border:none"></i>Inicio</span>
+        <span><i style="background:#fff;border-color:var(--machine)"></i>Sistema/IA</span>
+        <span><i style="background:var(--human-bg);border-color:var(--human)"></i>Validación humana</span>
+        <span><i style="transform:rotate(45deg);background:#fff;border-color:var(--ink)"></i>Decisión</span>
+        <span><i style="background:var(--fail-bg);border-color:var(--fail)"></i>Rechazo/error</span>
+      </div>
+    </div>
+    <div class="bpmn-wrap">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Diagrama BPMN del flujo ${fid.toUpperCase()}">
+        <defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 z" fill="#566570"/></marker></defs>
+        ${edges}${elabels}${nodes}
+      </svg>
+    </div>
+  </div>`;
+}
+
+/* ───────── Stepper: detalle exhaustivo por flujo ───────── */
+const FLOWS = [
+  {
+    id:'f1', code:'F1', live:false,
+    name:'Control Documental con OCR',
+    purpose:'Procesar documentos de terreno (boletas, facturas, contratos, formularios), extraer sus datos con OCR, validarlos con apoyo de Claude cuando la confianza es baja y registrarlos solo tras aprobación humana.',
+    tags:['Actores: <b>supervisor · operador</b>','Entrada: <b>WhatsApp · email · manual</b>','Modelo: <code>Document</code>','Umbral OCR: <code>0.85</code>'],
+    gate:'Aprobar documento',
+    steps:[
+      {type:'input',title:'Entrada del documento',body:'Foto por WhatsApp, correo corporativo <em>(canal a habilitar)</em> o upload manual. El archivo sube a <code>Cloudflare R2</code>.'},
+      {type:'decision',title:'Webhook + verificación HMAC',body:'<code>POST /api/webhooks/whatsapp</code>. Se valida la firma <code>x-hub-signature-256</code> antes de tocar nada.',branches:[
+        {cls:'yes',label:'Firma válida',body:'Continúa el procesamiento.'},
+        {cls:'err',label:'Firma inválida',body:'<code>401</code> — el evento se descarta y <b>no</b> persiste.'}
+      ]},
+      {type:'event',title:'Persistencia en eventos_crudos',body:'Se persiste el evento (<code>status=PENDING</code> + <code>tenantId</code>) <b>antes</b> de cualquier proceso. WhatsApp/correo siguen siendo input-only.'},
+      {type:'decision',title:'Asociación a proyecto y cliente',body:'Se identifica al <b>emisor</b> por su <b>teléfono o correo</b> y se busca el proyecto donde está registrado (de ahí cuelga el <code>clientId</code>). Todo evento queda atado a <code>projectId</code> + <code>clientId</code>.',branches:[{cls:'yes',label:'Emisor registrado',body:'Se asocia al proyecto y cliente y continúa.'},{cls:'alt',label:'No registrado',body:'<b>Alta urgente</b>: se escala al operador para registrarlo en el proyecto; el evento espera la asociación.'}]},
+      {type:'machine',kind:'machine',title:'Worker clasifica → F1',body:'El worker BullMQ identifica que es un documento y crea el <code>Document</code> (<code>ocrStatus=PENDING</code>, <code>status=PENDING_REVIEW</code>).'},
+      {type:'machine',kind:'machine',title:'OCR — Google Cloud Vision',body:'Extrae <code>ocrRawText</code>, <code>ocrData</code> estructurado y <code>ocrConfidence</code>.'},
+      {type:'decision',title:'Bifurcación por confianza OCR',body:'Umbral <code>0.85</code>.',branches:[
+        {cls:'yes',label:'≥ 0.85',body:'<code>ocrStatus=DONE</code> → queda en <code>PENDING_REVIEW</code>.'},
+        {cls:'no',label:'< 0.85',body:'<code>NEEDS_REVIEW</code> → Claude consulta al supervisor por WhatsApp y corrige <code>ocrData</code>.'},
+        {cls:'err',label:'Ilegible',body:'<code>ocrStatus=FAILED</code> → se solicita reenvío.'}
+      ]},
+      {type:'state',title:'Cierre del evento crudo',body:'Terminado el procesamiento, <code>EventoCrudo → DONE</code>. Los datos quedan en <code>PENDING_REVIEW</code>.'},
+      {type:'gate',title:'Validación humana — Operador',body:'Revisa texto extraído + datos + imagen original: <code>PUT /approve</code> o <code>PUT /reject</code>. Sella <code>approvedBy</code> y <code>approvedAt</code>.'},
+      {type:'state',title:'Resultado',body:'Salidas terminales del gate.',branches:[
+        {cls:'yes',label:'Aprobado',body:'<code>APPROVED</code> — documento registrado y trazable.'},
+        {cls:'err',label:'Rechazado',body:'<code>REJECTED</code> — no alimenta reportes ni rendiciones.'}
+      ]}
+    ],
+    rules:['Todo evento se asocia a un proyecto y cliente por el teléfono/correo del emisor; si no está registrado, se agrega al proyecto como urgencia.','El documento no se registra hasta <code>APPROVED</code>.','Claude solo pregunta por campos faltantes: nunca inventa ni aprueba.','Máximo razonable de reintentos antes de escalar al operador.'],
+    endpoints:[['GET','/api/app/documents'],['POST','/api/app/documents'],['GET','/api/app/documents/:id'],['PUT','/api/app/documents/:id/approve'],['PUT','/api/app/documents/:id/reject']],
+    edges:['<b>Imagen ilegible</b> → <code>FAILED</code>, se pide reenvío.','<b>Sin proyecto</b> → <code>projectId=null</code>; se asigna al aprobar.','<b>Supervisor no responde</b> → queda <code>NEEDS_REVIEW</code> visible para el operador.'],
+    outscope:'Versionado, vencimientos y firma de documentos.',
+    accept:'Supervisor envía foto → OCR extrae datos → (si baja confianza, Claude valida) → operador aprueba → documento <code>APPROVED</code> con trazabilidad de quién y cuándo.'
+  },
+  {
+    id:'f2', code:'F2', live:false,
+    name:'Rendición de Gastos',
+    purpose:'Convertir fotos de boletas en gastos estructurados, agruparlos automáticamente por persona + proyecto + semana en una rendición, y permitir que el operador apruebe o rechace la rendición consolidada.',
+    tags:['Actores: <b>supervisor · operador · cron</b>','Entrada: <b>WhatsApp · correo · manual</b>','Modelos: <code>Expense</code> · <code>ExpenseRendition</code>','Cierre: <b>cron lun 00:00</b>'],
+    gate:'Aprobar rendición',
+    steps:[
+      {type:'input',title:'Entrada de boleta',body:'Foto de boleta por WhatsApp o registro manual. Archivo a <code>R2</code> como evidencia.'},
+      {type:'decision',title:'Webhook + verificación HMAC',body:'<code>POST /api/webhooks/whatsapp</code>.',branches:[
+        {cls:'yes',label:'Firma válida',body:'Continúa.'},
+        {cls:'err',label:'Firma inválida',body:'<code>401</code> — descartado.'}
+      ]},
+      {type:'event',title:'Persistencia en eventos_crudos',body:'<code>status=PENDING</code> + <code>tenantId</code>, antes de procesar.'},
+      {type:'decision',title:'Asociación a proyecto y cliente',body:'El <b>emisor</b> (teléfono o correo) define el proyecto y, con él, el cliente. El gasto se ata a <code>projectId</code> + <code>clientId</code>.',branches:[{cls:'yes',label:'Emisor registrado',body:'Continúa la agrupación de la rendición.'},{cls:'alt',label:'No registrado',body:'<b>Alta urgente</b>: se escala al operador para registrarlo en el proyecto.'}]},
+      {type:'machine',kind:'machine',title:'Worker clasifica → F2 + OCR',body:'Extrae <b>monto</b>, <b>fecha</b> (<code>docDate</code>), <b>proveedor</b> y <b>categoría</b>.'},
+      {type:'decision',title:'Confianza OCR',body:'Mismo umbral <code>0.85</code> que F1.',branches:[
+        {cls:'yes',label:'≥ 0.85',body:'Datos OK → continúa.'},
+        {cls:'no',label:'< 0.85',body:'Claude valida con el supervisor y corrige.'}
+      ]},
+      {type:'state',title:'Cierre del evento crudo',body:'<code>EventoCrudo → DONE</code>.'},
+      {type:'machine',kind:'machine',title:'Análisis IA del gasto',body:'Claude sugiere la <code>category</code> y <b>flaggea anomalías</b> (monto fuera de rango, proveedor repetido). Es sugerencia: el operador decide en el gate.'},
+      {type:'decision',title:'Agrupación automática',body:'Busca rendición <code>OPEN</code> por <code>{ projectId, personId, weekStart }</code>.',branches:[
+        {cls:'yes',label:'Existe',body:'Asocia el gasto (<code>renditionId</code>) y recalcula <code>totalAmount</code>.'},
+        {cls:'no',label:'No existe',body:'Crea <code>ExpenseRendition</code> (lunes → domingo).'}
+      ]},
+      {type:'machine',kind:'machine',title:'Cierre semanal — cron lunes 00:00',body:'Rendiciones <code>OPEN</code> de la semana anterior → <code>SUBMITTED</code> y notifica al operador.'},
+      {type:'gate',title:'Validación humana — rendición completa',body:'<code>PUT /renditions/:id/approve</code> o <code>/reject</code>. La IA sugiere categoría y flaggea anomalías; no aprueba.'},
+      {type:'state',title:'Resultado',body:'Salidas terminales.',branches:[
+        {cls:'yes',label:'Aprobada',body:'<code>APPROVED</code> → confirmación por WhatsApp + export PDF.'},
+        {cls:'err',label:'Rechazada',body:'<code>REJECTED</code> → motivo al supervisor.'}
+      ]}
+    ],
+    rules:['Todo gasto se asocia a un proyecto y cliente por el teléfono/correo del emisor; si no está registrado, se agrega al proyecto como urgencia.','Unicidad <code>(projectId, personId, weekStart)</code>: una sola rendición abierta por persona/proyecto/semana.','<code>currency</code> por defecto <code>CLP</code>.','La aprobación es a nivel de rendición; los <code>Expense</code> heredan el resultado.'],
+    endpoints:[['GET','/api/app/expenses'],['POST','/api/app/expenses'],['GET','/api/app/renditions'],['GET','/api/app/renditions/:id'],['PUT','/api/app/renditions/:id/approve'],['PUT','/api/app/renditions/:id/reject'],['GET','/api/app/renditions/:id/export']],
+    edges:['<b>Boleta tardía</b> → usa la rendición de la semana de su <code>docDate</code>.','<b>Gasto sin proyecto</b> → Claude resuelve contexto; si sigue ambiguo, escala.','<b>Rendición rechazada</b> → supervisor recibe el motivo.'],
+    outscope:'Conciliación contable, integración tributaria, multi-moneda real (solo CLP en MVP).',
+    accept:'Supervisor envía boletas → se agrupan por semana → cron cierra → operador aprueba → rendición exportable a PDF y supervisor notificado.'
+  },
+  {
+    id:'f3', code:'F3', live:false,
+    name:'Inventario de Material POP',
+    purpose:'Controlar stock de material POP en bodegas físicas, exponer una bodega virtual “Proyectos Live”, trazar todo movimiento y alertar por stock bajo. Gestión interna desde el dashboard.',
+    tags:['Actor: <b>operador</b>','Entrada: <b>dashboard (sin webhook)</b>','Modelos: <code>Warehouse</code> · <code>PopStock</code>','Virtual: <b>SQL VIEW</b>'],
+    gate:null,
+    steps:[
+      {type:'input',title:'Cargar bodegas (con dirección)',body:'Lo <b>único obligatorio</b>: registrar las <code>Warehouse</code> <b>con su dirección</b>. La dirección es la que vincula a la bodega cuando alguien deja o retira material. Stock por ítem×bodega en <code>PopStock</code> (<code>unique(warehouseId, itemId)</code>).'},
+      {type:'input',title:'Carga inicial (opcional) e ítems',body:'La carga de stock inicial es <b>opcional</b>. Al cargar piezas, el <b>ID de cada una se genera automáticamente</b>; dos piezas iguales se distinguen por un <b>correlativo</b>. “Proyectos Live” es una <b>SQL VIEW</b> de solo lectura (no tabla, <code>isVirtual=true</code>): única excepción de SQL crudo.'},
+      {type:'input',title:'Registrar movimiento',body:'<code>POST /stock/movement</code>: <code>IN</code> · <code>OUT</code> · <code>TRANSFER</code> · <code>ADJUSTMENT</code> con <code>quantity</code>, <code>responsibleId</code>, <code>notes</code> y <code>projectId</code> opcional.'},
+      {type:'decision',title:'Validación del movimiento',body:'¿el stock resultante es válido?',branches:[
+        {cls:'yes',label:'Válido',body:'Ajusta <code>PopStock</code> atómicamente (par origen/destino si es <code>TRANSFER</code>).'},
+        {cls:'err',label:'Quedaría negativo',body:'Se rechaza con <code>{ message, code }</code>; usar <code>ADJUSTMENT</code> documentado.'}
+      ]},
+      {type:'state',title:'Movimiento trazado',body:'Se registra <code>StockMovement</code> con responsable y fecha. Trazabilidad completa.'},
+      {type:'decision',title:'Control de stock mínimo',body:'¿<code>quantity &lt; minStock</code>?',branches:[
+        {cls:'no',label:'Sí, está bajo',body:'IA proactiva: alerta al operador y sugiere reposición (no ejecuta).'},
+        {cls:'yes',label:'No',body:'Sin alerta. Inventario queda actualizado.'}
+      ]}
+    ],
+    rules:['Cada movimiento se ata a un proyecto (y por él, al cliente); la pieza se vincula a la bodega por su dirección.','El stock nunca se edita a mano: todo cambio es un <code>StockMovement</code>. Correcciones con <code>ADJUSTMENT</code>.','<code>TRANSFER</code> genera el par de efectos (sale de origen, entra a destino).','“Proyectos Live” no se materializa como tabla → solo VIEW de lectura.'],
+    endpoints:[['GET','/api/app/warehouses'],['POST','/api/app/warehouses'],['GET','/api/app/warehouses/:id/stock'],['POST','/api/app/stock/movement'],['GET','/api/app/pop-items'],['POST','/api/app/pop-items'],['GET','/api/app/stock/live-projects']],
+    edges:['<b>Stock negativo</b> → movimiento rechazado; usar <code>ADJUSTMENT</code>.','<b>Transferencia a bodega de otro tenant</b> → bloqueada por <code>ClientIsolationGuard</code>.'],
+    outscope:'Lotes/series, vencimiento de material, reposición automática, scanner de código de barras.',
+    accept:'Operador gestiona bodegas e ítems, registra movimientos con trazabilidad, ve “Proyectos Live” en tiempo real y recibe alertas de stock bajo.'
+  },
+  {
+    id:'f4', code:'F4', live:false,
+    name:'Setup de Proyectos y Convocatoria de Personal',
+    purpose:'Crear proyectos de activación, armar el calendario persona-por-día y convocar al personal por WhatsApp solo después de aprobación humana explícita, registrando confirmaciones y rechazos.',
+    tags:['Actores: <b>operador · personal BTL</b>','Arranque: <b>en blanco o archivo → IA arma</b>','Entrada: <b>dashboard · WhatsApp (respuestas)</b>','Modelos: <code>Convocation</code> · <code>PersonDay</code>','Gate: <b>obligatorio antes de enviar</b>'],
+    gate:'Enviar convocatoria',
+    steps:[
+      {type:'input',title:'Arranque: en blanco o con archivo',body:'El proyecto parte <b>en blanco</b> o <b>subiendo un archivo de cualquier tipo</b>. Si hay archivo, la IA lo lee.'},
+      {type:'machine',kind:'machine',title:'La IA arma el proyecto',body:'A partir del archivo (o desde cero) la IA propone <b>todo</b>: asignaciones, tiempos, días y recursos. El usuario hace lo mínimo: revisa y aprueba. Crea <code>Project</code> (<code>SETUP</code>) + <code>Convocation</code> en <code>DRAFT</code>.'},
+      {type:'input',title:'Calendario persona-por-día',body:'Asignación por día y turno (<code>PersonDay</code>, <code>unique(convocationId, personId, date)</code>). Cada asignación nace en <code>PENDING</code>. Luego <code>PENDING_APPROVAL</code>.'},
+      {type:'gate',title:'Validación humana — OBLIGATORIA antes del envío masivo',body:'Se muestra el <code>HumanValidationBanner</code>. Sin <code>approvedBy</code> + <code>approvedAt</code> no se envía nada.',branches:[
+        {cls:'yes',label:'Aprueba',body:'Continúa el envío.'},
+        {cls:'err',label:'No aprueba',body:'La convocatoria vuelve a <code>DRAFT</code>.'}
+      ]},
+      {type:'machine',kind:'machine',title:'Envío por WhatsApp',body:'<code>POST /convocations/:id/approve</code> dispara el worker. <code>APPROVED → SENT</code> (<code>sentAt</code>). Cada saliente → <code>ConvocationMessage</code> (<code>OUTBOUND</code>) vía <code>WhatsappOutputService</code> (lock 5 min).'},
+      {type:'event',title:'Respuestas del personal',body:'Entran por WhatsApp → webhook con verificación <code>HMAC</code> (firma inválida → <code>401</code>) → <code>eventos_crudos</code>. WhatsApp sigue siendo input-only.'},
+      {type:'decision',title:'Asociación a proyecto y cliente',body:'Cada respuesta se ata al proyecto por el <b>teléfono</b> del emisor (la persona convocada).',branches:[{cls:'yes',label:'Registrado en la convocatoria',body:'Se actualiza su <code>AssignStatus</code>.'},{cls:'alt',label:'Número desconocido',body:'<b>Alta urgente</b>: se escala al operador para registrarlo en el proyecto.'}]},
+      {type:'decision',title:'Clasificación de la respuesta (Claude)',body:'Cada respuesta se clasifica.',branches:[
+        {cls:'yes',label:'Confirma',body:'<code>AssignStatus=CONFIRMED</code>.'},
+        {cls:'err',label:'Rechaza',body:'<code>AssignStatus=REJECTED</code>.'},
+        {cls:'alt',label:'Ambiguo',body:'Claude infiere contexto; máx. 2 intentos antes de escalar al operador.'}
+      ]},
+      {type:'machine',kind:'machine',title:'Historial',body:'Cada entrante se guarda como <code>ConvocationMessage</code> (<code>INBOUND</code>).'},
+      {type:'decision',title:'¿Respondió todo el personal?',body:'',branches:[
+        {cls:'yes',label:'Sí',body:'Notifica al operador → convocatoria <code>CLOSED</code>.'},
+        {cls:'no',label:'No',body:'Sigue abierta esperando respuestas.'}
+      ]},
+      {type:'state',title:'Cierre y asistencia',body:'<code>CLOSED</code> al completar. <code>NO_SHOW</code> se marca el día de la activación si un confirmado no se presenta.'}
+    ],
+    rules:['La IA arma el proyecto completo; el operador solo aprueba o ajusta lo mínimo.','Todo se asocia a un proyecto y cliente por el teléfono/correo del emisor; si no está registrado, se agrega al proyecto como urgencia.','El envío masivo jamás se dispara sin el gate humano.','WhatsApp input-only: la respuesta solo actualiza <code>AssignStatus</code> tras <code>eventos_crudos</code> + clasificación.','Editar el calendario tras <code>SENT</code> requiere nueva aprobación.'],
+    endpoints:[['GET','/api/app/convocations'],['POST','/api/app/convocations'],['GET','/api/app/convocations/:id'],['PUT','/api/app/convocations/:id'],['POST','/api/app/convocations/:id/approve'],['GET','/api/app/convocations/:id/calendar'],['POST','/api/app/convocations/:id/assign'],['GET','/api/app/convocations/:id/messages']],
+    edges:['<b>Doble turno mismo día</b> → bloqueado por la unicidad.','<b>Respuesta tardía</b> tras <code>CLOSED</code> → al historial, no reabre.','<b>Edición post-envío</b> → exige re-aprobación.'],
+    outscope:'Reemplazos automáticos, scoring de personal, geolocalización de asistencia.',
+    accept:'Operador crea proyecto, arma el calendario, aprueba explícitamente, se envía la convocatoria, el personal responde por WhatsApp y los estados se actualizan con historial completo.'
+  },
+  {
+    id:'f5', code:'F5', live:true,
+    name:'Control de Activaciones en Vivo + Reporte al Cliente',
+    purpose:'Monitorear en tiempo real cada punto de activación con novedades de terreno y generar un reporte para el cliente de la agencia que solo se envía tras validación humana.',
+    tags:['Actores: <b>supervisor · operador · cliente</b>','Entrada: <b>WhatsApp (novedades)</b>','Modelos: <code>Activation</code> · <code>ActivationEvent</code>','Gate: <b>obligatorio antes de enviar</b>'],
+    gate:'Enviar reporte',
+    steps:[
+      {type:'input',title:'Activación programada y en vivo',body:'<code>Activation</code> en <code>SCHEDULED</code>; al iniciar pasa a <code>IN_PROGRESS</code>. Dashboard en tiempo real por punto.'},
+      {type:'input',title:'Novedades de terreno',body:'El supervisor envía mensajes y fotos por WhatsApp desde el punto de activación.'},
+      {type:'decision',title:'Webhook + verificación HMAC',body:'<code>POST /api/webhooks/whatsapp</code>: se valida <code>x-hub-signature-256</code> y se resuelve el <code>tenantId</code> antes de persistir.',branches:[
+        {cls:'yes',label:'Firma válida',body:'Persiste en <code>eventos_crudos</code> (<code>flow=F5</code>).'},
+        {cls:'err',label:'Firma inválida',body:'<code>401</code> — descartado, no persiste.'}
+      ]},
+      {type:'decision',title:'Asociación a proyecto y cliente',body:'El <b>emisor</b> (teléfono o correo) define la activación, su proyecto y su cliente.',branches:[{cls:'yes',label:'Emisor registrado',body:'Se asocia y continúa.'},{cls:'alt',label:'No registrado',body:'<b>Alta urgente</b>: se escala al operador para registrarlo en el proyecto.'}]},
+      {type:'machine',kind:'machine',title:'Worker clasifica → ActivationEvent',body:'Crea <code>ActivationEvent</code> con <code>content</code>, <code>mediaUrl</code> (evidencia en R2) y <code>reportedBy</code>. <b>Notifica al operador en cada novedad</b> (avisos constantes).'},
+      {type:'decision',title:'¿Activación cancelada?',body:'',branches:[
+        {cls:'yes',label:'No',body:'Continúa hacia el reporte.'},
+        {cls:'err',label:'Sí',body:'<code>CANCELLED</code> — no se genera reporte de cierre.'}
+      ]},
+      {type:'machine',kind:'machine',title:'Borrador de reporte (Claude analista)',body:'Resume novedades y arma <code>reportData</code> (datos + evidencias). Es propuesta, no envío. <b>Avisa cuando el borrador está listo</b>.'},
+      {type:'input',title:'Preview',body:'<code>POST /activations/:id/report/preview</code> muestra el reporte tal como lo vería el cliente (<code>ClientReportPreview</code>).'},
+      {type:'gate',title:'Validación humana — OBLIGATORIA antes de enviar al cliente',body:'<code>HumanValidationBanner</code>. Acción irreversible: el operador es responsable del contenido.',branches:[
+        {cls:'yes',label:'Valida',body:'Se envía al cliente.'},
+        {cls:'err',label:'No valida',body:'No se envía; vuelve a edición del borrador.'}
+      ]},
+      {type:'output',title:'Envío + cierre',body:'<code>POST /report/approve</code> → reporte por <b>email</b> al cliente. <b>Avisa cuando se envió</b>. Sella <code>reportSentAt</code> y <code>reportApprovedBy</code>. <code>EventoCrudo → DONE</code>. Activación → <code>COMPLETED</code>.'}
+    ],
+    rules:['Todo se asocia a un proyecto y cliente por el teléfono/correo del emisor; si no está registrado, se agrega al proyecto como urgencia.','Avisos constantes durante la activación: en cada novedad, al tener el borrador y al enviarse.','El reporte al cliente nunca se envía automáticamente: requiere <code>reportApprovedBy</code>.','Las evidencias se almacenan en R2 con metadata; el reporte las referencia.','Claude redacta y resume, pero el operador es responsable del contenido.'],
+    endpoints:[['GET','/api/app/activations'],['POST','/api/app/activations'],['GET','/api/app/activations/:id'],['GET','/api/app/activations/:id/events'],['POST','/api/app/activations/:id/report/preview'],['POST','/api/app/activations/:id/report/approve']],
+    edges:['<b>Cancelada</b> en terreno → <code>CANCELLED</code>, sin reporte.','<b>Solo texto o solo foto</b> → el <code>ActivationEvent</code> se crea con lo disponible.','<b>Borrador editado</b> antes de aprobar → el envío usa la versión final.'],
+    outscope:'Portal de cliente en vivo, métricas comparativas, alertas de SLA.',
+    accept:'Supervisores reportan en tiempo real, el operador revisa el borrador, valida explícitamente y el reporte llega al cliente con trazabilidad de quién aprobó y cuándo.'
+  }
+];
+
+/* ───────── Flujo comercial (no técnico): cómo viaja el dato ───────── */
+const CICON = {
+  field:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  scan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/></svg>',
+  ask:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
+  human:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg>',
+  doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l2 2 4-4"/></svg>',
+  group:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  box:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 22v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.8-3.4L21 8M21 15a9 9 0 0 1-14.8 3.4L3 16"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+  calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>',
+  live:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14M8 8a5 5 0 0 0 0 8M16 8a5 5 0 0 1 0 8"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>',
+  star:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/></svg>'
+};
+const BPMN_COM = {
+  f1:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Llega un documento'],sub:'WhatsApp o correo'},
+    {id:'gch',type:'gateway',row:1,lane:0,label:['¿por qué','canal?']},
+    {id:'wsp',type:'task',row:2,lane:-1,label:['Por WhatsApp'],sub:'foto del terreno'},
+    {id:'eml',type:'task',row:2,lane:1,label:['Por correo'],sub:'documentos legales'},
+    {id:'read',type:'machine',row:3,lane:0,label:['El sistema lo lee'],sub:'montos·fechas·RUT'},
+    {id:'gund',type:'gateway',row:4,lane:0,label:['¿se entendió','todo?']},
+    {id:'eil',type:'enderr',row:5,lane:1,label:['Ilegible'],sub:'pide reenviar'},
+    {id:'ask',type:'machine',row:5,lane:-1,label:['Pregunta al','supervisor']},
+    {id:'okr',type:'task',row:5,lane:0,label:['Datos OK']},
+    {id:'fix',type:'task',row:6,lane:-1,label:['Confirma el dato']},
+    {id:'ficha',type:'machine',row:7,lane:0,label:['Arma la ficha'],sub:'ordenada'},
+    {id:'gate',type:'gate',row:8,lane:0,label:['Tú apruebas','o rechazas']},
+    {id:'gap',type:'gateway',row:9,lane:0,label:['¿aprueba?']},
+    {id:'rej',type:'enderr',row:10,lane:1,label:['Rechazado']},
+    {id:'app',type:'end',row:10,lane:0,label:['Guardado y trazable']}
+  ], edges:[
+    {from:'s',to:'gch'},{from:'gch',to:'wsp',label:'WhatsApp'},{from:'gch',to:'eml',label:'Correo'},
+    {from:'wsp',to:'read'},{from:'eml',to:'read'},{from:'read',to:'gund'},
+    {from:'gund',to:'eil',label:'ilegible'},{from:'gund',to:'ask',label:'no'},{from:'gund',to:'okr',label:'sí'},
+    {from:'ask',to:'fix'},{from:'fix',to:'ficha'},{from:'okr',to:'ficha'},
+    {from:'ficha',to:'gate'},{from:'gate',to:'gap'},{from:'gap',to:'rej',label:'No'},{from:'gap',to:'app',label:'Sí'}
+  ]},
+  f2:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Llega una boleta'],sub:'foto por WhatsApp'},
+    {id:'read',type:'machine',row:1,lane:0,label:['El sistema la lee'],sub:'monto·fecha·proveedor'},
+    {id:'gconf',type:'gateway',row:2,lane:0,label:['¿se','entendió?']},
+    {id:'ask',type:'machine',row:3,lane:-1,label:['Pregunta al','supervisor']},
+    {id:'fix',type:'task',row:4,lane:-1,label:['Corrige']},
+    {id:'ok',type:'task',row:3,lane:0,label:['Datos OK']},
+    {id:'group',type:'machine',row:5,lane:0,label:['Agrupa la rendición'],sub:'persona·proyecto·semana'},
+    {id:'flag',type:'machine',row:6,lane:0,label:['Marca anomalías'],sub:'monto raro·proveedor repetido'},
+    {id:'cron',type:'event',row:7,lane:0,label:['Cierra la semana'],sub:'lunes · te avisa'},
+    {id:'gate',type:'gate',row:8,lane:0,label:['Apruebas o','rechazas']},
+    {id:'gap',type:'gateway',row:9,lane:0,label:['¿aprueba?']},
+    {id:'rej',type:'enderr',row:10,lane:1,label:['Rechazada'],sub:'avisa motivo'},
+    {id:'out',type:'output',row:10,lane:0,label:['Confirma + PDF'],sub:'WhatsApp'},
+    {id:'end',type:'end',row:11,lane:0,label:['Rendición lista']}
+  ], edges:[
+    {from:'s',to:'read'},{from:'read',to:'gconf'},{from:'gconf',to:'ask',label:'no'},{from:'gconf',to:'ok',label:'sí'},
+    {from:'ask',to:'fix'},{from:'fix',to:'group'},{from:'ok',to:'group'},
+    {from:'group',to:'flag'},{from:'flag',to:'cron'},{from:'cron',to:'gate'},{from:'gate',to:'gap'},
+    {from:'gap',to:'rej',label:'No'},{from:'gap',to:'out',label:'Sí'},{from:'out',to:'end'}
+  ]},
+  f3:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Configurar inventario']},
+    {id:'wh',type:'task',row:1,lane:0,label:['Cargar bodegas','con dirección'],sub:'lo único obligatorio'},
+    {id:'gini',type:'gateway',row:2,lane:0,label:['¿cargar stock','inicial?']},
+    {id:'load',type:'task',row:3,lane:-1,label:['Cargar piezas']},
+    {id:'idgen',type:'machine',row:4,lane:-1,label:['Crea el ID de','cada pieza'],sub:'auto · correlativo si se repite'},
+    {id:'mov',type:'task',row:5,lane:0,label:['Dejan o retiran','material'],sub:'en una bodega'},
+    {id:'link',type:'machine',row:6,lane:0,label:['Vincula pieza','y bodega'],sub:'por la dirección'},
+    {id:'gneg',type:'gateway',row:7,lane:0,label:['¿stock','negativo?']},
+    {id:'eneg',type:'enderr',row:8,lane:1,label:['Lo frena'],sub:'usar ajuste'},
+    {id:'upd',type:'machine',row:8,lane:0,label:['Actualiza stock'],sub:'+ vista en vivo'},
+    {id:'gmin',type:'gateway',row:9,lane:0,label:['¿bajo el','mínimo?']},
+    {id:'alert',type:'event',row:10,lane:-1,label:['Te avisa'],sub:'para reponer'},
+    {id:'end',type:'end',row:11,lane:0,label:['Inventario trazado']}
+  ], edges:[
+    {from:'s',to:'wh'},{from:'wh',to:'gini'},{from:'gini',to:'load',label:'sí'},{from:'gini',to:'mov',label:'no'},
+    {from:'load',to:'idgen'},{from:'idgen',to:'mov'},{from:'mov',to:'link'},{from:'link',to:'gneg'},
+    {from:'gneg',to:'eneg',label:'sí'},{from:'gneg',to:'upd',label:'no'},{from:'upd',to:'gmin'},
+    {from:'gmin',to:'alert',label:'sí'},{from:'alert',to:'end'},{from:'gmin',to:'end',label:'no'}
+  ]},
+  f4:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Nuevo proyecto']},
+    {id:'gst',type:'gateway',row:1,lane:0,label:['¿cómo','arranca?']},
+    {id:'blank',type:'task',row:2,lane:-1,label:['En blanco']},
+    {id:'file',type:'task',row:2,lane:1,label:['Subiendo un','archivo'],sub:'de cualquier tipo'},
+    {id:'aird',type:'machine',row:3,lane:1,label:['La IA lee','el archivo']},
+    {id:'build',type:'machine',row:4,lane:0,label:['La IA arma el','proyecto'],sub:'asignaciones·tiempos·días·recursos'},
+    {id:'gate1',type:'gate',row:5,lane:0,label:['Apruebas / ajustas'],sub:'lo mínimo'},
+    {id:'gsend',type:'gateway',row:6,lane:0,label:['¿apruebas','enviar?']},
+    {id:'eno',type:'enderr',row:7,lane:1,label:['No se envía']},
+    {id:'send',type:'machine',row:7,lane:0,label:['Envía convocatorias'],sub:'WhatsApp'},
+    {id:'resp',type:'task',row:8,lane:0,label:['El equipo responde']},
+    {id:'gcf',type:'gateway',row:9,lane:0,label:['¿confirma?']},
+    {id:'rej',type:'task',row:10,lane:-1,label:['Rechaza']},
+    {id:'amb',type:'machine',row:10,lane:1,label:['La IA infiere'],sub:'si no, te escala'},
+    {id:'cfm',type:'task',row:10,lane:0,label:['Confirma']},
+    {id:'noti',type:'event',row:11,lane:0,label:['Te avisa'],sub:'todos respondieron'},
+    {id:'clo',type:'task',row:12,lane:0,label:['Convocatoria cerrada']},
+    {id:'gns',type:'gateway',row:13,lane:0,label:['¿se presenta','el día D?']},
+    {id:'ns',type:'enderr',row:14,lane:1,label:['Inasistencia']},
+    {id:'end',type:'end',row:14,lane:0,label:['Equipo en terreno']}
+  ], edges:[
+    {from:'s',to:'gst'},{from:'gst',to:'blank',label:'En blanco'},{from:'gst',to:'file',label:'Con archivo'},
+    {from:'file',to:'aird'},{from:'aird',to:'build'},{from:'blank',to:'build'},
+    {from:'build',to:'gate1'},{from:'gate1',to:'gsend'},{from:'gsend',to:'eno',label:'No'},{from:'gsend',to:'send',label:'Sí'},
+    {from:'send',to:'resp'},{from:'resp',to:'gcf'},
+    {from:'gcf',to:'rej',label:'Rechaza'},{from:'gcf',to:'amb',label:'Ambiguo'},{from:'gcf',to:'cfm',label:'Confirma'},
+    {from:'rej',to:'noti'},{from:'amb',to:'noti'},{from:'cfm',to:'noti'},{from:'noti',to:'clo'},
+    {from:'clo',to:'gns'},{from:'gns',to:'ns',label:'No'},{from:'gns',to:'end',label:'Sí'}
+  ]},
+  f5:{ nodes:[
+    {id:'s',type:'start',row:0,lane:0,label:['Activación en vivo']},
+    {id:'rep',type:'task',row:1,lane:0,label:['Reportan novedades'],sub:'WhatsApp+fotos · todo el día'},
+    {id:'ord',type:'machine',row:2,lane:0,label:['Ordena cada','novedad']},
+    {id:'n1',type:'event',row:3,lane:0,label:['Avisa al operador'],sub:'en cada novedad'},
+    {id:'draft',type:'machine',row:4,lane:0,label:['La IA arma','el borrador']},
+    {id:'n2',type:'event',row:5,lane:0,label:['Avisa'],sub:'borrador listo'},
+    {id:'gate',type:'gate',row:6,lane:0,label:['Revisas y validas'],sub:'antes de enviar'},
+    {id:'gap',type:'gateway',row:7,lane:0,label:['¿validas?']},
+    {id:'eno',type:'enderr',row:8,lane:-1,label:['No se envía'],sub:'ajustas'},
+    {id:'send',type:'machine',row:8,lane:0,label:['Envía al cliente'],sub:'email'},
+    {id:'n3',type:'event',row:9,lane:0,label:['Avisa'],sub:'reporte enviado'},
+    {id:'end',type:'end',row:10,lane:0,label:['Activación cerrada']}
+  ], edges:[
+    {from:'s',to:'rep'},{from:'rep',to:'ord'},{from:'ord',to:'n1'},{from:'n1',to:'draft'},{from:'draft',to:'n2'},
+    {from:'n2',to:'gate'},{from:'gate',to:'gap'},{from:'gap',to:'eno',label:'No'},{from:'gap',to:'send',label:'Sí'},
+    {from:'send',to:'n3'},{from:'n3',to:'end'}
+  ]}
+};
+
+const COMERCIAL = [
+  {
+    id:'f1', code:'F1', title:'De la foto al documento aprobado', big:false,
+    pain:'Los papeles del terreno se pierden en los chats y alguien tiene que transcribirlos a mano, uno por uno.',
+    capture:['Monto, fecha y proveedor','Tipo de documento (boleta, factura, contrato)','Por qué canal llegó: WhatsApp o correo'],
+    create:['Una ficha de documento por proyecto','El archivo original respaldado','El registro de quién aprobó y cuándo'],
+    notify:['Le pregunta al supervisor si falta un dato','Avisa al operador que hay un documento por revisar'],
+    protect:['Nada se registra hasta que un humano aprueba','La IA solo pregunta: nunca inventa un dato'],
+    value:'Cero transcripción manual, entre por WhatsApp o por correo. Nada se pierde y todo queda con respaldo.'
+  },
+  {
+    id:'f2', code:'F2', title:'De la boleta a la rendición lista', big:false,
+    pain:'Juntar las boletas de varios supervisores y cuadrar los gastos semana a semana es un Excel infinito.',
+    capture:['Monto, fecha y proveedor de cada boleta','La categoría del gasto','A qué persona y proyecto pertenece'],
+    create:['Rendiciones agrupadas por persona / proyecto / semana','El total recalculado solo','Un PDF consolidado exportable'],
+    notify:['Avisa al operador cuando cierra la semana','Confirma al supervisor si fue aprobada o rechazada'],
+    protect:['Se aprueba la rendición completa, no gasto por gasto','La IA marca anomalías, pero el operador decide'],
+    value:'Se acaba el Excel de gastos. El cuadre se arma solo, semana a semana.'
+  },
+  {
+    id:'f3', code:'F3', title:'Del material a la trazabilidad total', big:true,
+    pain:'Nadie sabe con certeza cuánto material POP queda, dónde está, ni cuánto se fue a cada activación.',
+    capture:['Cada movimiento: quién, cuándo y a qué bodega','El ID único de cada pieza (con correlativo si se repite)','La dirección de cada bodega, para linkear retiros y entregas'],
+    create:['Bodegas con su dirección — lo único obligatorio de cargar','El ID de cada pieza, generado automáticamente','Historial de movimientos + vista “Proyectos Live” en vivo'],
+    notify:['Alerta proactiva cuando el stock baja del mínimo','Sugiere reponer, sin comprar solo'],
+    protect:['Solo te obliga a cargar bodegas con dirección; el stock inicial es opcional','Bloquea cualquier movimiento que deje stock negativo','El stock nunca se edita a mano: todo queda trazado'],
+    value:'Cargas las bodegas con su dirección y listo. Las piezas se identifican solas (con correlativo si se repiten) y todo movimiento queda trazado.'
+  },
+  {
+    id:'f4', code:'F4', title:'Del archivo al proyecto armado por la IA', big:true,
+    pain:'Armar un proyecto y convocar al equipo a mano es lento y se presta para errores.',
+    capture:['Quién confirma, quién rechaza, quién no se presenta','Todo el historial de mensajes','Lo que ajustas sobre la propuesta de la IA'],
+    create:['El proyecto completo, armado por la IA a partir de un archivo (o en blanco)','Las asignaciones, tiempos, días y recursos propuestos','El calendario persona-por-día y cada convocatoria'],
+    notify:['Envía la convocatoria a cada persona por WhatsApp','Te avisa cuando todo el equipo respondió'],
+    protect:['La IA propone todo; tú solo apruebas o ajustas lo mínimo','No envía ninguna convocatoria sin tu aprobación','No deja a una persona en dos turnos el mismo día'],
+    value:'Subes un archivo (o partes en blanco) y la IA arma el proyecto entero. Tú solo apruebas asignaciones, días y recursos.'
+  },
+  {
+    id:'f5', code:'F5', title:'Del terreno al reporte, con avisos en todo momento', big:true,
+    pain:'El cliente quiere saber cómo va su activación en tiempo real y recibir un reporte profesional, no un audio de WhatsApp.',
+    capture:['Cada novedad reportada desde el terreno','Las fotos y evidencias, con quién y cuándo','El estado de cada punto de activación en vivo'],
+    create:['Los eventos de la activación con su evidencia','Un borrador de reporte para el cliente','El reporte final enviado, con su trazabilidad'],
+    notify:['Avisa al operador en cada novedad del terreno','Avisa cuando el borrador del reporte está listo','Avisa cuando el reporte se envió al cliente'],
+    protect:['Nada se envía al cliente sin validación humana','El envío es irreversible: el operador es responsable','Claude redacta y resume, pero no envía'],
+    value:'Avisos constantes durante toda la activación, y un reporte profesional que sale al cliente solo cuando tú lo validas.'
+  }
+];
+
+/* ───────── Render ───────── */
+function nodeHTML(step, idx){
+  const kindBadge = step.kind && KIND_LABEL[step.kind] ? `<span class="kind ${step.kind}">${KIND_LABEL[step.kind]}</span>` : '';
+  let inner = `<span class="step-no">PASO ${String(idx+1).padStart(2,'0')}</span><h3>${step.title}${kindBadge}</h3>`;
+  if(step.body) inner += `<p>${step.body}</p>`;
+  if(step.branches){ inner += `<div class="branches">` + step.branches.map(b=>`<div class="branch ${b.cls}"><span class="bl">${b.label}</span>${b.body}</div>`).join('') + `</div>`; }
+  const icon = ICON[step.type] || ICON.machine;
+  return `<div class="node" data-type="${step.type}"><div class="marker">${icon}</div><div class="card">${inner}</div></div>`;
+}
+function flowHTML(f){
+  const steps = f.steps.map(nodeHTML).join('');
+  const eps = f.endpoints.map(([v,p])=>`<li><span class="verb">${v}</span> <span class="path">${p}</span></li>`).join('');
+  const rules = f.rules.map(r=>`<li>${r}</li>`).join('');
+  const edges = f.edges.map(e=>`<li>${e}</li>`).join('');
+  const tags = f.tags.map(t=>`<span class="tag">${t}</span>`).join('');
+  const live = f.live ? `<span class="live">● LIVE</span>` : '';
+  return `<section class="flow" id="${f.id}">
+    <div class="flow-head">
+      <div class="flow-code">${f.code}${live}</div>
+      <div class="flow-titles"><h2>${f.name}</h2><p class="purpose">${f.purpose}</p><div class="tags">${tags}</div></div>
+    </div>
+    ${buildBPMN(f.id)}
+    <h4 class="stepper-h">Detalle paso a paso</h4>
+    <div class="rail">${steps}</div>
+    <div class="details">
+      <div class="dblock"><h4>Reglas de negocio</h4><ul>${rules}</ul></div>
+      <div class="dblock ep"><h4>Endpoints</h4><ul>${eps}</ul></div>
+      <div class="dblock edge"><h4>Casos borde</h4><ul>${edges}</ul></div>
+    </div>
+    <div class="accept"><div class="ic">${ICON.state}</div><div class="tx"><b>Criterio de aceptación</b><p>${f.accept}</p></div></div>
+    <div class="outscope"><b>Fuera de alcance (MVP):</b> ${f.outscope}</div>
+  </section>`;
+}
+function indexHTML(f){
+  const gate = f.gate ? `<span class="gate-tag">Gate: ${f.gate}</span>` : `<span class="gate-tag none">Sin envío externo</span>`;
+  return `<button class="ix" data-target="${f.id}"><div class="code">${f.code}</div><div class="nm">${f.name}</div><div class="ds">${f.purpose.split('.')[0]}.</div>${gate}</button>`;
+}
+function commercialFlowHTML(c){
+  const col = (cls,ic,title,items)=>`<div class="checkcol ${cls}"><h5>${CICON[ic]||''}${title}</h5><ul>${items.map(i=>`<li>${i}</li>`).join('')}</ul></div>`;
+  const grid = col('cap','scan','Qué captura',c.capture) + col('cre','box','Qué crea',c.create) + col('not','bell','Qué notifica',c.notify) + col('pro','shield','Qué protege',c.protect);
+  return `<div class="com-flow ${c.big?'big':''}">
+    <div class="com-fhead"><span class="cc">${c.code}</span><h3>${c.title}</h3>${c.big?'<span class="cx">Captura · crea · notifica</span>':''}</div>
+    <div class="com-pain"><span class="pic">${CICON.ask}</span><p>${c.pain}</p></div>
+    ${buildBPMN(c.id, BPMN_COM, {title:'Diagrama de flujo · cómo viaja el dato'})}
+    <div class="checkgrid">${grid}</div>
+    <div class="com-value"><span class="vic">${CICON.star}</span><p>${c.value}</p></div>
+  </div>`;
+}
+function commercialHTML(){
+  const flows = COMERCIAL.map(commercialFlowHTML).join('');
+  return `<section class="flow com-wrap" id="comercial">
+    <div class="com-intro">
+      <div class="eyebrow">Versión negocio · sin tecnicismos</div>
+      <h2>Cómo viaja el dato, contado <em>en simple</em>.</h2>
+      <p>El mismo sistema, explicado para quien no escribe código: qué hace una persona, qué hace el software solo, dónde decides tú, y qué recibe al final cada quien. Los flujos <b>F3</b>, <b>F4</b> y <b>F5</b> son los más ricos — capturan datos específicos, crean cosas y disparan notificaciones — así que cada uno trae su desglose de <b>qué captura, qué crea, qué notifica y qué protege</b>.</p>
+    </div>
+    ${flows}
+  </section>`;
+}
+document.getElementById('index').innerHTML = FLOWS.map(indexHTML).join('') + `<button class="ix" data-target="comercial" style="border-color:#EAD2AC;background:linear-gradient(180deg,#fff,#fdf6ec)"><div class="code" style="color:var(--human)">★</div><div class="nm">Flujo comercial</div><div class="ds">Cómo viaja el dato, en lenguaje de negocio. Sin tecnicismos.</div><span class="gate-tag">Versión no técnica</span></button>`;
+document.getElementById('flows').innerHTML = FLOWS.map(flowHTML).join('') + commercialHTML();
+
+/* ───────── Navegación por pestañas ───────── */
+const reduce = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+const tabsEl = document.getElementById('tabs');
+tabsEl.innerHTML = FLOWS.map(f=>`<button data-target="${f.id}">${f.code}</button>`).join('') + `<button data-target="all">Todos</button>` + `<button class="tab-com" data-target="comercial">FLUJO COMERCIAL</button>`;
+function setActive(target, init){
+  document.querySelectorAll('.flow').forEach(s=>s.classList.toggle('active', target==='all' || s.id===target));
+  tabsEl.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b.dataset.target===target));
+  if(init) return;
+  if(target==='all'){ window.scrollTo({top:0,behavior:reduce?'auto':'smooth'}); }
+  else{ const el=document.getElementById(target); if(el){ try{ el.scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'}); }catch(e){ window.scrollTo(0,el.offsetTop-80);} } }
+}
+tabsEl.addEventListener('click', e=>{ const b=e.target.closest('button'); if(b) setActive(b.dataset.target); });
+document.getElementById('index').addEventListener('click', e=>{ const c=e.target.closest('.ix'); if(c){ e.preventDefault(); setActive(c.dataset.target); } });
+const progress=document.getElementById('progress');
+document.addEventListener('scroll', ()=>{ const h=document.documentElement, d=h.scrollHeight-h.clientHeight; progress.style.width=(d>0?h.scrollTop/d*100:0)+'%'; },{passive:true});
+setActive('f1', true);
+</script>
+</body>
+</html>

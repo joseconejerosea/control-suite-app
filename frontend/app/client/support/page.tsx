@@ -7,9 +7,9 @@ import { api } from "@/lib/api";
 const TIPO_OPTIONS = ["Error en sistema", "Solicitud de acceso", "Consulta funcional", "Problema con WhatsApp", "Otro"];
 
 const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
-  abierto:    { background: "rgba(59,130,246,0.12)",  color: "#60a5fa" },
-  en_proceso: { background: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
-  cerrado:    { background: "rgba(42,157,92,0.12)",   color: "#34b96e" },
+  abierto:    { background: "rgba(6,182,212,0.12)",   color: "var(--brand-accent)" },
+  en_proceso: { background: "rgba(79,70,229,0.10)",   color: "var(--primary)" },
+  cerrado:    { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" },
 };
 
 export default function SupportPage() {
@@ -52,13 +52,13 @@ export default function SupportPage() {
             <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Crea y sigue tus tickets de soporte</p>
           </div>
           <button onClick={() => setShowForm(!showForm)}
-            style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             + Nuevo ticket
           </button>
         </div>
 
         {success && (
-          <div className="rounded-xl p-4 mb-4 text-sm font-medium" style={{ background: "rgba(42,157,92,0.15)", color: "#34b96e" }}>
+          <div className="rounded-xl p-4 mb-4 text-sm font-medium" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)" }}>
             Ticket creado correctamente. El equipo de soporte se pondra en contacto pronto.
           </div>
         )}
@@ -81,7 +81,7 @@ export default function SupportPage() {
                   {["baja", "media", "alta"].map(p => (
                     <button key={p} onClick={() => setForm(prev => ({ ...prev, prioridad: p }))}
                       className="text-xs px-3 py-1.5 rounded-lg capitalize"
-                      style={{ background: form.prioridad === p ? "var(--red-dim)" : "var(--secondary)", color: form.prioridad === p ? "var(--red-light)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
+                      style={{ background: form.prioridad === p ? "rgba(79,70,229,0.10)" : "var(--secondary)", color: form.prioridad === p ? "var(--primary)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
                       {p}
                     </button>
                   ))}
@@ -100,7 +100,7 @@ export default function SupportPage() {
                 Cancelar
               </button>
               <button onClick={submit} disabled={sending || !form.tipo || !form.descripcion.trim()}
-                style={{ flex: 2, padding: 10, borderRadius: 8, border: "none", background: form.tipo && form.descripcion.trim() ? "var(--red)" : "var(--secondary)", color: form.tipo && form.descripcion.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
+                style={{ flex: 2, padding: 10, borderRadius: 8, border: "none", background: form.tipo && form.descripcion.trim() ? "var(--primary)" : "var(--secondary)", color: form.tipo && form.descripcion.trim() ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
                 {sending ? "Enviando..." : "Crear ticket"}
               </button>
             </div>
@@ -128,7 +128,7 @@ export default function SupportPage() {
                 </div>
                 <div className="text-sm mb-2" style={{ color: "var(--muted-foreground)" }}>{t.descripcion}</div>
                 {t.respuesta && (
-                  <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(99,102,241,0.1)", color: "#818cf8" }}>
+                  <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)" }}>
                     <span className="font-semibold">Respuesta: </span>{t.respuesta}
                   </div>
                 )}

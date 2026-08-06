@@ -12,12 +12,19 @@ import {
   MarcarPagadaDto,
   RendicionFiltersDto,
 } from './dto/rendicion.dto';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
+import { UserRole } from '../../common/enums/user-role.enum';
+import PDFDocument from 'pdfkit';
 
 @Injectable()
 export class RendicionesService {
   private readonly logger = new Logger(RendicionesService.name);
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly wa: WhatsAppService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // Agrupación automática: llamado desde F1 persist processor
@@ -67,7 +74,7 @@ export class RendicionesService {
     );
 
     // Recalcular total
-    await this.recalcTotal(rendicionId);
+    await this.recalcTotal(rendicionId, clientId);
     this.logger.log(`[F2] Invoice ${invoiceId} asignada a rendición ${rendicionId}`);
   }
 
@@ -76,36 +83,46 @@ export class RendicionesService {
   // ─────────────────────────────────────────────────────────────────────────
   async cerrarRendicionesSemana(): Promise<void> {
     const periodoActual = this.isoWeek(new Date());
-    // Cerrar rendiciones borrador de semanas PASADAS
-    const borradores = await this.ds.query(
-      `SELECT id, client_id, project_id, monto_total
-       FROM rendiciones
-       WHERE estado='borrador' AND periodo < $1`,
-      [periodoActual],
+    // Fase 2: la lista de borradores es cross-tenant (pool de sistema, solo lectura).
+    const borradores = await runAsSystem(() =>
+      this.ds.query(
+        `SELECT id, client_id, project_id, monto_total
+         FROM rendiciones
+         WHERE estado='borrador' AND periodo < $1`,
+        [periodoActual],
+      ),
     );
 
     for (const r of borradores) {
-      await this.ds.query(
-        `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
-        [r.id],
-      );
-      await this.decidirAprobacion(r.id, r.client_id, r.project_id, parseFloat(r.monto_total));
+      // Cada cierre corre en la tx del tenant dueño.
+      await runWithTenant(this.ds, r.client_id, async () => {
+        await this.ds.query(
+          `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
+          [r.id],
+        );
+        const { requiereAdmin } = await this.decidirAprobacion(r.id, r.client_id, r.project_id, parseFloat(r.monto_total));
+        // Solo notificar "pendiente de revisión" cuando NO excede presupuesto.
+        // Si excede, notifyBudgetExceeded ya fue enviado dentro de decidirAprobacion.
+        if (!requiereAdmin) {
+          await this.notifyOperatorPending(r.client_id, r.project_id, r.id, parseFloat(r.monto_total));
+        }
+      });
     }
     this.logger.log(`[F2] Cerradas ${borradores.length} rendiciones de semanas pasadas`);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Aprobación auto vs manual
+  // Evaluación presupuestaria (nunca auto-aprueba — invariante del sistema)
   // ─────────────────────────────────────────────────────────────────────────
   private async decidirAprobacion(
     rendicionId: string,
     clientId: string,
     projectId: string | null,
     montoRendicion: number,
-  ): Promise<void> {
+  ): Promise<{ requiereAdmin: boolean }> {
     if (!projectId) {
-      // sin proyecto → queda en enviada esperando admin
-      return;
+      // sin proyecto → queda en enviada esperando operador
+      return { requiereAdmin: false };
     }
 
     // Obtener presupuesto del proyecto
@@ -113,7 +130,7 @@ export class RendicionesService {
       `SELECT budget FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
     );
-    if (!proj.length || !proj[0].budget) return;
+    if (!proj.length || !proj[0].budget) return { requiereAdmin: false };
 
     const presupuesto = parseFloat(proj[0].budget);
 
@@ -129,14 +146,16 @@ export class RendicionesService {
     const pct = presupuesto > 0 ? (gastoSiAprueba / presupuesto) * 100 : null;
 
     if (gastoSiAprueba <= presupuesto) {
+      // Dentro del presupuesto: persiste el porcentaje pero NO aprueba.
+      // La aprobación SIEMPRE requiere acción humana (invariante del sistema).
       await this.ds.query(
         `UPDATE rendiciones
-         SET estado='aprobada', aprobada_auto=true, aprobada_at=NOW(),
-             porcentaje_presupuesto=$2, updated_at=NOW()
+         SET porcentaje_presupuesto=$2, requiere_admin=false, updated_at=NOW()
          WHERE id=$1`,
         [rendicionId, pct],
       );
-      this.logger.log(`[F2] Auto-aprobada rendición ${rendicionId} (${pct?.toFixed(1)}% presupuesto)`);
+      this.logger.log(`[F2] Rendición ${rendicionId} dentro de presupuesto (${pct?.toFixed(1)}%) — pendiente aprobación operador`);
+      return { requiereAdmin: false };
     } else {
       const excede = gastoSiAprueba - presupuesto;
       await this.ds.query(
@@ -146,6 +165,95 @@ export class RendicionesService {
         [rendicionId, excede, pct],
       );
       this.logger.warn(`[F2] Rendición ${rendicionId} excede presupuesto en $${excede.toLocaleString('es-CL')}`);
+
+      await this.notifyBudgetExceeded(clientId, projectId, rendicionId, pct ?? 0, excede);
+      return { requiereAdmin: true };
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Helpers de notificación
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Devuelve teléfono e idioma de todos los admin_cliente del tenant con phone. */
+  private async getAdminPhones(clientId: string): Promise<{ phone: string; language: string }[]> {
+    return this.ds.query(
+      `SELECT u.phone, u.language FROM users u
+       WHERE u.client_id = $1 AND u.role = '${UserRole.MANAGER}' AND u.phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+  }
+
+  private async notifyBudgetExceeded(
+    clientId: string,
+    projectId: string,
+    rendicionId: string,
+    pct: number,
+    excedeClp: number,
+  ): Promise<void> {
+    try {
+      const proj = await this.ds.query(
+        `SELECT name FROM projects WHERE id = $1 AND client_id = $2`, [projectId, clientId],
+      );
+      const projectName = proj[0]?.name ?? 'Sin nombre';
+
+      // Dashboard alert via mind_propuestas
+      await this.ds.query(
+        `INSERT INTO mind_propuestas
+           (client_id, tipo, titulo, descripcion, datos_soporte, prioridad, estado, created_at)
+         VALUES ($1, 'alerta_presupuesto', $2, $3, $4::jsonb, 'alta', 'pendiente', NOW())
+         ON CONFLICT DO NOTHING`,
+        [
+          clientId,
+          `Presupuesto excedido: ${projectName}`,
+          `La rendición supera el presupuesto del proyecto en $${Math.round(excedeClp).toLocaleString('es-CL')} CLP (${pct.toFixed(1)}% del budget). Requiere aprobación manual.`,
+          JSON.stringify({
+            project_id: projectId,
+            rendicion_id: rendicionId,
+            porcentaje: pct,
+            excede_clp: excedeClp,
+          }),
+        ],
+      ).catch(() => {});
+
+      const admins = await this.getAdminPhones(clientId);
+      for (const admin of admins) {
+        const msg = admin.language === 'en'
+          ? `Budget alert: Project "${projectName}" exceeded budget by $${Math.round(excedeClp).toLocaleString('es-CL')} CLP (${pct.toFixed(1)}%). Manual approval required.`
+          : `Alerta presupuesto: Proyecto "${projectName}" excede el budget en $${Math.round(excedeClp).toLocaleString('es-CL')} CLP (${pct.toFixed(1)}%). Requiere aprobación manual.`;
+        await this.wa.sendText(admin.phone, msg).catch(() => {});
+      }
+    } catch (err: any) {
+      this.logger.warn(`[F2] Budget notification failed: ${err.message}`);
+    }
+  }
+
+  private async notifyOperatorPending(
+    clientId: string,
+    projectId: string | null,
+    rendicionId: string,
+    montoTotal: number,
+  ): Promise<void> {
+    try {
+      const projectName = projectId
+        ? (await this.ds.query(
+            `SELECT name FROM projects WHERE id = $1 AND client_id = $2`, [projectId, clientId],
+          ).catch(() => []))[0]?.name ?? 'Sin nombre'
+        : 'Sin proyecto';
+
+      const appUrl = process.env.ALLOWED_ORIGIN ?? '';
+      const link = appUrl ? ` Revisar: ${appUrl}/client/rendiciones` : '';
+      const linkEn = appUrl ? ` Review: ${appUrl}/client/rendiciones` : '';
+
+      const admins = await this.getAdminPhones(clientId);
+      for (const admin of admins) {
+        const msg = admin.language === 'en'
+          ? `New expense report pending review: project "${projectName}", total $${Math.round(montoTotal).toLocaleString('es-CL')} CLP.${linkEn}`
+          : `Nueva rendición lista para revisar: proyecto "${projectName}", total $${Math.round(montoTotal).toLocaleString('es-CL')} CLP.${link}`;
+        await this.wa.sendText(admin.phone, msg).catch(() => {});
+      }
+    } catch (err: any) {
+      this.logger.warn(`[F2] Operator pending notification failed: ${err.message}`);
     }
   }
 
@@ -188,8 +296,8 @@ export class RendicionesService {
       `SELECT ri.*, i.vendor_name, i.invoice_date, i.category
        FROM rendicion_items ri
        LEFT JOIN invoices i ON i.id = ri.invoice_id
-       WHERE ri.rendicion_id = $1`,
-      [id],
+       WHERE ri.rendicion_id = $1 AND ri.client_id = $2`,
+      [id, clientId],
     );
     return rendicion;
   }
@@ -198,10 +306,13 @@ export class RendicionesService {
     const r = await this.findOne(clientId, id);
     if (r.estado !== 'borrador') throw new BadRequestException('Solo borradores se pueden cerrar');
     await this.ds.query(
-      `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1`,
-      [id],
+      `UPDATE rendiciones SET estado='enviada', updated_at=NOW() WHERE id=$1 AND client_id=$2`,
+      [id, clientId],
     );
-    await this.decidirAprobacion(id, clientId, r.project_id, parseFloat(r.monto_total));
+    const { requiereAdmin } = await this.decidirAprobacion(id, clientId, r.project_id, parseFloat(r.monto_total));
+    if (!requiereAdmin) {
+      await this.notifyOperatorPending(clientId, r.project_id, id, parseFloat(r.monto_total));
+    }
   }
 
   async aprobar(clientId: string, id: string, userId: string): Promise<void> {
@@ -210,19 +321,80 @@ export class RendicionesService {
     await this.ds.query(
       `UPDATE rendiciones
        SET estado='aprobada', aprobada_at=NOW(), aprobada_por_user_id=$2, aprobada_auto=false, updated_at=NOW()
-       WHERE id=$1`,
-      [id, userId],
+       WHERE id=$1 AND client_id=$3`,
+      [id, userId, clientId],
     );
+
+    // Notificar aprobación a admins con resumen + link a la app.
+    // Decisión de producto: NO adjuntamos el PDF por WhatsApp (ventana de 24h + media
+    // upload). Enviamos un link al listado de rendiciones donde el PDF ya se sirve
+    // vía el endpoint /rendiciones/:id/export (autenticado).
+    await this.notifyAprobacion(clientId, r.project_id, id, parseFloat(r.monto_total)).catch(() => {});
+  }
+
+  private async notifyAprobacion(
+    clientId: string,
+    projectId: string | null,
+    rendicionId: string,
+    montoTotal: number,
+  ): Promise<void> {
+    try {
+      const projectName = projectId
+        ? (await this.ds.query(
+            `SELECT name FROM projects WHERE id = $1 AND client_id = $2`, [projectId, clientId],
+          ).catch(() => []))[0]?.name ?? 'Sin nombre'
+        : 'Sin proyecto';
+
+      const appUrl = process.env.ALLOWED_ORIGIN ?? '';
+      const link = appUrl ? ` Ver: ${appUrl}/client/rendiciones` : '';
+      const linkEn = appUrl ? ` View: ${appUrl}/client/rendiciones` : '';
+
+      const admins = await this.getAdminPhones(clientId);
+      for (const admin of admins) {
+        const msg = admin.language === 'en'
+          ? `Expense report APPROVED: project "${projectName}", total $${Math.round(montoTotal).toLocaleString('es-CL')} CLP.${linkEn}`
+          : `Rendición APROBADA: proyecto "${projectName}", total $${Math.round(montoTotal).toLocaleString('es-CL')} CLP.${link}`;
+        await this.wa.sendText(admin.phone, msg).catch(() => {});
+      }
+    } catch (err: any) {
+      this.logger.warn(`[F2] Approval notification failed: ${err.message}`);
+    }
   }
 
   async rechazar(clientId: string, id: string, dto: RechazarRendicionDto): Promise<void> {
-    await this.findOne(clientId, id);
+    const r = await this.findOne(clientId, id);
     await this.ds.query(
       `UPDATE rendiciones
        SET estado='rechazada', rechazada_at=NOW(), rechazada_motivo=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, dto.motivo],
+       WHERE id=$1 AND client_id=$3`,
+      [id, dto.motivo, clientId],
     );
+    await this.notifyRechazo(clientId, r.project_id, id, dto.motivo).catch(() => {});
+  }
+
+  private async notifyRechazo(
+    clientId: string,
+    projectId: string | null,
+    rendicionId: string,
+    motivo: string,
+  ): Promise<void> {
+    try {
+      const projectName = projectId
+        ? (await this.ds.query(
+            `SELECT name FROM projects WHERE id = $1 AND client_id = $2`, [projectId, clientId],
+          ).catch(() => []))[0]?.name ?? 'Sin nombre'
+        : 'Sin proyecto';
+
+      const admins = await this.getAdminPhones(clientId);
+      for (const admin of admins) {
+        const msg = admin.language === 'en'
+          ? `Expense report REJECTED: project "${projectName}" (Rendición ID: ${rendicionId}). Reason: ${motivo}`
+          : `Rendición RECHAZADA: proyecto "${projectName}" (Rendición ID: ${rendicionId}). Motivo: ${motivo}`;
+        await this.wa.sendText(admin.phone, msg).catch(() => {});
+      }
+    } catch (err: any) {
+      this.logger.warn(`[F2] Rejection notification failed: ${err.message}`);
+    }
   }
 
   async marcarPagada(clientId: string, id: string, dto: MarcarPagadaDto): Promise<void> {
@@ -231,8 +403,8 @@ export class RendicionesService {
     await this.ds.query(
       `UPDATE rendiciones
        SET estado='pagada', pagada_at=NOW(), comprobante_pago_key=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, dto.comprobante_pago_key ?? null],
+       WHERE id=$1 AND client_id=$3`,
+      [id, dto.comprobante_pago_key ?? null, clientId],
     );
   }
 
@@ -252,14 +424,104 @@ export class RendicionesService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  private async recalcTotal(rendicionId: string): Promise<void> {
+  // Export PDF
+  // ─────────────────────────────────────────────────────────────────────────
+  async exportPdf(clientId: string, id: string): Promise<Buffer> {
+    const rendicion = await this.findOne(clientId, id);
+    const items = rendicion.items ?? [];
+
+    const clientRows = await this.ds.query(
+      `SELECT nombre FROM clients WHERE id = $1`, [clientId],
+    ).catch(() => []);
+    const clientName = clientRows[0]?.nombre ?? 'Cliente';
+
+    const personaRows = await this.ds.query(
+      `SELECT full_name AS persona_name FROM users WHERE id = $1 AND client_id = $2
+       UNION ALL SELECT name AS persona_name FROM promoters WHERE id = $1 AND client_id = $2
+       LIMIT 1`,
+      [rendicion.persona_id, clientId],
+    ).catch(() => []);
+    const personaName = personaRows[0]?.persona_name ?? rendicion.persona_id?.slice(0, 8) ?? '—';
+
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      // Header
+      doc.fontSize(18).text('Rendición de Gastos', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#666')
+        .text(`Control Suite · ${clientName}`, { align: 'center' });
+      doc.moveDown(1.5);
+
+      // Info
+      doc.fillColor('#000').fontSize(11);
+      doc.text(`Período: ${rendicion.periodo}`);
+      doc.text(`Proyecto: ${rendicion.project_name ?? '—'}`);
+      doc.text(`Persona: ${personaName}`);
+      doc.text(`Estado: ${rendicion.estado.toUpperCase()}`);
+      doc.text(`Total: $${Number(rendicion.monto_total).toLocaleString('es-CL')} CLP`);
+      if (rendicion.porcentaje_presupuesto) {
+        doc.text(`% Presupuesto: ${Number(rendicion.porcentaje_presupuesto).toFixed(1)}%`);
+      }
+      doc.moveDown(1);
+
+      // Table header
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#ccc');
+      doc.moveDown(0.3);
+      const headerY = doc.y;
+      doc.fontSize(9).fillColor('#666');
+      doc.text('Fecha', 50, headerY, { width: 80 });
+      doc.text('Proveedor', 130, headerY, { width: 180 });
+      doc.text('Categoría', 310, headerY, { width: 100 });
+      doc.text('Monto', 420, headerY, { width: 120, align: 'right' });
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#ccc');
+      doc.moveDown(0.3);
+
+      // Rows
+      doc.fillColor('#000').fontSize(9);
+      for (const item of items) {
+        if (doc.y > 720) {
+          doc.addPage();
+        }
+        const rowY = doc.y;
+        doc.text(item.invoice_date ?? '—', 50, rowY, { width: 80 });
+        doc.text(item.vendor_name ?? item.descripcion ?? '—', 130, rowY, { width: 180 });
+        doc.text(item.category ?? '—', 310, rowY, { width: 100 });
+        doc.text(`$${Number(item.monto).toLocaleString('es-CL')}`, 420, rowY, { width: 120, align: 'right' });
+        doc.moveDown(0.6);
+      }
+
+      // Footer line
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#ccc');
+      doc.moveDown(0.5);
+      doc.fontSize(11).text(
+        `TOTAL: $${Number(rendicion.monto_total).toLocaleString('es-CL')} CLP`,
+        { align: 'right' },
+      );
+
+      doc.moveDown(2);
+      doc.fontSize(8).fillColor('#999')
+        .text(`Generado por Control Suite · ${new Date().toLocaleDateString('es-CL')}`, { align: 'center' });
+
+      doc.end();
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  private async recalcTotal(rendicionId: string, clientId: string): Promise<void> {
     await this.ds.query(
       `UPDATE rendiciones
        SET monto_total = (
-         SELECT COALESCE(SUM(monto),0) FROM rendicion_items WHERE rendicion_id=$1
+         SELECT COALESCE(SUM(monto),0) FROM rendicion_items WHERE rendicion_id=$1 AND client_id=$2
        ), updated_at=NOW()
-       WHERE id=$1`,
-      [rendicionId],
+       WHERE id=$1 AND client_id=$2`,
+      [rendicionId, clientId],
     );
   }
 

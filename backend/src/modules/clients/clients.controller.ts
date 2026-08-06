@@ -11,18 +11,21 @@ import {
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
 @Controller('clients')
 @UseGuards(AuthGuard, RolesGuard)
-@Roles('super_admin')
+@Roles(UserRole.SUPERADMIN)
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   /** Create a new client tenant. Sets status='onboarding'. */
   @Post()
+  @AuditAction({ action: 'CREATE_CLIENT', entity: 'Client' })
   create(@Body() dto: CreateClientDto) {
     return this.clientsService.create(dto);
   }
@@ -41,6 +44,7 @@ export class ClientsController {
 
   /** Update client fields (nombre, rut, plan, config). */
   @Patch(':id')
+  @AuditAction({ action: 'UPDATE_CLIENT', entity: 'Client' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateClientDto,

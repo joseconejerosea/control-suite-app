@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { TenantRepository } from '../../common/repositories/tenant.repository';
 import { Client } from '../clients/client.entity';
 import { User } from '../users/user.entity';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 export interface WorkspaceContext {
   client: {
@@ -70,7 +71,7 @@ export class WorkspaceService {
   }
 
   private buildModules(role: string, plan: string): Record<string, boolean> {
-    const isSuper = role === 'super_admin';
+    const isSuper = role === UserRole.SUPERADMIN;
     const proOrEnterprise = plan === 'pro' || plan === 'enterprise';
     return {
       projects: true,
@@ -93,7 +94,7 @@ export class WorkspaceService {
       { key: 'dashboard', label: 'Dashboard', icon: 'chart-bar', path: '/dashboard' },
     ];
 
-    if (role === 'user') {
+    if (role === UserRole.OPERATOR) {
       return [
         ...base,
         { key: 'projects', label: 'Projects', icon: 'folder', path: '/projects' },
@@ -120,7 +121,7 @@ export class WorkspaceService {
       });
     }
 
-    if (role === 'super_admin') {
+    if (role === UserRole.SUPERADMIN) {
       adminNav.push({
         key: 'onboarding',
         label: 'Onboarding',

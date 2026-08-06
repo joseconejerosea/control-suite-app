@@ -5,9 +5,11 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigModule } from './config/config.module';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ClientIsolationGuard } from './common/guards/client-isolation.guard';
 import { AuthGuard } from './common/guards/auth.guard';
+import { ServiceLeadGuard } from './common/guards/service-lead.guard';
+import { ServiceLeadTenant } from './modules/auth/entities/service-lead-tenant.entity';
 
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -38,10 +40,19 @@ import { InventarioModule } from './modules/inventario/inventario.module';
 import { MindModule } from './modules/mind/mind.module';
 import { EquivalenciasModule } from './modules/equivalencias/equivalencias.module';
 import { F5Module } from './modules/f5/f5.module';
+import { F5ViewsModule } from './modules/f5-views/f5-views.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { MaterialIntakeModule } from './modules/whatsapp/material-intake.module';
 import { CronModule } from './modules/cron/cron.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { StorageModule } from './common/storage/storage.module';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
+import { ProjectResolverModule } from './modules/project-resolver/project-resolver.module';
+import { F1ReviewModule } from './modules/f1-review/f1-review.module';
+import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module';
+import { SupportModule } from './modules/support/support.module';
 
 @Module({
   imports: [
@@ -57,6 +68,9 @@ import { AuditModule } from './modules/audit/audit.module';
         database: config.get<string>('DB_NAME'),
         entities:   [__dirname + '/**/*.entity{.ts,.js}'],
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
+        ssl: config.get('NODE_ENV') === 'production' || config.get('DB_SSL') === 'true'
+          ? { rejectUnauthorized: false }
+          : false,
         synchronize: false,
         logging: config.get('NODE_ENV') === 'development',
       }),
@@ -67,6 +81,10 @@ import { AuditModule } from './modules/audit/audit.module';
         throttlers: [{ ttl: config.get<number>('THROTTLE_TTL', 60), limit: config.get<number>('THROTTLE_LIMIT', 100) }],
       }),
     }),
+
+    // Repo del guard global ServiceLeadGuard (APP_GUARD). Se registra en el
+    // injector raíz para que el guard pueda inyectar el repositorio.
+    TypeOrmModule.forFeature([ServiceLeadTenant]),
 
     UsersModule, AuthModule, LocationsModule, PromotersModule,
     CampaignsModule, ActivationsModule, CanalEntradaModule,
@@ -80,10 +98,17 @@ import { AuditModule } from './modules/audit/audit.module';
 
     EquivalenciasModule,
     F5Module,
+    F5ViewsModule,
     WhatsAppModule,
+    MaterialIntakeModule,
     CronModule,
     MonitoringModule,
     AuditModule,
+    StorageModule,
+    ProjectResolverModule,
+    F1ReviewModule,
+    ProjectInboxModule,
+    SupportModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
@@ -91,8 +116,15 @@ import { AuditModule } from './modules/audit/audit.module';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Global AuthGuard — runs first, decodes JWT, respects @Public()
     { provide: APP_GUARD, useClass: AuthGuard },
+    // ServiceLeadGuard — corre DESPUÉS de AuthGuard (necesita req.user).
+    // Sólo el SERVICE_LEAD paga costo de DB; valida el tenant activo (Diseño B).
+    { provide: APP_GUARD, useClass: ServiceLeadGuard },
     // Brief Rule 09: isolation check runs after user is set
     { provide: APP_GUARD, useClass: ClientIsolationGuard },
+    // Tenant binding (Fase 2 · E4a) — el MÁS externo: abre la tx con
+    // app.current_tenant antes que cualquier otro interceptor (incl. audit).
+    { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })
 export class AppModule {}

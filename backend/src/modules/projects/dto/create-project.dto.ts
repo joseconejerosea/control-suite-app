@@ -22,8 +22,13 @@ export class CreateProjectDto {
   description?: string;
 
   @IsOptional()
-  @IsIn(['active', 'paused', 'archived'])
-  status?: 'active' | 'paused' | 'archived';
+  @IsString()
+  @MaxLength(5000)
+  objectives?: string;
+
+  @IsOptional()
+  @IsIn(['active', 'paused', 'archived', 'closed'])
+  status?: 'active' | 'paused' | 'archived' | 'closed';
 
   @IsOptional()
   @IsDateString()

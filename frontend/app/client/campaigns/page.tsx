@@ -1,3 +1,5 @@
+"use client";
+
 import AppShell from "@/components/layout/app-shell";
 import CrudTable, { StatusBadge, DateFmt, MoneyFmt } from "@/components/CrudTable";
 
@@ -5,30 +7,30 @@ export default function CampaignsPage() {
   return (
     <AppShell>
       <CrudTable
-        title="Campaigns"
-        subtitle="Marketing campaigns with budgets, dates, and status tracking"
+        title="Campañas"
+        subtitle="Campañas de marketing con presupuestos, fechas y seguimiento de estado"
         endpoint="/campaigns"
         defaultForm={{ name: "", description: "", status: "draft", start_date: "", end_date: "", budget: 0 as any }}
         columns={[
-          { key: "name",       label: "Name" },
-          { key: "status",     label: "Status",     render: StatusBadge },
-          { key: "start_date", label: "Start Date",  render: DateFmt },
-          { key: "end_date",   label: "End Date",    render: DateFmt },
-          { key: "budget",     label: "Budget",      render: MoneyFmt },
+          { key: "name",       label: "Nombre" },
+          { key: "status",     label: "Estado",     render: StatusBadge },
+          { key: "start_date", label: "Inicio",     render: DateFmt },
+          { key: "end_date",   label: "Fin",        render: DateFmt },
+          { key: "budget",     label: "Presupuesto", render: MoneyFmt },
         ]}
         fields={[
-          { key: "name",        label: "Campaign Name", required: true, placeholder: "Verano 2025 BTL" },
-          { key: "description", label: "Description",   type: "textarea", placeholder: "Campaign description" },
-          { key: "status",      label: "Status",        type: "select",
+          { key: "name",        label: "Nombre de campaña", required: true, placeholder: "Verano 2025 BTL" },
+          { key: "description", label: "Descripción",       type: "textarea", placeholder: "Descripción de la campaña" },
+          { key: "status",      label: "Estado",            type: "select",
             options: [
-              { value: "draft",   label: "Draft" },
-              { value: "active",  label: "Active" },
-              { value: "paused",  label: "Paused" },
-              { value: "ended",   label: "Ended" },
+              { value: "draft",   label: "Borrador" },
+              { value: "active",  label: "Activa" },
+              { value: "paused",  label: "Pausada" },
+              { value: "ended",   label: "Finalizada" },
             ]},
-          { key: "start_date", label: "Start Date", type: "date" },
-          { key: "end_date",   label: "End Date",   type: "date" },
-          { key: "budget",     label: "Budget (USD)", type: "number", placeholder: "25000" },
+          { key: "start_date", label: "Fecha inicio", type: "date" },
+          { key: "end_date",   label: "Fecha fin",    type: "date" },
+          { key: "budget",     label: "Presupuesto (USD)", type: "number", placeholder: "25000" },
         ]}
       />
     </AppShell>

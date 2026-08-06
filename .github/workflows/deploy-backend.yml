@@ -1,0 +1,169 @@
+name: Deploy to Hetzner
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [dev, main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'docker-compose.yml'
+      - 'nginx/**'
+  # Manual trigger: fires via the Actions API (not a git webhook), so it still
+  # works when push/PR webhooks are throttled (e.g. GitHub Actions incidents).
+  # Only visible in the UI when this workflow lives on the repo's default branch.
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - main
+
+jobs:
+  deploy:
+    # Run on a merged PR OR a manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            # set -e: aborta el script ante el primer comando que falle (sin
+            # esto, un build roto quedaba enmascarado por el `docker image prune`
+            # final y la CI reportaba éxito). pipefail: falla si falla cualquier
+            # comando de un pipe, no solo el último.
+            set -eo pipefail
+            # On a merged PR, github.base_ref is the target branch (dev|main).
+            # On a manual workflow_dispatch it is empty, so fall back to the
+            # chosen `environment` input. This keeps both trigger paths working.
+            TARGET_REF="${{ github.event.inputs.environment || github.base_ref }}"
+            if [ "$TARGET_REF" = "main" ]; then
+              DIR="$HOME/entornos/control-suite-prod"
+              PORT=3002
+              NODE_ENV=production
+              DB_HOST="${{ secrets.PROD_DB_HOST }}"
+              DB_USERNAME="${{ secrets.PROD_DB_USERNAME }}"
+              DB_PASSWORD="${{ secrets.PROD_DB_PASSWORD }}"
+              DB_NAME="${{ secrets.PROD_DB_NAME }}"
+              DB_MIGRATION_USERNAME="${{ secrets.PROD_DB_MIGRATION_USERNAME }}"
+              DB_MIGRATION_PASSWORD="${{ secrets.PROD_DB_MIGRATION_PASSWORD }}"
+              DB_SYSTEM_USERNAME="${{ secrets.PROD_DB_SYSTEM_USERNAME }}"
+              DB_SYSTEM_PASSWORD="${{ secrets.PROD_DB_SYSTEM_PASSWORD }}"
+              DB_APP_USERNAME="${{ secrets.PROD_DB_APP_USERNAME }}"
+              DB_APP_PASSWORD="${{ secrets.PROD_DB_APP_PASSWORD }}"
+              JWT_SECRET="${{ secrets.PROD_JWT_SECRET }}"
+              JWT_REFRESH_SECRET="${{ secrets.PROD_JWT_REFRESH_SECRET }}"
+              ALLOWED_ORIGIN="${{ secrets.PROD_ALLOWED_ORIGIN }}"
+              SUPABASE_URL="${{ secrets.PROD_SUPABASE_URL }}"
+              SUPABASE_SERVICE_ROLE_KEY="${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}"
+              ANTHROPIC_API_KEY="${{ secrets.PROD_ANTHROPIC_API_KEY }}"
+              GMAIL_CLIENT_ID="${{ secrets.PROD_GMAIL_CLIENT_ID }}"
+              GMAIL_CLIENT_SECRET="${{ secrets.PROD_GMAIL_CLIENT_SECRET }}"
+              GMAIL_REDIRECT_URI="${{ vars.PROD_GMAIL_REDIRECT_URI }}"
+              GOOGLE_SHEETS_ID="${{ vars.PROD_GOOGLE_SHEETS_ID }}"
+              ENV_LABEL="prod"
+              FRONTEND_PORT=3100
+              NEXT_PUBLIC_API_URL="${{ vars.PROD_NEXT_PUBLIC_API_URL }}"
+            else
+              DIR="$HOME/entornos/control-suite-dev"
+              PORT=3001
+              NODE_ENV=development
+              DB_HOST="${{ secrets.DEV_DB_HOST }}"
+              DB_USERNAME="${{ secrets.DEV_DB_USERNAME }}"
+              DB_PASSWORD="${{ secrets.DEV_DB_PASSWORD }}"
+              DB_NAME="${{ secrets.DEV_DB_NAME }}"
+              DB_MIGRATION_USERNAME="${{ secrets.DEV_DB_MIGRATION_USERNAME }}"
+              DB_MIGRATION_PASSWORD="${{ secrets.DEV_DB_MIGRATION_PASSWORD }}"
+              DB_SYSTEM_USERNAME="${{ secrets.DEV_DB_SYSTEM_USERNAME }}"
+              DB_SYSTEM_PASSWORD="${{ secrets.DEV_DB_SYSTEM_PASSWORD }}"
+              DB_APP_USERNAME="${{ secrets.DEV_DB_APP_USERNAME }}"
+              DB_APP_PASSWORD="${{ secrets.DEV_DB_APP_PASSWORD }}"
+              JWT_SECRET="${{ secrets.DEV_JWT_SECRET }}"
+              JWT_REFRESH_SECRET="${{ secrets.DEV_JWT_REFRESH_SECRET }}"
+              ALLOWED_ORIGIN="${{ secrets.DEV_ALLOWED_ORIGIN }}"
+              SUPABASE_URL="${{ secrets.DEV_SUPABASE_URL }}"
+              SUPABASE_SERVICE_ROLE_KEY="${{ secrets.DEV_SUPABASE_SERVICE_ROLE_KEY }}"
+              ANTHROPIC_API_KEY="${{ secrets.DEV_ANTHROPIC_API_KEY }}"
+              GMAIL_CLIENT_ID="${{ secrets.DEV_GMAIL_CLIENT_ID }}"
+              GMAIL_CLIENT_SECRET="${{ secrets.DEV_GMAIL_CLIENT_SECRET }}"
+              GMAIL_REDIRECT_URI="${{ vars.DEV_GMAIL_REDIRECT_URI }}"
+              GOOGLE_SHEETS_ID="${{ vars.DEV_GOOGLE_SHEETS_ID }}"
+              ENV_LABEL="dev"
+              FRONTEND_PORT=3000
+              NEXT_PUBLIC_API_URL="${{ vars.DEV_NEXT_PUBLIC_API_URL }}"
+            fi
+
+            cd "$DIR"
+            git pull origin "$TARGET_REF"
+
+            cat > backend/.env << EOF
+            DB_HOST=$DB_HOST
+            DB_PORT=5432
+            DB_USERNAME=$DB_USERNAME
+            DB_PASSWORD=$DB_PASSWORD
+            DB_NAME=$DB_NAME
+            DB_SSL=true
+            DB_MIGRATION_USERNAME=$DB_MIGRATION_USERNAME
+            DB_MIGRATION_PASSWORD=$DB_MIGRATION_PASSWORD
+            DB_SYSTEM_USERNAME=$DB_SYSTEM_USERNAME
+            DB_SYSTEM_PASSWORD=$DB_SYSTEM_PASSWORD
+            DB_APP_USERNAME=$DB_APP_USERNAME
+            DB_APP_PASSWORD=$DB_APP_PASSWORD
+            JWT_SECRET=$JWT_SECRET
+            JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
+            JWT_EXPIRES_IN=8h
+            JWT_REFRESH_EXPIRES_IN=7d
+            PORT=$PORT
+            NODE_ENV=$NODE_ENV
+            ALLOWED_ORIGIN=$ALLOWED_ORIGIN
+            WEBHOOK_SECRET=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
+            REDIS_PORT=6379
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            AI_PROVIDER=anthropic
+            AI_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            AI_MODEL=gpt-4o-mini
+            AI_MAX_TOKENS=4096
+            ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+            GMAIL_CLIENT_ID=$GMAIL_CLIENT_ID
+            GMAIL_CLIENT_SECRET=$GMAIL_CLIENT_SECRET
+            GMAIL_REDIRECT_URI=$GMAIL_REDIRECT_URI
+            GOOGLE_SHEETS_ID=$GOOGLE_SHEETS_ID
+            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
+            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+            WHATSAPP_ACCESS_TOKEN=${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+            META_WABA_ID=${{ secrets.META_WABA_ID }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            SUPABASE_URL=$SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+            UPLOAD_MAX_SIZE_MB=10
+            UPLOAD_DIR=./uploads
+            EOF
+
+            export ENV=$ENV_LABEL PORT=$PORT FRONTEND_PORT=$FRONTEND_PORT NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+            # Fase 2 · E6 — migraciones automáticas en el deploy.
+            # 1) build de la imagen backend
+            # 2) migración como one-off: conecta con DB_MIGRATION_* (owner/postgres)
+            #    y crea el rol controlsuite_app (migración 041). Usa el datasource
+            #    COMPILADO (sin ts-node, que no está en la imagen de prod).
+            # 3) si el build o la migración fallan, `set -e` aborta el script ACÁ
+            #    y NO se reinicia la app: la versión vieja sigue arriba. Comandos
+            #    separados (no `&&`) para que `set -e` evalúe cada uno: dentro de
+            #    una cadena `&&` el comando que falla queda eximido de `set -e`.
+            docker compose build backend
+            docker compose run --rm backend npm run migration:run:prod
+            docker compose up --build -d
+
+            docker image prune -f

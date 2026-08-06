@@ -1,20 +1,24 @@
 import {
   Body, Controller, Get, Param, ParseUUIDPipe,
-  Patch, Post, Req, UseGuards,
+  Patch, Post, Put, Req, UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
 import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
-  user: { id: string; client_id: string; role: string };
+  // El AuthGuard puebla req.user con el JWT decodificado, cuyo id de usuario es el
+  // claim `sub` (no `id`). Tipar `id` acá compilaba pero devolvía undefined en runtime.
+  user: { sub: string; client_id: string; role: string };
 }
 
 // ── DTOs inline (small, project-specific) ────────────────────────────────────
@@ -39,11 +43,28 @@ class EnviarConvocatoriaDto {
 }
 
 class ResponderConvocatoriaDto {
-  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada']) estado: string;
+  // 'no_show'   — el operador marca (día de activación) que un promotor confirmado no se presentó.
+  // 'cancelada' — el promotor confirmó pero luego avisa que no puede; dispara aviso de reemplazo.
+  @IsString() @IsNotEmpty() @IsIn(['confirmada', 'rechazada', 'no_show', 'cancelada']) estado: string;
 }
 
 class AprobarProyectoDto {
   @IsOptional() @IsString() comentario?: string;
+}
+
+class ConvocarAnfitrionesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ConvocatoriaItemDto)
+  items: ConvocatoriaItemDto[];
+
+  @IsOptional() @IsString() comentario?: string;
+}
+
+class ReportRecipientsDto {
+  @IsArray()
+  @IsEmail({}, { each: true })
+  emails: string[];
 }
 
 // ── Controller ────────────────────────────────────────────────────────────────
@@ -54,25 +75,27 @@ export class ProjectsController {
   constructor(private readonly service: ProjectsService) {}
 
   @Post()
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'CREATE_PROJECT', entity: 'Project' })
   create(@Req() req: AuthedRequest, @Body() dto: CreateProjectDto) {
     return this.service.create(req.user.client_id, dto);
   }
 
   @Get()
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@Req() req: AuthedRequest) {
     return this.service.findAll(req.user.client_id);
   }
 
   @Get(':id')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findOne(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(req.user.client_id, id);
   }
 
   @Patch(':id')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'UPDATE_PROJECT', entity: 'Project' })
   update(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -82,21 +105,43 @@ export class ProjectsController {
   }
 
   @Get(':id/summary')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   summary(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.summary(req.user.client_id, id);
+  }
+
+  // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
+  //   GET /projects/:id/report-recipients → lista configurada
+  //   PUT /projects/:id/report-recipients → reemplaza la lista
+
+  @Get(':id/report-recipients')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  getReportRecipients(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getReportRecipients(req.user.client_id, id);
+  }
+
+  @Put(':id/report-recipients')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'SET_REPORT_RECIPIENTS', entity: 'Project' })
+  setReportRecipients(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportRecipientsDto,
+  ) {
+    return this.service.setReportRecipients(req.user.client_id, id, dto.emails);
   }
 
   // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────
 
   @Post(':id/aprobar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'APPROVE_PROJECT', entity: 'Project' })
   aprobar(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AprobarProyectoDto,
   ) {
-    return this.service.aprobarProyecto(req.user.client_id, id, req.user.id, dto.comentario);
+    return this.service.aprobarProyecto(req.user.client_id, id, req.user.sub, dto.comentario);
   }
 
   // ── F4: Shift calendar — persona × día ───────────────────────────────────
@@ -104,13 +149,13 @@ export class ProjectsController {
   //   POST /projects/:id/turno-equipo        → asignar persona a día(s)
 
   @Get(':id/turno-equipo')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getTurnoEquipo(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.getTurnoEquipo(req.user.client_id, id);
   }
 
   @Post(':id/turno-equipo')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   asignarTurno(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -125,7 +170,8 @@ export class ProjectsController {
   //   PATCH /projects/:id/convocatorias/:convId → actualizar estado manualmente
 
   @Post(':id/convocar')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'SEND_CONVOCATION', entity: 'Project' })
   enviarConvocatoria(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -135,13 +181,13 @@ export class ProjectsController {
   }
 
   @Get(':id/convocatorias')
-  @Roles('admin_cliente', 'super_admin', 'user')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getConvocatorias(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.getConvocatorias(req.user.client_id, id);
   }
 
   @Patch(':id/convocatorias/:convId')
-  @Roles('admin_cliente', 'super_admin')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
   updateConvocatoria(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -149,5 +195,26 @@ export class ProjectsController {
     @Body() dto: ResponderConvocatoriaDto,
   ) {
     return this.service.updateConvocatoria(req.user.client_id, id, convId, dto.estado);
+  }
+
+  // ── F4: Convocatoria de anfitriones — sugerencia IA + confirmar/enviar ────
+  //   GET  /projects/:id/sugerir-convocatoria → promotores sugeridos por perfil IA
+  //   POST /projects/:id/convocar-anfitriones  → aprueba + crea turnos + envía WA
+
+  @Get(':id/sugerir-convocatoria')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  sugerirConvocatoria(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.sugerirConvocatoria(req.user.client_id, id);
+  }
+
+  @Post(':id/convocar-anfitriones')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'SEND_CONVOCATION', entity: 'Project' })
+  convocarAnfitriones(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConvocarAnfitrionesDto,
+  ) {
+    return this.service.convocarAnfitriones(req.user.client_id, id, req.user.sub, dto.items, dto.comentario);
   }
 }

@@ -48,13 +48,15 @@ export class ActivationsService {
 
   // ── F5 sub-resources ──────────────────────────────────────────────
 
+  // Columnas reales (migración 025): las tablas F5 usan `activacion_id` (español);
+  // checkins referencia a la persona por `persona_id`; reportes_avance ordena por `ts`.
   async findCheckins(clientId: string, activationId: string): Promise<any[]> {
     try {
       return await this.dataSource.query(
         `SELECT c.*, row_to_json(p.*) as promotor
          FROM checkins c
-         LEFT JOIN promoters p ON p.id = c.promoter_id
-         WHERE c.activation_id = $1 AND c.client_id = $2
+         LEFT JOIN promoters p ON p.id = c.persona_id
+         WHERE c.activacion_id = $1 AND c.client_id = $2
          ORDER BY c.ts DESC`,
         [activationId, clientId],
       );
@@ -67,21 +69,12 @@ export class ActivationsService {
     try {
       return await this.dataSource.query(
         `SELECT * FROM incidencias
-         WHERE activation_id = $1 AND client_id = $2
+         WHERE activacion_id = $1 AND client_id = $2
          ORDER BY created_at DESC`,
         [activationId, clientId],
       );
     } catch {
-      try {
-        return await this.dataSource.query(
-          `SELECT * FROM incidences
-           WHERE activation_id = $1 AND client_id = $2
-           ORDER BY created_at DESC`,
-          [activationId, clientId],
-        );
-      } catch {
-        return [];
-      }
+      return [];
     }
   }
 
@@ -89,8 +82,8 @@ export class ActivationsService {
     try {
       return await this.dataSource.query(
         `SELECT * FROM reportes_avance
-         WHERE activation_id = $1 AND client_id = $2
-         ORDER BY created_at DESC`,
+         WHERE activacion_id = $1 AND client_id = $2
+         ORDER BY ts DESC`,
         [activationId, clientId],
       );
     } catch {

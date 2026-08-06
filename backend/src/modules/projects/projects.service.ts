@@ -6,6 +6,9 @@ import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
+import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 export interface ProjectSummary {
   project_id:       string;
@@ -33,6 +36,8 @@ export class ProjectsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly waOutput: WhatsappOutputService,
+    private readonly stockReturns: StockReturnsService,
   ) {
     this.repo = new TenantRepository<Project>(dataSource, Project);
   }
@@ -46,6 +51,7 @@ export class ProjectsService {
     return this.repo.create(clientId, {
       name:        dto.name,
       description: dto.description ?? null,
+      objectives:  dto.objectives ?? null,
       status:      dto.status ?? 'active',
       start_date:  dto.start_date ?? null,
       end_date:    dto.end_date ?? null,
@@ -69,15 +75,75 @@ export class ProjectsService {
     if (nextStart && nextEnd && nextStart > nextEnd) {
       throw new BadRequestException('start_date cannot be after end_date');
     }
-    return this.repo.update(clientId, id, {
+    const updated = await this.repo.update(clientId, id, {
       name:        dto.name        ?? existing.name,
       description: dto.description ?? existing.description,
+      objectives:  dto.objectives  ?? existing.objectives,
       status:      dto.status      ?? existing.status,
       start_date:  dto.start_date  ?? existing.start_date,
       end_date:    dto.end_date    ?? existing.end_date,
       budget:      dto.budget      ?? existing.budget,
       config:      dto.config      ?? existing.config,
     });
+
+    if (dto.status === 'closed' && existing.status !== 'closed') {
+      this.stockReturns.triggerReturnRequests(clientId, id).catch((err) =>
+        this.logger.warn(`[F3Returns] trigger failed project=${id}: ${err.message}`),
+      );
+    }
+
+    // F4 Fase 4: editar un proyecto cuya convocatoria YA se envió invalida la
+    // aprobación → hay que re-aprobar antes de re-enviar (el gate vuelve a cerrar).
+    await this.invalidarAprobacionSiEditadoPostEnvio(clientId, id, dto);
+
+    return updated;
+  }
+
+  /**
+   * Si el proyecto ya tenía convocatoria ENVIADA y se editó un campo relevante
+   * (nombre/fechas/presupuesto/config/descripción), resetea la aprobación y avisa
+   * al operador. Sin esto, un cambio post-envío podría re-disparar WhatsApp masivo
+   * sin pasar de nuevo por el gate humano — el mismo invariante que arreglamos en Tier 1.
+   */
+  private async invalidarAprobacionSiEditadoPostEnvio(
+    clientId: string, projectId: string, dto: UpdateProjectDto,
+  ): Promise<void> {
+    const sustantivo =
+      dto.name !== undefined || dto.description !== undefined ||
+      dto.start_date !== undefined || dto.end_date !== undefined ||
+      dto.budget !== undefined || dto.config !== undefined;
+    if (!sustantivo) return;
+
+    const rows = await this.dataSource.query(
+      `UPDATE projects p
+          SET aprobado_por_user_id  = NULL,
+              aprobado_at           = NULL,
+              convocatoria_cerrada_at = NULL,
+              config = jsonb_set(COALESCE(config,'{}'), '{ia_status}', '"pending_human_approval"'),
+              updated_at = NOW()
+        WHERE p.id = $1 AND p.client_id = $2
+          AND p.aprobado_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+               AND c.mensaje_enviado_at IS NOT NULL
+          )
+        RETURNING p.name`,
+      [projectId, clientId],
+    ).catch((err: any) => {
+      this.logger.warn(`[F4] invalidarAprobacion error proyecto=${projectId}: ${err.message}`);
+      return [];
+    });
+
+    if (!rows.length) return; // no estaba aprobado, o no había convocatoria enviada
+
+    this.logger.warn(`[F4] Aprobación invalidada por edición post-envío proyecto=${projectId}`);
+    const msg = `⚠️ El proyecto "${rows[0].name}" fue editado después de enviar la convocatoria. `
+      + `Requiere RE-APROBACIÓN antes de volver a enviar.`;
+    const admins = await this.getAdminPhones(clientId);
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
   }
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
@@ -103,6 +169,41 @@ export class ProjectsService {
       budget_allocated:  project.budget,
       budget_used:       counts.budget_used ?? '0',
     };
+  }
+
+  // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
+  // Guardados en projects.config.report_recipients (string[]). Sin migración:
+  // config JSONB ya existe. El envío del reporte (F5Controller) los resuelve
+  // automáticamente cuando no se pasan destinatarios explícitos.
+
+  async getReportRecipients(clientId: string, projectId: string): Promise<string[]> {
+    const [row] = await this.dataSource.query(
+      `SELECT config->'report_recipients' AS recipients
+         FROM projects WHERE id=$1 AND client_id=$2 LIMIT 1`,
+      [projectId, clientId],
+    );
+    if (!row) throw new NotFoundException('Proyecto no encontrado');
+    const recipients = row.recipients;
+    return Array.isArray(recipients) ? recipients : [];
+  }
+
+  async setReportRecipients(
+    clientId: string,
+    projectId: string,
+    emails: string[],
+  ): Promise<{ report_recipients: string[] }> {
+    // Merge en config existente: jsonb_set NO pisa otras claves (ia_status, etc.).
+    const rows = await this.dataSource.query(
+      `UPDATE projects
+          SET config = jsonb_set(COALESCE(config,'{}'), '{report_recipients}', $1::jsonb),
+              updated_at = NOW()
+        WHERE id=$2 AND client_id=$3
+        RETURNING config->'report_recipients' AS recipients`,
+      [JSON.stringify(emails), projectId, clientId],
+    );
+    if (!rows.length) throw new NotFoundException('Proyecto no encontrado');
+    this.logger.log(`[F5] report_recipients actualizados proyecto=${projectId} (${emails.length})`);
+    return { report_recipients: rows[0].recipients ?? [] };
   }
 
   // ── F4: Aprobar proyecto (luego de revisión IA) ───────────────────────────
@@ -154,7 +255,7 @@ export class ProjectsService {
     const equipo = await this.dataSource.query(
       `SELECT pe.id, pe.persona_id, pe.rol, pe.costo_dia, pe.dias_asignados,
               pe.fecha_inicio, pe.fecha_fin, pe.activo,
-              p.name AS persona_nombre, p.phone AS persona_phone
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre, p.phone AS persona_phone
          FROM proyecto_equipo pe
          LEFT JOIN promoters p ON p.id = pe.persona_id
         WHERE pe.client_id=$1 AND pe.proyecto_id=$2 AND pe.activo=true
@@ -167,7 +268,7 @@ export class ProjectsService {
       `SELECT c.id, c.persona_id, c.dia, c.estado,
               c.local_nombre, c.local_direccion,
               c.mensaje_enviado_at, c.respuesta_at,
-              p.name AS persona_nombre
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre
          FROM convocatorias c
          LEFT JOIN promoters p ON p.id = c.persona_id
         WHERE c.client_id=$1 AND c.proyecto_id=$2
@@ -198,15 +299,17 @@ export class ProjectsService {
       [clientId, projectId, body.persona_id],
     );
 
-    // Crear convocatorias pendientes por cada día (sin enviar WA todavía)
+    // Crear convocatorias pendientes por cada día (sin enviar WA todavía).
+    // ON CONFLICT apunta al índice único uq_convocatorias_turno (migración 047):
+    // re-asignar el mismo turno es idempotente en vez de duplicar la fila.
     for (const dia of body.dias) {
       await this.dataSource.query(
         `INSERT INTO convocatorias
            (client_id, proyecto_id, persona_id, dia, local_nombre, local_direccion, estado)
          VALUES ($1,$2,$3,$4,$5,$6,'pendiente')
-         ON CONFLICT DO NOTHING`,
+         ON CONFLICT (client_id, proyecto_id, persona_id, dia) DO NOTHING`,
         [clientId, projectId, body.persona_id, dia, body.local_nombre ?? null, body.local_direccion ?? null],
-      ).catch(() => {});
+      );
     }
 
     this.logger.log(`[F4] Turnos asignados persona=${body.persona_id} proyecto=${projectId} dias=${body.dias.length}`);
@@ -222,10 +325,21 @@ export class ProjectsService {
     modo:      'ai' | 'manual',
   ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
     const [proyecto] = await this.dataSource.query(
-      `SELECT name FROM projects WHERE id=$1 AND client_id=$2`,
+      `SELECT name, aprobado_por_user_id, aprobado_at FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
     );
     if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    // ── Gate humano F4: el envío masivo JAMÁS se dispara sin aprobación explícita.
+    // El proyecto debe tener aprobado_por_user_id y aprobado_at seteados por
+    // aprobarProyecto() antes de que cualquier WhatsApp salga. Sin esto, nada se envía.
+    if (!proyecto.aprobado_por_user_id || !proyecto.aprobado_at) {
+      this.logger.warn(`[F4] Intento de envío sin aprobación humana proyecto=${projectId}`);
+      throw new BadRequestException({
+        message: 'La convocatoria no fue aprobada. Requiere aprobación humana antes del envío.',
+        code:    'CONVOCATORIA_NO_APROBADA',
+      });
+    }
 
     let enviados = 0;
     let errores  = 0;
@@ -234,7 +348,7 @@ export class ProjectsService {
     for (const item of items) {
       // Obtener teléfono del promotor
       const [promotor] = await this.dataSource.query(
-        `SELECT name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
+        `SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), name) AS name, phone FROM promoters WHERE id=$1 AND client_id=$2`,
         [item.persona_id, clientId],
       ).catch(() => []);
 
@@ -244,30 +358,131 @@ export class ProjectsService {
         continue;
       }
 
-      // Enviar WA
-      const ok = await this.wa.enviarConvocatoria({
-        telefono:       promotor.phone,
-        nombrePromotor: promotor.name,
-        proyecto:       proyecto.name,
-        fecha:          item.dia,
-        local:          item.local_nombre    ?? 'Por confirmar',
-        direccion:      item.local_direccion ?? 'Por confirmar',
-      });
+      // Lock de idempotencia (Fase 4): no re-enviar el mismo turno dentro de 5 min
+      // (doble click / reintento / doble job). Clave por proyecto+persona+día.
+      const dedupKey = `conv:${clientId}:${projectId}:${item.persona_id}:${item.dia}`;
+      if (!(await this.waOutput.guard(dedupKey))) {
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: 'Duplicado suprimido (lock)' });
+        continue;
+      }
 
-      // Actualizar convocatoria en DB
-      await this.dataSource.query(
-        `UPDATE convocatorias
-         SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
-         WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
-        [clientId, projectId, item.persona_id, item.dia],
-      ).catch(() => {});
+      // El request completo corre dentro de una única tx runWithTenant (commit al
+      // resolver, rollback al lanzar). El envío de WhatsApp es I/O irreversible: si
+      // un throw del send (o del UPDATE siguiente) se propagara, haría rollback de la
+      // aprobación + turnos ya confirmados en la tx DESPUÉS de que WhatsApps de ítems
+      // previos ya se entregaron. Contenemos el throw como error por-ítem para que no
+      // tumbe la transacción entera. (Desacoplar el envío a una cola es un refactor F4
+      // aparte, fuera de alcance.)
+      try {
+        // Enviar WA
+        const ok = await this.wa.enviarConvocatoria({
+          telefono:       promotor.phone,
+          nombrePromotor: promotor.name,
+          proyecto:       proyecto.name,
+          fecha:          item.dia,
+          local:          item.local_nombre    ?? 'Por confirmar',
+          direccion:      item.local_direccion ?? 'Por confirmar',
+        });
 
-      if (ok) { enviados++; } else { errores++; }
-      detalle.push({ persona_id: item.persona_id, dia: item.dia, ok });
+        // Actualizar convocatoria en DB
+        await this.dataSource.query(
+          `UPDATE convocatorias
+           SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
+           WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
+          [clientId, projectId, item.persona_id, item.dia],
+        ).catch(() => {});
+
+        if (ok) { enviados++; } else { errores++; }
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok });
+      } catch (err: any) {
+        errores++;
+        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: err?.message ?? 'Error al enviar' });
+      }
     }
 
     this.logger.log(`[F4] Convocatoria enviada proyecto=${projectId} enviados=${enviados} errores=${errores}`);
     return { enviados, errores, detalle };
+  }
+
+  // ── F4: Sugerencia de anfitriones desde el perfil que extrajo la IA ────────
+  // Lee config.ia_extracted.perfil_personas (rol + cantidad) y locales, y propone
+  // promotores ACTIVOS con teléfono que matcheen el rol (nullable → match parcial,
+  // case-insensitive). No aprueba ni envía: solo sugiere para revisión humana.
+  async sugerirConvocatoria(clientId: string, projectId: string): Promise<{
+    items: unknown[]; disponibles: unknown[]; dia: string | null; locales: unknown[]; perfiles: unknown[];
+  }> {
+    const [proj] = await this.dataSource.query(
+      `SELECT config, start_date FROM projects WHERE id=$1 AND client_id=$2`,
+      [projectId, clientId],
+    );
+    if (!proj) throw new NotFoundException('Proyecto no encontrado');
+
+    const cfg = typeof proj.config === 'string' ? JSON.parse(proj.config) : (proj.config ?? {});
+    const ia = cfg?.ia_extracted ?? cfg ?? {};
+    const perfiles: any[] = Array.isArray(ia.perfil_personas) ? ia.perfil_personas : [];
+    const locales: any[]  = Array.isArray(ia.locales) ? ia.locales : [];
+    const dia = proj.start_date ? String(proj.start_date).slice(0, 10) : null;
+    const primerLocal = locales[0] ?? null;
+
+    const disponibles = await this.dataSource.query(
+      `SELECT id, COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), name) AS name, phone, rol FROM promoters
+        WHERE client_id=$1 AND status='active' AND phone IS NOT NULL
+        ORDER BY name ASC`,
+      [clientId],
+    );
+
+    const usados = new Set<string>();
+    const items: any[] = [];
+    for (const perfil of perfiles) {
+      const rolPerfil = String(perfil?.rol ?? '').trim().toLowerCase();
+      const cantidad  = Number(perfil?.cantidad) > 0 ? Number(perfil.cantidad) : 1;
+      const matches = (disponibles as any[]).filter(
+        (p) => !usados.has(p.id) && (!rolPerfil || String(p.rol ?? '').toLowerCase().includes(rolPerfil)),
+      );
+      for (const p of matches.slice(0, cantidad)) {
+        usados.add(p.id);
+        items.push({
+          persona_id: p.id, name: p.name, phone: p.phone, rol: p.rol ?? perfil?.rol ?? null,
+          dia, local_nombre: primerLocal?.nombre ?? null, local_direccion: primerLocal?.direccion ?? null,
+        });
+      }
+    }
+
+    return { items, disponibles, dia, locales, perfiles };
+  }
+
+  // ── F4: Confirmar + enviar convocatoria a los anfitriones ──────────────────
+  // El click de "Aprobar y enviar" ES la aprobación humana (gate F4). Reusa
+  // aprobarProyecto (setea el gate) → asignarTurno (crea las convocatorias) →
+  // enviarConvocatoria (manda WhatsApp). Nada nuevo en el envío.
+  async convocarAnfitriones(
+    clientId: string, projectId: string, userId: string,
+    items: ConvocatoriaItem[], comentario?: string,
+  ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    if (!items?.length) throw new BadRequestException('No hay anfitriones para convocar');
+
+    await this.aprobarProyecto(clientId, projectId, userId, comentario);
+
+    // Crear convocatorias (persona × día) antes de enviar. Agrupamos por
+    // persona + local: agrupar sólo por persona_id perdía el local por-día
+    // (tomaba el del primer item y lo aplicaba a todos sus días). Cada
+    // combinación distinta (persona, local) obtiene su propio asignarTurno
+    // con sus propios días y su propio local.
+    const porPersonaLocal = new Map<string, { persona_id: string; dias: string[]; local_nombre?: string; local_direccion?: string }>();
+    for (const it of items) {
+      const key = `${it.persona_id}|${it.local_nombre ?? ''}|${it.local_direccion ?? ''}`;
+      const prev = porPersonaLocal.get(key) ?? { persona_id: it.persona_id, dias: [], local_nombre: it.local_nombre, local_direccion: it.local_direccion };
+      if (it.dia) prev.dias.push(it.dia);
+      porPersonaLocal.set(key, prev);
+    }
+    for (const info of porPersonaLocal.values()) {
+      if (!info.dias.length) continue;
+      await this.asignarTurno(clientId, projectId, {
+        persona_id: info.persona_id, dias: info.dias, local_nombre: info.local_nombre, local_direccion: info.local_direccion,
+      });
+    }
+
+    return this.enviarConvocatoria(clientId, projectId, items, 'ai');
   }
 
   async getConvocatorias(clientId: string, projectId: string): Promise<unknown[]> {
@@ -276,7 +491,7 @@ export class ProjectsService {
               c.local_nombre, c.local_direccion,
               c.mensaje_enviado_at, c.respuesta_texto, c.respuesta_at,
               c.reenvio_count,
-              p.name AS persona_nombre, p.phone AS persona_phone
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre, p.phone AS persona_phone
          FROM convocatorias c
          LEFT JOIN promoters p ON p.id = c.persona_id
         WHERE c.client_id=$1 AND c.proyecto_id=$2
@@ -297,6 +512,129 @@ export class ProjectsService {
        WHERE id=$2 AND client_id=$3 AND proyecto_id=$4`,
       [estado, convId, clientId, projectId],
     );
+
+    // C2 — El promotor confirmó pero canceló después → hay que reemplazarlo.
+    //   No existe búsqueda automática de reemplazo: se notifica al OPERATOR del
+    //   tenant (rol 'user'), que es quien gestiona la operación en terreno, para
+    //   que consiga un reemplazo manualmente para ese turno/día.
+    if (estado === 'cancelada') {
+      await this.notificarReemplazoNecesario(clientId, projectId, convId).catch((err) =>
+        this.logger.warn(`[F4] notificarReemplazo error conv=${convId}: ${err?.message}`),
+      );
+    }
+
+    // Resolver manualmente una convocatoria puede completar la ronda → CLOSED.
+    await this.cerrarConvocatoriaSiCompleta(clientId, projectId);
     return { ok: true };
   }
+
+  /**
+   * C2 — Avisa a los OPERATOR del tenant que un promotor canceló y se necesita
+   * reemplazo para su turno. Idempotente por convocatoria (sendTextOnce con
+   * dedupKey por convId): si la cancelación se re-procesa, no duplica el aviso.
+   */
+  private async notificarReemplazoNecesario(
+    clientId: string, projectId: string, convId: string,
+  ): Promise<void> {
+    const [row] = await this.dataSource.query(
+      `SELECT c.dia, pr.name AS proyecto_nombre, COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre
+         FROM convocatorias c
+         LEFT JOIN projects  pr ON pr.id = c.proyecto_id
+         LEFT JOIN promoters p  ON p.id  = c.persona_id
+        WHERE c.id=$1 AND c.client_id=$2 AND c.proyecto_id=$3`,
+      [convId, clientId, projectId],
+    ).catch(() => []);
+    if (!row) return;
+
+    const fecha = row.dia ? new Date(row.dia).toLocaleDateString('es-CL') : 'la fecha asignada';
+    const msg =
+      `🔁 Reemplazo necesario en "${row.proyecto_nombre ?? 'proyecto'}": ` +
+      `${row.persona_nombre ?? 'un promotor'} canceló su turno del ${fecha}. ` +
+      `Buscá un reemplazo para ese día.`;
+
+    const operators = await this.getOperatorPhones(clientId);
+    for (const op of operators) {
+      await this.waOutput.sendTextOnce(op.phone, msg, `conv-reemplazo:${convId}:${op.phone}`).catch(() => {});
+    }
+    this.logger.log(`[F4] Reemplazo notificado conv=${convId} (${operators.length} operador/es 'user')`);
+  }
+
+  // ── F4 Fase 3: CLOSED lifecycle ───────────────────────────────────────────
+
+  /**
+   * Cierra la ronda de convocatoria del proyecto si TODAS las convocatorias
+   * quedaron resueltas (ninguna en 'enviada'/'pendiente'), y notifica al operador
+   * UNA sola vez. El UPDATE es atómico e idempotente: el guard
+   * convocatoria_cerrada_at IS NULL + el chequeo de pendientes evitan doble aviso
+   * aunque dos respuestas lleguen casi simultáneas.
+   */
+  async cerrarConvocatoriaSiCompleta(clientId: string, projectId: string): Promise<void> {
+    const cerradas = await this.dataSource.query(
+      `UPDATE projects p
+          SET convocatoria_cerrada_at = NOW(), updated_at = NOW()
+        WHERE p.id = $1 AND p.client_id = $2
+          AND p.convocatoria_cerrada_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM convocatorias c
+             WHERE c.proyecto_id = $1 AND c.client_id = $2
+               AND c.estado IN ('enviada','pendiente')
+          )
+        RETURNING p.name`,
+      [projectId, clientId],
+    ).catch((err: any) => {
+      this.logger.warn(`[F4] cerrarConvocatoria error proyecto=${projectId}: ${err.message}`);
+      return [];
+    });
+
+    if (!cerradas.length) return; // nada que cerrar (o ya estaba cerrada)
+
+    const nombre = cerradas[0].name;
+    // Resumen de la ronda para el operador.
+    const [resumen] = await this.dataSource.query(
+      `SELECT
+          COUNT(*)                                        AS total,
+          COUNT(*) FILTER (WHERE estado='confirmada')     AS confirmadas,
+          COUNT(*) FILTER (WHERE estado='rechazada')      AS rechazadas
+         FROM convocatorias
+        WHERE proyecto_id=$1 AND client_id=$2`,
+      [projectId, clientId],
+    ).catch(() => [{ total: '?', confirmadas: '?', rechazadas: '?' }]);
+
+    const msg = `✅ Convocatoria "${nombre}" cerrada: todos respondieron. `
+      + `${resumen.confirmadas}/${resumen.total} confirmaron, ${resumen.rechazadas} rechazaron.`;
+    const admins = await this.getAdminPhones(clientId);
+    for (const admin of admins) {
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
+    this.logger.log(`[F4] Convocatoria cerrada proyecto=${projectId} (${admins.length} operadores notificados)`);
+  }
+
+  /** Teléfonos de los admin_cliente del tenant con phone registrado. */
+  private async getAdminPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.dataSource.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+  }
+
+  /**
+   * Teléfonos de los OPERATOR (rol 'user') del tenant con phone registrado.
+   * Análogo a getAdminPhones pero para el operador de terreno: es el destinatario
+   * de las tareas del ciclo de convocatoria (reemplazo por cancelación C2,
+   * no-respuesta tras 2 recordatorios C4). Distinto del MANAGER que recibe las
+   * escaladas de ambigüedad y el cierre de ronda.
+   */
+  private async getOperatorPhones(clientId: string): Promise<{ phone: string }[]> {
+    return this.dataSource.query(
+      `SELECT phone FROM users
+        WHERE client_id=$1 AND role='${UserRole.OPERATOR}' AND phone IS NOT NULL`,
+      [clientId],
+    ).catch(() => []);
+  }
+
 }

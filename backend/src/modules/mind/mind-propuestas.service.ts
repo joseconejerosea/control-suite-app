@@ -1,12 +1,17 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Injectable()
 export class MindPropuestasService {
   private readonly logger = new Logger(MindPropuestasService.name);
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly wa: WhatsAppService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // Obtener propuestas abiertas del cliente
@@ -79,14 +84,14 @@ export class MindPropuestasService {
     let resultado: unknown = { ok: true };
 
     if (accion) {
-      resultado = await this.ejecutarAccion(clientId, accion, userId);
+      resultado = await this.ejecutarAccion(clientId, accion, userId, p);
     }
 
     await this.ds.query(
       `UPDATE mind_propuestas
        SET estado='aprobada', aprobada_at=NOW(), aprobada_por_user_id=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, userId],
+       WHERE id=$1 AND client_id=$3`,
+      [id, userId, clientId],
     );
 
     // Log
@@ -104,8 +109,8 @@ export class MindPropuestasService {
     await this.ds.query(
       `UPDATE mind_propuestas
        SET estado='rechazada', rechazada_motivo=$2, updated_at=NOW()
-       WHERE id=$1`,
-      [id, motivo ?? 'Rechazado por el usuario'],
+       WHERE id=$1 AND client_id=$3`,
+      [id, motivo ?? 'Rechazado por el usuario', clientId],
     );
   }
 
@@ -116,6 +121,7 @@ export class MindPropuestasService {
     clientId: string,
     accion: Record<string, unknown>,
     userId: string,
+    propuesta?: Record<string, any>,
   ): Promise<unknown> {
     this.logger.log(`[Mind] Ejecutando acción: ${accion.tipo} para cliente ${clientId}`);
 
@@ -123,9 +129,42 @@ export class MindPropuestasService {
       case 'reasignar_presupuesto':
         return { tipo: 'reasignar_presupuesto', status: 'simulado_sin_integracion_financiera' };
 
-      case 'enviar_recordatorio':
-        // Aquí se integraría con el WhatsApp service
-        return { tipo: 'enviar_recordatorio', personas: accion.persona_ids, status: 'pendiente_whatsapp' };
+      case 'enviar_recordatorio': {
+        // Destinatario: admins del cliente (accion.target === 'admins').
+        // El teléfono sale de users.phone (agregado en migración 1700000000043).
+        // Mismo patrón que rendiciones.service.ts y support.service.ts.
+        const admins = await this.ds
+          .query(
+            `SELECT u.phone, u.language FROM users u
+             WHERE u.client_id = $1 AND u.role = '${UserRole.MANAGER}' AND u.phone IS NOT NULL`,
+            [clientId],
+          )
+          .catch(() => []);
+
+        const detalle =
+          propuesta?.descripcion ??
+          propuesta?.titulo ??
+          'Tenés pendientes por revisar en Control Suite.';
+
+        let enviados = 0;
+        for (const admin of admins) {
+          if (!admin.phone) continue;
+          const msg =
+            admin.language === 'en'
+              ? `Reminder — Control Suite: ${detalle}`
+              : `Recordatorio — Control Suite: ${detalle}`;
+          const ok = await this.wa.sendText(admin.phone, msg).catch(() => false);
+          if (ok) enviados++;
+        }
+
+        return {
+          tipo: 'enviar_recordatorio',
+          target: 'admins',
+          total_admins: admins.length,
+          enviados,
+          status: enviados > 0 ? 'enviado' : 'sin_destinatarios',
+        };
+      }
 
       case 'redactar_correo':
         return { tipo: 'redactar_correo', borrador: 'Estimado cliente, le recordamos que...', status: 'borrador_listo' };

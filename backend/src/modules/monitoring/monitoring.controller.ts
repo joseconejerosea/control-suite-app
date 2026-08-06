@@ -2,11 +2,15 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 const SAVINGS_RATE_USD_PER_HOUR = 15;
 const HOURS_SAVED_PER_DAY       = 3;
 
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(UserRole.SUPERADMIN)
 @Controller('admin/monitoring')
 export class MonitoringController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
@@ -18,7 +22,7 @@ export class MonitoringController {
       this.ds.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN status='in_progress' THEN 1 END) as live FROM activations`).catch(() => [{ total: 0, live: 0 }]),
       this.ds.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN processing_status='failed' THEN 1 END) as failed FROM eventos_crudos WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total: 0, failed: 0 }]),
       this.ds.query(`SELECT COUNT(*) as total FROM documents WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total: 0 }]),
-      this.ds.query(`SELECT COALESCE(SUM(costo_usd),0) as total_hoy FROM ai_costs_log WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total_hoy: 0 }]),
+      this.ds.query(`SELECT COALESCE(SUM(cost_usd),0) as total_hoy FROM ai_costs_log WHERE created_at > NOW() - INTERVAL '24h'`).catch(() => [{ total_hoy: 0 }]),
     ]);
 
     const flows = await this.ds.query(`

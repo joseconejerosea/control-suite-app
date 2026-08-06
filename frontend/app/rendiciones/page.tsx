@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 
 interface Rendicion {
   id: string;
@@ -24,23 +25,10 @@ interface Kpis {
 const ESTADO_CONFIG: Record<string, { label: string; color: string }> = {
   borrador:  { label: 'Borrador',  color: 'bg-slate-100 text-slate-600' },
   enviada:   { label: 'Enviada',   color: 'bg-blue-100 text-blue-700' },
-  aprobada:  { label: 'Aprobada',  color: 'bg-green-100 text-green-700' },
-  pagada:    { label: 'Pagada',    color: 'bg-emerald-100 text-emerald-700' },
-  rechazada: { label: 'Rechazada', color: 'bg-red-100 text-red-700' },
+  aprobada:  { label: 'Aprobada',  color: 'bg-[color:color-mix(in_srgb,var(--success)_12%,transparent)] text-[color:var(--success)]' },
+  pagada:    { label: 'Pagada',    color: 'bg-[color:color-mix(in_srgb,var(--success)_12%,transparent)] text-[color:var(--success)]' },
+  rechazada: { label: 'Rechazada', color: 'bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] text-[color:var(--danger)]' },
 };
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
-async function apiFetch(path: string, opts?: RequestInit) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : '';
-  const fullPath = path.startsWith('/api') ? path : `/api${path}`;
-  const res = await fetch(`${API}${fullPath}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...opts?.headers },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
 
 export default function RendicionesPage() {
   const [rendiciones, setRendiciones] = useState<Rendicion[]>([]);
@@ -56,8 +44,8 @@ export default function RendicionesPage() {
     try {
       const params = filtroEstado ? `?estado=${filtroEstado}` : '';
       const [data, k] = await Promise.all([
-        apiFetch(`/rendiciones${params}`),
-        apiFetch('/rendiciones/kpis'),
+        api.get<any>(`/rendiciones${params}`),
+        api.get<any>('/rendiciones/kpis'),
       ]);
       setRendiciones(data.data ?? data);
       setKpis(k.data ?? k);
@@ -69,15 +57,14 @@ export default function RendicionesPage() {
 
   const openDetalle = async (id: string) => {
     setSelectedId(id);
-    const d = await apiFetch(`/rendiciones/${id}`);
-    console.log('DETALLE RAW:', JSON.stringify(d));
+    const d = await api.get<any>(`/rendiciones/${id}`);
     setDetalle(d.data ?? d);
   };
 
   const cerrar = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/cerrar`, { method: 'PATCH' });
+      await api.patch(`/rendiciones/${id}/cerrar`);
       await fetchData();
     } finally { setActionLoading(null); }
   };
@@ -85,10 +72,10 @@ export default function RendicionesPage() {
   const aprobar = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/aprobar`, { method: 'PATCH' });
+      await api.patch(`/rendiciones/${id}/aprobar`);
       await fetchData();
       if (selectedId === id) {
-        const d = await apiFetch(`/rendiciones/${id}`);
+        const d = await api.get<any>(`/rendiciones/${id}`);
         setDetalle(d.data ?? d);
       }
     } finally { setActionLoading(null); }
@@ -97,7 +84,7 @@ export default function RendicionesPage() {
   const rechazar = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/rechazar`, { method: 'PATCH', body: JSON.stringify({}) });
+      await api.patch(`/rendiciones/${id}/rechazar`, {});
       await fetchData();
       setSelectedId(null);
       setDetalle(null);
@@ -107,7 +94,7 @@ export default function RendicionesPage() {
   const marcarPagada = async (id: string) => {
     setActionLoading(id);
     try {
-      await apiFetch(`/rendiciones/${id}/marcar-pagada`, { method: 'PATCH', body: JSON.stringify({}) });
+      await api.patch(`/rendiciones/${id}/marcar-pagada`, {});
       await fetchData();
       setSelectedId(null);
       setDetalle(null);
@@ -167,9 +154,9 @@ export default function RendicionesPage() {
                     {pct != null ? (
                       <div className="flex items-center gap-2">
                         <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(pct,100)}%` }} />
+                          <div className={`h-full rounded-full ${pct > 100 ? 'bg-[color:var(--danger)]' : pct > 80 ? 'bg-amber-400' : 'bg-[color:var(--success)]'}`} style={{ width: `${Math.min(pct,100)}%` }} />
                         </div>
-                        <span className={`text-xs font-medium ${pct > 100 ? 'text-red-600' : 'text-slate-600'}`}>{pct.toFixed(0)}%</span>
+                        <span className={`text-xs font-medium ${pct > 100 ? 'text-[color:var(--danger)]' : 'text-slate-600'}`}>{pct.toFixed(0)}%</span>
                       </div>
                     ) : '—'}
                   </td>
@@ -183,8 +170,8 @@ export default function RendicionesPage() {
                       <button onClick={() => openDetalle(r.id)} className="px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50 rounded">Ver</button>
                       {r.estado === 'borrador' && <button disabled={busy} onClick={() => cerrar(r.id)} className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded disabled:opacity-40">{busy ? '...' : 'Cerrar'}</button>}
                       {r.estado === 'enviada' && <>
-                        <button disabled={busy} onClick={() => aprobar(r.id)} className="px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">{busy ? '...' : 'Aprobar'}</button>
-                        <button disabled={busy} onClick={() => rechazar(r.id)} className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded disabled:opacity-40">{busy ? '...' : 'Rechazar'}</button>
+                        <button disabled={busy} onClick={() => aprobar(r.id)} className="px-2 py-1 text-xs text-[color:var(--success)] hover:bg-[color:color-mix(in_srgb,var(--success)_10%,transparent)] rounded disabled:opacity-40">{busy ? '...' : 'Aprobar'}</button>
+                        <button disabled={busy} onClick={() => rechazar(r.id)} className="px-2 py-1 text-xs text-[color:var(--danger)] hover:bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] rounded disabled:opacity-40">{busy ? '...' : 'Rechazar'}</button>
                       </>}
                       {r.estado === 'aprobada' && (
                         <button disabled={busy} onClick={() => marcarPagada(r.id)} className="px-3 py-1 text-xs bg-indigo-600 text-white rounded font-semibold hover:bg-indigo-700 disabled:opacity-40">
@@ -216,8 +203,8 @@ export default function RendicionesPage() {
                   </button>
                 )}
                 {detalle.estado === 'enviada' && <>
-                  <button disabled={actionLoading === detalle.id} onClick={() => aprobar(detalle.id)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-40">{actionLoading === detalle.id ? '...' : 'Aprobar'}</button>
-                  <button disabled={actionLoading === detalle.id} onClick={() => rechazar(detalle.id)} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-100 disabled:opacity-40">{actionLoading === detalle.id ? '...' : 'Rechazar'}</button>
+                  <button disabled={actionLoading === detalle.id} onClick={() => aprobar(detalle.id)} className="px-4 py-2 bg-[color:var(--success)] text-white rounded-lg text-sm font-semibold hover:opacity-90 disabled:opacity-40">{actionLoading === detalle.id ? '...' : 'Aprobar'}</button>
+                  <button disabled={actionLoading === detalle.id} onClick={() => rechazar(detalle.id)} className="px-4 py-2 bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] text-[color:var(--danger)] rounded-lg text-sm font-semibold hover:bg-[color:color-mix(in_srgb,var(--danger)_18%,transparent)] disabled:opacity-40">{actionLoading === detalle.id ? '...' : 'Rechazar'}</button>
                 </>}
                 <button onClick={() => { setSelectedId(null); setDetalle(null); }} className="text-slate-400 hover:text-slate-600 text-xl ml-2">✕</button>
               </div>

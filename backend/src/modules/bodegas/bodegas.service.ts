@@ -54,20 +54,13 @@ export class BodegasService {
     return bodega;
   }
 
-  /** Vista virtual Proyectos Live */
+  /** Vista Proyectos Live — lee desde la DB VIEW vw_proyectos_live */
   async proyectosLive(clientId: string) {
     return this.ds.query(
-      `SELECT m.sku_id, s.nombre as sku_nombre, s.codigo, s.cliente_final,
-              m.proyecto_destino_id, p.name as proyecto_nombre,
-              m.persona_id, m.cantidad, m.fecha_retorno_esperada,
-              m.bodega_origen_id, b.nombre as bodega_origen_nombre,
-              m.created_at as salida_at
-       FROM movimientos_pop m
-       JOIN skus s ON s.id = m.sku_id
-       JOIN projects p ON p.id = m.proyecto_destino_id
-       LEFT JOIN bodegas b ON b.id = m.bodega_origen_id
-       WHERE m.client_id=$1 AND m.estado='en_terreno' AND m.tipo='salida'
-       ORDER BY m.fecha_retorno_esperada ASC NULLS LAST`,
+      `SELECT *
+       FROM vw_proyectos_live
+       WHERE client_id = $1
+       ORDER BY fecha_retorno_esperada ASC NULLS LAST`,
       [clientId],
     );
   }
@@ -93,7 +86,7 @@ export class BodegasService {
     if (!fields.length) return this.findOne(clientId, id);
     fields.push(`updated_at=NOW()`);
     const res = await this.ds.query(
-      `UPDATE bodegas SET ${fields.join(',')} WHERE id=$1 AND client_id=${i} RETURNING *`,
+      `UPDATE bodegas SET ${fields.join(',')} WHERE id=$1 AND client_id=$${i} RETURNING *`,
       [...params, clientId],
     );
     return res[0];

@@ -3,37 +3,44 @@
 @import "shadcn/tailwind.css";
 
 :root {
-  --background: oklch(0.08 0.01 265);
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.12 0.01 265);
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.14 0.01 265);
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.48 0.2 25);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.18 0.01 265);
-  --secondary-foreground: oklch(0.85 0 0);
-  --muted: oklch(0.16 0.01 265);
-  --muted-foreground: oklch(0.55 0 0);
-  --accent: oklch(0.18 0.01 265);
-  --accent-foreground: oklch(0.9 0 0);
-  --destructive: oklch(0.55 0.22 25);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.48 0.2 25);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.1 0.01 265);
-  --sidebar-foreground: oklch(0.9 0 0);
-  --sidebar-border: oklch(1 0 0 / 7%);
+  /* shadcn-compat core tokens (oklch, radix-nova light palette) */
+  --background:           oklch(0.985 0.002 92);   /* paper #FAFAF9 */
+  --foreground:           oklch(0.16 0.03 265);    /* ink #0B1020 */
+  --card:                 oklch(1 0 0);            /* white */
+  --card-foreground:      oklch(0.16 0.03 265);    /* ink */
+  --popover:              oklch(1 0 0);            /* white */
+  --popover-foreground:   oklch(0.16 0.03 265);    /* ink */
+  --primary:              oklch(0.51 0.23 277);    /* indigo #4F46E5 */
+  --primary-foreground:   oklch(1 0 0);            /* white */
+  --secondary:            oklch(0.968 0.005 265);  /* slate-100 #F1F5F9 */
+  --secondary-foreground: oklch(0.28 0.04 265);    /* ink-soft #1E293B */
+  --muted:                oklch(0.968 0.005 265);  /* slate-100 #F1F5F9 */
+  --muted-foreground:     oklch(0.55 0.03 257);    /* #64748B */
+  --accent:               oklch(0.968 0.005 265);  /* neutral slate hover #F1F5F9 — ONE declaration only */
+  --accent-foreground:    oklch(0.16 0.03 265);    /* ink */
+  --destructive:          oklch(0.64 0.24 25);     /* danger #EF4444 */
+  --border:               oklch(0.92 0.004 265);   /* line #E5E7EB */
+  --input:                oklch(0.92 0.004 265);   /* line #E5E7EB */
+  --ring:                 oklch(0.51 0.23 277);    /* indigo #4F46E5 */
+  --radius:               0.625rem;
+  --sidebar:              oklch(1 0 0);            /* white */
+  --sidebar-foreground:   oklch(0.28 0.04 265);    /* ink-soft */
+  --sidebar-border:       oklch(0.92 0.004 265);   /* line */
 
-  /* Brand tokens */
-  --red: #C8202C;
-  --red-light: #e8353f;
-  --red-dim: rgba(200, 32, 44, 0.12);
-  --green: #2a9d5c;
-  --green-light: #34b96e;
-  --green-dim: rgba(42, 157, 92, 0.12);
-  --navy: #12131a;
+  /* Semantic / brand extras (hex) */
+  --paper:          #FAFAF9;
+  --ink:            #0B1020;
+  --ink-soft:       #1E293B;
+  --line:           #E5E7EB;
+  --primary-dark:   #3730A3;
+  --success:        #10B981;
+  --warning:        #F59E0B;
+  --danger:         #EF4444;
+  --info:           #3B82F6;
+  --brand-accent:   #06B6D4;   /* brand cyan — NOT named --accent */
+  --accent-soft:    #ECFEFF;   /* cyan tint surface */
+  --ai-gradient:    linear-gradient(135deg, #4F46E5, #06B6D4);
+
 }
 
 @layer base {
@@ -46,14 +53,32 @@
     color: var(--foreground);
     font-synthesis: none;
     -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "cv11";
   }
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 12%); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 }
 
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-up { animation: fadeUp 0.25s ease both; }
+/* No `both`/forwards fill: holding the end keyframe would leave a lingering
+   `transform: translateY(0)` on the element, which creates a containing block
+   for `position: fixed` descendants — clipping every modal rendered inside a
+   scroll container (e.g. app-shell <main>). Reverting to `transform: none` at
+   rest keeps fixed overlays viewport-relative. End state == natural state, so
+   there is no visual difference. */
+.animate-fade-up { animation: fadeUp 0.25s ease; }
+
+/* Font utility classes (vars wired in Slice B via next/font; resolves once layout.tsx lands) */
+.display-font {
+  font-family: var(--font-display), serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.mono {
+  font-family: var(--font-mono), monospace;
+}

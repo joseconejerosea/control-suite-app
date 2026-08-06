@@ -194,7 +194,7 @@ export default function OnboardingPage() {
   const Btn = ({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) => (
     <button onClick={onClick} disabled={disabled || loading}
       className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 transition-all"
-      style={{ background: "var(--red)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(200,32,44,0.3)" }}>
+      style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(79,70,229,0.3)" }}>
       {loading
         ? <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} />
         : children}
@@ -216,9 +216,9 @@ export default function OnboardingPage() {
               <div className="flex flex-col items-center gap-1.5" style={{ width: 72 }}>
                 <div className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
                   style={{
-                    border:     `2px solid ${step > s.id ? "var(--green)" : step === s.id ? "var(--red)" : "var(--border)"}`,
-                    background: step > s.id ? "var(--green-dim)" : step === s.id ? "var(--red-dim)" : "transparent",
-                    color:      step > s.id ? "var(--green)" : step === s.id ? "var(--red-light)" : "var(--muted-foreground)",
+                    border:     `2px solid ${step > s.id ? "var(--success)" : step === s.id ? "var(--primary)" : "var(--border)"}`,
+                    background: step > s.id ? "color-mix(in srgb, var(--success) 12%, transparent)" : step === s.id ? "rgba(79,70,229,0.10)" : "transparent",
+                    color:      step > s.id ? "var(--success)" : step === s.id ? "var(--primary)" : "var(--muted-foreground)",
                   }}>
                   {step > s.id ? <CheckCircle size={16} /> : <s.icon size={14} />}
                 </div>
@@ -228,7 +228,7 @@ export default function OnboardingPage() {
                 }}>{s.label}</span>
               </div>
               {i < STEPS.length - 1 && (
-                <div style={{ width: 32, height: 2, marginBottom: 18, background: step > s.id ? "var(--green)" : "var(--border)", transition: "background 0.3s" }} />
+                <div style={{ width: 32, height: 2, marginBottom: 18, background: step > s.id ? "var(--success)" : "var(--border)", transition: "background 0.3s" }} />
               )}
             </div>
           ))}
@@ -241,7 +241,7 @@ export default function OnboardingPage() {
           </div>
 
           {error && (
-            <div className="mb-4 text-xs px-3 py-2 rounded-lg" style={{ background: "var(--red-dim)", color: "var(--red-light)" }}>
+            <div className="mb-4 text-xs px-3 py-2 rounded-lg" style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" }}>
               {error}
             </div>
           )}
@@ -301,7 +301,7 @@ export default function OnboardingPage() {
               {isWA ? (
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center gap-2 pb-2" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <Phone size={14} style={{ color: "var(--red, #C8202C)" }} />
+                    <Phone size={14} style={{ color: "var(--primary)" }} />
                     <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--muted-foreground)" }}>
                       {waStep === "provision" ? "Registrar numero WhatsApp" : "Verificar OTP"}
                     </span>
@@ -359,7 +359,7 @@ export default function OnboardingPage() {
                   {waStep === "verify" && (
                     <>
                       <div className="p-3 rounded-lg text-xs"
-                        style={{ background: "rgba(42,157,92,0.08)", border: "1px solid rgba(42,157,92,0.2)", color: "#2a9d5c" }}>
+                        style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 20%, transparent)", color: "var(--success)" }}>
                         Codigo OTP enviado a +{waForm.cc} {waForm.phone_number}. Revisa tus mensajes SMS.
                       </div>
                       <Field label="Codigo OTP *" required value={otp} onChange={setOtp}
@@ -415,8 +415,8 @@ export default function OnboardingPage() {
           {step === 5 && (
             <div className="flex flex-col items-center gap-5 text-center py-4">
               <div className="w-16 h-16 rounded-full flex items-center justify-center"
-                style={{ background: "var(--green-dim)", border: "2px solid var(--green)" }}>
-                <CheckCircle size={32} style={{ color: "var(--green)" }} />
+                style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", border: "2px solid var(--success)" }}>
+                <CheckCircle size={32} style={{ color: "var(--success)" }} />
               </div>
               <div>
                 <h3 className="font-bold text-base mb-2">Configuracion completa</h3>

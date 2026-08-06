@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Job } from 'bullmq';
 import { MindPropuestasService } from '../../mind/mind-propuestas.service';
+import { runWithTenant, runAsSystem } from '../../../common/tenant/tenant-context';
 
 /**
  * Implementa los 10 triggers del Perfil Proactivo (spec §08):
@@ -32,16 +33,19 @@ export class MindProactiveProcessor extends WorkerHost {
 
   async process(job: Job<{ client_id?: string }>): Promise<void> {
     const { client_id } = job.data;
+    // clients NO tiene RLS → la lista se lee sin contexto de tenant.
     const clientes = client_id
       ? [{ id: client_id }]
       : await this.ds.query(`SELECT id FROM clients WHERE status='active'`);
 
     for (const c of clientes) {
-      await this.detectarParaCliente(c.id).catch((err) =>
+      // Cada cliente corre en su propia tx con app.current_tenant = c.id.
+      await runWithTenant(this.ds, c.id, () => this.detectarParaCliente(c.id)).catch((err) =>
         this.logger.error(`[MindProactive] Error cliente ${c.id}:`, err.message),
       );
     }
-    await this.mindSvc.expirarAntiguas();
+    // Expiración global (todos los tenants) → pool de sistema (cross-tenant).
+    await runAsSystem(() => this.mindSvc.expirarAntiguas());
   }
 
   private async detectarParaCliente(clientId: string): Promise<void> {
@@ -159,22 +163,24 @@ export class MindProactiveProcessor extends WorkerHost {
 
   // ── Trigger 5: Stock insuficiente ─────────────────────────────────────────
   private async trigger5_StockInsuficiente(clientId: string): Promise<void> {
+    // Usa <= min_stock para consistencia con skus.service.ts#alertasStock().
+    // Solo aplica a SKUs que tienen min_stock configurado (> 0).
     const alertas = await this.ds.query(
-      `SELECT s.nombre, p.name as proyecto, p.start_date,
+      `SELECT s.nombre, s.min_stock, p.name as proyecto, p.start_date,
               COALESCE(SUM(inv.cantidad),0) as disponible
        FROM skus s CROSS JOIN projects p
        LEFT JOIN inventario inv ON inv.sku_id=s.id
-       WHERE s.client_id=$1 AND p.client_id=$1 AND s.active=true
+       WHERE s.client_id=$1 AND p.client_id=$1 AND s.active=true AND s.min_stock > 0
          AND p.status='active' AND p.start_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'
-       GROUP BY s.id, s.nombre, p.id, p.name, p.start_date
-       HAVING COALESCE(SUM(inv.cantidad),0) < 5`,
+       GROUP BY s.id, s.nombre, s.min_stock, p.id, p.name, p.start_date
+       HAVING COALESCE(SUM(inv.cantidad),0) <= s.min_stock`,
       [clientId],
     );
     if (!alertas.length || await this.propuestaYaExiste(clientId, 'stock_bajo')) return;
     await this.mindSvc.crear({
       clientId, tipo: 'proactivo', perfilOrigen: 'stock_bajo',
       titulo: `Stock bajo para activaciones próximas (${alertas.length} SKUs)`,
-      descripcion: `${alertas.length} SKUs con stock < 5 unidades para proyectos en los próximos 7 días.`,
+      descripcion: `${alertas.length} SKUs con stock en o bajo su mínimo configurado para proyectos en los próximos 7 días.`,
       severidad: 'alta',
       accionPropuesta: { tipo: 'marcar_stock_revision', alertas },
       expiresInHours: 24,

@@ -1,19 +1,42 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { AuditService } from './audit.service';
+import { AuditLogFiltersDto } from './dto/audit-log-filters.dto';
 
-@UseGuards(AuthGuard)
-@Controller('admin/audit')
+@UseGuards(AuthGuard, RolesGuard)
+@Controller()
 export class AuditController {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly auditService: AuditService,
+  ) {}
 
-  @Get('ai-costs')
+  // ── Global audit log (superadmin) ─────────────────────────────────────────
+  @Get('admin/audit-log')
+  @Roles(UserRole.SUPERADMIN)
+  async getAdminAuditLog(@Query() filters: AuditLogFiltersDto) {
+    return this.auditService.findAll(filters);
+  }
+
+  // ── Tenant audit log (operator) ───────────────────────────────────────────
+  @Get('app/audit-log')
+  async getAppAuditLog(@Query() filters: AuditLogFiltersDto, @Req() req: any) {
+    const tenantId = req.user?.client_id ?? req.user?.clientId;
+    return this.auditService.findAll(filters, tenantId);
+  }
+
+  // ── AI cost tracking (existing) ───────────────────────────────────────────
+  @Get('admin/audit/ai-costs')
+  @Roles(UserRole.SUPERADMIN)
   async getAiCosts(
     @Query('days')      daysRaw    = '30',
     @Query('client_id') clientId?: string,
   ) {
-    // Rule 06: no interpolated SQL — days cast+clamped, client_id is $N param
     const d          = Math.min(Math.max(parseInt(daysRaw) || 30, 1), 365);
     const hasClient  = !!clientId;
     const baseParams = hasClient ? [d, clientId] : [d];
@@ -73,21 +96,23 @@ export class AuditController {
     return { total: total[0], byClient, byFlow, byDay };
   }
 
-  @Get('actions')
+  @Get('admin/audit/actions')
+  @Roles(UserRole.SUPERADMIN)
   async getActionLog() {
+    // Log de ACCIONES CRÍTICAS = audit_logs (lo que escribe el AuditInterceptor),
+    // no eventos_crudos. El front lee action / entity / user_email / created_at.
     return this.ds.query(
-      `SELECT e.id, e.canal, e.processing_status, e.created_at,
-         c.nombre AS client_nombre
-       FROM eventos_crudos e
-       LEFT JOIN clients c ON c.id = e.client_id
-       ORDER BY e.created_at DESC
+      `SELECT al.action, al.entity, al.entity_id, al.created_at,
+         u.email AS user_email
+       FROM audit_logs al
+       LEFT JOIN users u ON u.id = al.user_id
+       ORDER BY al.created_at DESC
        LIMIT 100`,
     ).catch(() => []);
   }
 
-  // ── Brief §A6: Margin per client — MRR − attributed AI cost ──────────────
-  // "Negative-margin clients flagged"
-  @Get('margin-per-client')
+  @Get('admin/audit/margin-per-client')
+  @Roles(UserRole.SUPERADMIN)
   async getMarginPerClient(@Query('days') daysRaw = '30') {
     const d = Math.min(Math.max(parseInt(daysRaw) || 30, 1), 365);
 
@@ -96,14 +121,10 @@ export class AuditController {
          c.id                                              AS client_id,
          c.nombre                                          AS cliente,
          c.plan,
-         -- MRR proxy: count active months * plan rate (stored in client.config->>'mrr')
          COALESCE((c.config->>'mrr')::numeric, 0)         AS mrr_usd,
-         -- Total AI cost in period
          COALESCE(SUM(a.cost_usd), 0)                     AS costo_ia_usd,
-         -- Margin = MRR - AI cost (simple; infra costs omitted — add separately)
          COALESCE((c.config->>'mrr')::numeric, 0)
            - COALESCE(SUM(a.cost_usd), 0)                 AS margen_usd,
-         -- Flag negative margin
          CASE
            WHEN COALESCE((c.config->>'mrr')::numeric, 0)
               - COALESCE(SUM(a.cost_usd), 0) < 0

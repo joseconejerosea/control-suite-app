@@ -1,11 +1,14 @@
 "use client";
 import { useState, useEffect } from "react";
 import {
-  Settings, Users, Warehouse, Link2, Building2,
-  Save, Plus, Trash2, Eye, EyeOff, Copy, RefreshCw,
+  Settings, Warehouse, Link2, Building2,
+  Save, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
+import GmailConnect from "@/components/integrations/gmail-connect";
+import AppShell from "@/components/layout/app-shell";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+// NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
+const API = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/api`;
 
 function getToken() {
   try { return localStorage.getItem("cs_token") ?? ""; } catch { return ""; }
@@ -17,14 +20,9 @@ function getUser() {
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 const TABS = [
   { id: "cuenta",       label: "Cuenta",       icon: Building2 },
-  { id: "equipo",       label: "Equipo",        icon: Users },
   { id: "operaciones",  label: "Operaciones",   icon: Warehouse },
   { id: "integraciones",label: "Integraciones", icon: Link2 },
 ];
-
-// ── Permissions matrix ────────────────────────────────────────────────────────
-const FLUJOS = ["F1 Documentos", "F2 Rendiciones", "F3 Inventario", "F4 Proyectos", "F5 Terreno"];
-const ACCIONES = ["ver", "crear", "aprobar", "eliminar"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -36,10 +34,6 @@ export default function ConfigPage() {
   // Cuenta
   const [cuenta, setCuenta] = useState({ nombre: "", rut: "", plan: "", email_contacto: "" });
 
-  // Equipo
-  const [equipo, setEquipo]   = useState<any[]>([]);
-  const [permisos, setPermisos] = useState<Record<string, Record<string, boolean>>>({});
-
   // Operaciones
   const [bodegas, setBodegas]   = useState<any[]>([]);
   const [canales, setCanales]   = useState<any[]>([]);
@@ -47,7 +41,6 @@ export default function ConfigPage() {
   // Integraciones
   const [apiToken, setApiToken]   = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [sheetsUrl, setSheetsUrl] = useState("");
 
   const user = getUser();
 
@@ -73,12 +66,6 @@ export default function ConfigPage() {
           }));
         }
       }).catch(() => {});
-
-    // Equipo (collaborators)
-    fetch(`${API}/collaborators`, { headers: h })
-      .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setEquipo(d); })
-      .catch(() => {});
 
     // Bodegas
     fetch(`${API}/v1/app/bodegas`, { headers: h })
@@ -141,8 +128,8 @@ export default function ConfigPage() {
     />
   );
 
-  const badge = (text: string, color = "#2a9d5c") => (
-    <span style={{ fontSize: 11, background: color + "22", color, borderRadius: 99, padding: "2px 8px", fontWeight: 600 }}>{text}</span>
+  const badge = (text: string, color = "var(--success)", bg?: string) => (
+    <span style={{ fontSize: 11, background: bg ?? `color-mix(in srgb, ${color} 12%, transparent)`, color, borderRadius: 99, padding: "2px 8px", fontWeight: 600 }}>{text}</span>
   );
 
   // ── Tabs content ────────────────────────────────────────────────────────────
@@ -165,81 +152,14 @@ export default function ConfigPage() {
         <div style={{ marginTop: 12 }}>
           <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>Plan actual</label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {badge(cuenta.plan || "basic", "#0ea5e9")}
+            {badge(cuenta.plan || "basic", "var(--brand-accent)")}
             <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Contacta a soporte para cambiar de plan</span>
           </div>
         </div>
         <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
           <button onClick={saveCuenta} disabled={saving}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             <Save size={14} /> {saving ? "Guardando..." : "Guardar cambios"}
-          </button>
-        </div>
-      </>)}
-    </div>
-  );
-
-  // EQUIPO
-  const tabEquipo = (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {card(<>
-        {sectionTitle("Miembros del equipo")}
-        {equipo.length === 0
-          ? <div style={{ color: "var(--muted-foreground)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin colaboradores registrados. Agrégalos desde Colaboradores.</div>
-          : equipo.map(m => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600 }}>
-                {(m.name?.[0] ?? "U").toUpperCase()}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{m.email} · {m.phone}</div>
-              </div>
-              {badge(m.role ?? "Promotor")}
-            </div>
-          ))
-        }
-      </>)}
-
-      {card(<>
-        {sectionTitle("Matriz de permisos (persona × flujo × acción)")}
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--muted-foreground)", fontWeight: 500 }}>Flujo</th>
-                {ACCIONES.map(a => (
-                  <th key={a} style={{ textAlign: "center", padding: "6px 8px", color: "var(--muted-foreground)", fontWeight: 500, textTransform: "capitalize" }}>{a}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {FLUJOS.map(flujo => (
-                <tr key={flujo} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "8px 8px", fontWeight: 500 }}>{flujo}</td>
-                  {ACCIONES.map(accion => {
-                    const key = `${flujo}-${accion}`;
-                    const checked = permisos[flujo]?.[accion] ?? true;
-                    return (
-                      <td key={accion} style={{ textAlign: "center", padding: "8px" }}>
-                        <input type="checkbox" checked={checked}
-                          onChange={e => setPermisos(prev => ({
-                            ...prev,
-                            [flujo]: { ...(prev[flujo] ?? {}), [accion]: e.target.checked }
-                          }))}
-                          style={{ width: 14, height: 14, cursor: "pointer" }} />
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={() => showToast("Permisos guardados ✓")}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            <Save size={14} /> Guardar permisos
           </button>
         </div>
       </>)}
@@ -274,8 +194,8 @@ export default function ConfigPage() {
           : canales.map(c => (
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ flex: 1, fontSize: 13 }}>{c.nombre}</span>
-              {badge(c.tipo, c.tipo === "whatsapp" ? "#2a9d5c" : "#0ea5e9")}
-              {badge(c.is_active ? "activo" : "inactivo", c.is_active ? "#2a9d5c" : "#e76f51")}
+              {badge(c.tipo, c.tipo === "whatsapp" ? "var(--success)" : "var(--brand-accent)")}
+              {badge(c.is_active ? "activo" : "inactivo", c.is_active ? "var(--success)" : "var(--danger)")}
             </div>
           ))
         }
@@ -285,35 +205,24 @@ export default function ConfigPage() {
         {sectionTitle("Diccionario OCR (equivalencias)")}
         <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
           Gestiona las equivalencias OCR desde la sección{" "}
-          <a href="/client/equivalencias" style={{ color: "var(--red, #C8202C)", textDecoration: "none", fontWeight: 500 }}>Equivalencias OCR →</a>
+          <a href="/client/equivalencias" style={{ color: "var(--primary)", textDecoration: "none", fontWeight: 500 }}>Equivalencias OCR →</a>
         </div>
       </>)}
 
-      {card(<>
-        {sectionTitle("Reglas de aprobación F2")}
-        <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
-          Configura topes, categorías y flujos de aprobación desde{" "}
-          <a href="/client/rendiciones-config" style={{ color: "var(--red, #C8202C)", textDecoration: "none", fontWeight: 500 }}>Reglas de Aprobación →</a>
-        </div>
-      </>)}
     </div>
   );
 
   // INTEGRACIONES
   const tabIntegraciones = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <GmailConnect onToast={showToast} />
+
       {card(<>
         {sectionTitle("Google Sheets — destino de exportación")}
-        <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>URL de la hoja de cálculo</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          {input(sheetsUrl, setSheetsUrl, "https://docs.google.com/spreadsheets/d/...")}
-          <button onClick={() => showToast("Sheets URL guardada ✓")}
-            style={{ padding: "8px 14px", borderRadius: 7, background: "var(--red, #C8202C)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
-            <Save size={14} />
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 6 }}>
-          Las exportaciones de F1, F2 y F5 se enviarán a esta hoja.
+        <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
+          Las exportaciones de F1, F2 y F5 se envían a la hoja definida en el canal de
+          entrada del cliente (se configura en el onboarding). Requiere tener Gmail
+          conectado arriba — se usa el mismo permiso para escribir en la hoja.
         </div>
       </>)}
 
@@ -352,14 +261,14 @@ export default function ConfigPage() {
 
   const tabContent: Record<string, React.ReactNode> = {
     cuenta:        tabCuenta,
-    equipo:        tabEquipo,
     operaciones:   tabOperaciones,
     integraciones: tabIntegraciones,
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: "1.5rem", maxWidth: 820, margin: "0 auto" }}>
+    <AppShell>
+    <div style={{ maxWidth: 820, margin: "0 auto" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
         <Settings size={20} />
@@ -376,7 +285,7 @@ export default function ConfigPage() {
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: "7px 7px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: active ? 600 : 400,
                 background: active ? "var(--card)" : "none",
                 color:      active ? "var(--foreground)" : "var(--muted-foreground)",
-                borderBottom: active ? "2px solid var(--red, #C8202C)" : "2px solid transparent",
+                borderBottom: active ? "2px solid var(--primary)" : "2px solid transparent",
               }}>
               <Icon size={14} /> {t.label}
             </button>
@@ -389,10 +298,11 @@ export default function ConfigPage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: 24, right: 24, background: "#1a1a2e", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+        <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--ink)", color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
           {toast}
         </div>
       )}
     </div>
+    </AppShell>
   );
 }

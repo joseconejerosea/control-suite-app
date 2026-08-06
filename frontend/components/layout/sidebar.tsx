@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import { roleLabel } from "@/lib/roles";
+import { clearAuth } from "@/lib/api";
 import {
   LayoutDashboard, FolderOpen, MapPin, Users, Megaphone,
   FileText, UserCircle, Zap, Building2, ChevronRight,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
-  Settings,
+  Settings, CalendarDays,
 } from "lucide-react";
 
 const CLIENT_SECTIONS = [
@@ -19,17 +21,18 @@ const CLIENT_SECTIONS = [
     { label: "Inventario POP", icon: Package, href: "/client/inventario" },
     { label: "Rendiciones", icon: Receipt, href: "/client/rendiciones" },
     { label: "Terreno", icon: Radio, href: "/client/terreno" },
+    { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
     { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
     { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
     { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
-    { label: "Promotores", icon: Users, href: "/client/promoters" },
+    { label: "Staff", icon: Users, href: "/client/promoters" },
     { label: "Documentos", icon: FileText, href: "/client/documents" },
     { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
   ]},
   { label: "Configuración", items: [
+    { label: "Usuarios",          icon: UserCircle,  href: "/client/usuarios" },
     { label: "Configuración",     icon: Settings,    href: "/client/config" },
     { label: "Equivalencias OCR", icon: GitCompare,  href: "/client/equivalencias" },
-    { label: "Reglas Aprobación", icon: ShieldCheck, href: "/client/rendiciones-config" },
   ]},
   { label: "IA", items: [{ label: "Control Mind", icon: Brain, href: "/client/mind" }] },
 ];
@@ -56,6 +59,7 @@ const SUPER_ADMIN_ITEMS = [
   { label: "Monitoreo", icon: Activity, href: "/admin/monitoring" },
   { label: "Tickets", icon: Bell, href: "/admin/tickets" },
   { label: "Auditoría AI", icon: ShieldCheck, href: "/admin/audit" },
+  { label: "Usuarios", icon: UserCircle, href: "/admin/usuarios" },
 ];
 
 export default function Sidebar() {
@@ -71,15 +75,19 @@ export default function Sidebar() {
   }, []);
 
   const isSuperAdmin = user?.role === "super_admin";
-  const isAdmin = isSuperAdmin || user?.role === "admin_cliente";
+  // El toggle "Administrador" expone ADMIN_SECTIONS = secciones de PLATAFORMA (Clientes/tenants,
+  // Facturación, Auditoría AI, Monitoreo global) — territorio de SUPERADMIN / SERVICE_LEAD, NO del
+  // admin_cliente, que es admin del TENANT (MANAGER) y solo debe ver las secciones de Cliente.
+  // Se reserva para SERVICE_LEAD cuando ese rol exista en el front (migración a 6 roles).
+  const showPlatformToggle = false; // TODO(roles-6): user?.role === "service_lead"
   const sections = isSuperAdmin
     ? [{ label: "", items: SUPER_ADMIN_ITEMS.map(i => ({ ...i, badge: undefined })) }]
     : role === "admin" ? ADMIN_SECTIONS : CLIENT_SECTIONS;
 
   return (
-    <aside className="flex flex-col w-60 flex-shrink-0 border-r" style={{ background: "var(--navy)", borderColor: "var(--border)" }}>
+    <aside className="flex flex-col w-60 flex-shrink-0 border-r" style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}>
       <div className="flex items-center gap-2.5 px-4 py-5 border-b" style={{ borderColor: "var(--border)" }}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--red)", boxShadow: "0 4px 14px rgba(200,32,44,0.35)" }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--primary)", boxShadow: "0 4px 14px rgba(79,70,229,0.35)" }}>
           <Zap size={15} color="#fff" strokeWidth={2.5} />
         </div>
         <div>
@@ -88,7 +96,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {!isSuperAdmin && isAdmin && (
+      {showPlatformToggle && (
         <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border)" }}>
           <div className="flex rounded-lg p-0.5 text-xs" style={{ background: "var(--secondary)" }}>
             <button onClick={() => setRole("admin")} className="flex-1 py-1.5 rounded-md font-medium"
@@ -110,7 +118,7 @@ export default function Sidebar() {
           </div>
           <div className="overflow-hidden">
             <div className="text-xs truncate" style={{ color: "var(--foreground)" }}>{user.email}</div>
-            <div className="text-xs" style={{ color: "var(--muted-foreground)", textTransform: "uppercase", fontSize: "10px" }}>{user.role?.replace("_", " ")}</div>
+            <div className="text-xs" style={{ color: "var(--muted-foreground)", textTransform: "uppercase", fontSize: "10px" }}>{roleLabel(user.role)}</div>
           </div>
         </div>
       )}
@@ -129,10 +137,10 @@ export default function Sidebar() {
               return (
                 <Link key={item.href} href={item.href}
                   className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"
-                  style={{ background: active ? "var(--red-dim)" : "transparent", color: active ? "var(--red-light)" : "var(--muted-foreground)", fontWeight: active ? 600 : 400, textDecoration: "none" }}>
+                  style={{ background: active ? "linear-gradient(90deg, rgba(79,70,229,0.10), rgba(79,70,229,0))" : "transparent", color: active ? "var(--primary)" : "var(--muted-foreground)", fontWeight: active ? 600 : 400, textDecoration: "none", boxShadow: active ? "inset 2px 0 0 var(--primary)" : "none" }}>
                   <Icon size={15} strokeWidth={active ? 2.5 : 1.8} />
                   <span className="flex-1">{item.label}</span>
-                  {item.badge && <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--red)", color: "#fff" }}>{item.badge}</span>}
+                  {item.badge && <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{item.badge}</span>}
                   {active && <ChevronRight size={12} />}
                 </Link>
               );
@@ -142,7 +150,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="px-2 py-3 border-t" style={{ borderColor: "var(--border)" }}>
-        <button onClick={() => { localStorage.removeItem("cs_token"); localStorage.removeItem("cs_user"); window.location.href = "/login"; }}
+        <button onClick={() => { clearAuth(); window.location.href = "/login"; }}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm"
           style={{ background: "none", border: "none", color: "var(--muted-foreground)", cursor: "pointer" }}>
           Sign out
