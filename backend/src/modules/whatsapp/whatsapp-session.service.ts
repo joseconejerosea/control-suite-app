@@ -41,6 +41,10 @@ export interface WhatsAppSession {
     attempts: number;
     suggestedLabel?: string | null;      // nombre sugerido por la visión (ambigüedad/ayuda)
     nombre?: string;
+    // Ítems del alta. Multi-ítem: el remitente lista "1 Volumétrico / 2 muebles / 6
+    // canastos" en un mensaje → un ítem por línea con su cantidad inline. Single-ítem
+    // sin número: cantidad=null y se pregunta en el paso 'cantidad'.
+    items?: { nombre: string; cantidad: number | null }[];
     proyectoId?: string;
     bodegaId?: string;
     cantidad?: number;

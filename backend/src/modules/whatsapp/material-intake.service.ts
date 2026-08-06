@@ -168,12 +168,17 @@ export class MaterialIntakeService {
 
   private async handleNombre(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
     const mi = session.materialIntake!;
-    const nombre = (text ?? '').trim();
-    if (nombre.length < 2) {
+    const items = this.parseItems(text).filter((i) => i.nombre.length >= 2);
+    if (!items.length) {
       return this.retryOrEscalate(phone, session, '¿Cuál es el nombre del material? (mínimo 2 caracteres)');
     }
 
-    mi.nombre = nombre.slice(0, 200);
+    // Multi-ítem ("1 Volumétrico / 2 muebles / 6 canastos"): un ítem por línea con su
+    // cantidad inline; un ítem sin número se asume 1. Single-ítem sin número → cantidad
+    // queda null y se pregunta en el paso 'cantidad' (flujo clásico, un solo material).
+    const multi = items.length > 1;
+    mi.items = items.map((i) => ({ nombre: i.nombre, cantidad: multi ? (i.cantidad ?? 1) : i.cantidad }));
+    mi.nombre = mi.items[0].nombre; // compat con logs / confirmación single-ítem
     mi.attempts = 0;
 
     const projects = await runWithTenant(this.ds, session.clientId!, () =>
@@ -234,10 +239,7 @@ export class MaterialIntakeService {
     // Una sola bodega → auto-seleccionar.
     if (bodegas.length === 1) {
       mi.bodegaId = bodegas[0].id;
-      mi.step = 'cantidad';
-      await this.sessions.set(phone, session);
-      await this.wa.sendText(phone, '¿Cuántas unidades? Respondé con un número.');
-      return true;
+      return this.proceedAfterBodega(phone, session);
     }
 
     mi.bodegas = bodegas;
@@ -256,11 +258,26 @@ export class MaterialIntakeService {
       return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
     }
     mi.bodegaId = opts[num - 1].id;
-    mi.step = 'cantidad';
     mi.attempts = 0;
-    await this.sessions.set(phone, session);
-    await this.wa.sendText(phone, '¿Cuántas unidades? Respondé con un número.');
-    return true;
+    return this.proceedAfterBodega(phone, session);
+  }
+
+  /**
+   * Tras elegir la bodega: si es un único ítem SIN cantidad inline, pregunta la
+   * cantidad (flujo clásico). En multi-ítem (o single con cantidad) ya la tenemos
+   * → registra directo, sin preguntar de nuevo.
+   */
+  private async proceedAfterBodega(phone: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
+    const items = mi.items ?? [];
+    const necesitaCantidad = items.length === 1 && items[0].cantidad == null;
+    if (necesitaCantidad) {
+      mi.step = 'cantidad';
+      await this.sessions.set(phone, session);
+      await this.wa.sendText(phone, '¿Cuántas unidades? Respondé con un número.');
+      return true;
+    }
+    return this.register(phone, session);
   }
 
   private async handleCantidad(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
@@ -269,7 +286,9 @@ export class MaterialIntakeService {
     if (isNaN(cantidad) || cantidad < 1) {
       return this.retryOrEscalate(phone, session, 'Respondé con un número de unidades (ej: 1, 10).');
     }
-    session.materialIntake!.cantidad = cantidad;
+    const mi = session.materialIntake!;
+    if (mi.items?.length) mi.items[0].cantidad = cantidad;
+    else mi.cantidad = cantidad;
     return this.register(phone, session);
   }
 
@@ -279,40 +298,47 @@ export class MaterialIntakeService {
     const mi = session.materialIntake!;
     const clientId = session.clientId!;
 
-    try {
-      // Transacción CRÍTICA: SKU + movimiento (los datos que DEBEN persistir, atómicos).
-      // Solo estas escrituras determinan el éxito del alta.
-      const { sku, movimiento, proyectoNombre, bodegaNombre } = await runWithTenant(this.ds, clientId, async () => {
-        const sku = await this.crearSkuUnico(clientId, mi.nombre!);
+    // Normalizar a lista de ítems. Compat: el flujo single guarda mi.nombre + mi.cantidad;
+    // si no hay mi.items lo envolvemos en un ítem. Cualquier cantidad null → 1.
+    const items = (mi.items?.length ? mi.items : [{ nombre: mi.nombre!, cantidad: mi.cantidad ?? 1 }])
+      .map((i) => ({ nombre: i.nombre, cantidad: i.cantidad ?? 1 }));
 
-        const movimiento = await this.movimientos.create(clientId, {
-          sku_id: sku.id,
-          bodega_origen_id: mi.bodegaId!,
-          proyecto_destino_id: mi.proyectoId!,
-          tipo: 'entrada',
-          cantidad: mi.cantidad!,
-          foto_key: mi.storagePath,
-          observacion: 'Alta de material POP vía WhatsApp',
-        } as any);
+    try {
+      // Transacción CRÍTICA: TODOS los SKUs + movimientos, atómicos (todo o nada).
+      const { registrados, proyectoNombre, bodegaNombre } = await runWithTenant(this.ds, clientId, async () => {
+        const registrados: { skuId: string; movId: string; nombre: string; codigo: string; cantidad: number }[] = [];
+        for (const it of items) {
+          const sku = await this.crearSkuUnico(clientId, it.nombre);
+          const movimiento = await this.movimientos.create(clientId, {
+            sku_id: sku.id,
+            bodega_origen_id: mi.bodegaId!,
+            proyecto_destino_id: mi.proyectoId!,
+            tipo: 'entrada',
+            cantidad: it.cantidad,
+            foto_key: mi.storagePath,
+            observacion: 'Alta de material POP vía WhatsApp',
+          } as any);
+          registrados.push({ skuId: sku.id, movId: movimiento.id, nombre: sku.nombre, codigo: sku.codigo, cantidad: it.cantidad });
+        }
 
         const proyRows = await this.ds.query(`SELECT name FROM projects WHERE id=$1 LIMIT 1`, [mi.proyectoId]).catch(() => []);
         const bodRows = await this.ds.query(`SELECT nombre FROM bodegas WHERE id=$1 LIMIT 1`, [mi.bodegaId]).catch(() => []);
 
         return {
-          sku,
-          movimiento,
+          registrados,
           proyectoNombre: proyRows[0]?.name ?? 'sin nombre',
           bodegaNombre: bodRows[0]?.nombre ?? 'sin nombre',
         };
       });
 
-      // Bookkeeping en tx SEPARADA (foto del SKU + cierre del evento). Best-effort:
-      // corre DESPUÉS del commit del alta, así un fallo acá (p.ej. un statement que
-      // abortaría la tx) NUNCA puede voltear el SKU/movimiento ya persistidos — solo
-      // se loguea. flow='F3_INTAKE' (9 chars) entra en eventos_crudos.flow VARCHAR(10).
+      // Bookkeeping en tx SEPARADA (foto de cada SKU + cierre del evento). Best-effort:
+      // corre DESPUÉS del commit del alta, así un fallo acá NUNCA voltea lo persistido.
+      // flow='F3_INTAKE' (9 chars) entra en eventos_crudos.flow VARCHAR(10).
       await runWithTenant(this.ds, clientId, async () => {
         if (mi.storagePath) {
-          await this.ds.query(`UPDATE skus SET foto_key=$1 WHERE id=$2 AND client_id=$3`, [mi.storagePath, sku.id, clientId]);
+          for (const r of registrados) {
+            await this.ds.query(`UPDATE skus SET foto_key=$1 WHERE id=$2 AND client_id=$3`, [mi.storagePath, r.skuId, clientId]);
+          }
         }
         await this.ds.query(
           `UPDATE eventos_crudos SET
@@ -321,21 +347,31 @@ export class MaterialIntakeService {
            WHERE id=$1`,
           [
             mi.eventoCrudoId,
-            JSON.stringify({ material_sku_id: sku.id, material_movimiento_id: movimiento.id, material_registered_at: new Date().toISOString() }),
+            JSON.stringify({
+              material_skus: registrados.map((r) => r.skuId),
+              material_movimientos: registrados.map((r) => r.movId),
+              material_registered_at: new Date().toISOString(),
+            }),
           ],
         );
       }).catch((e: any) => this.logger.warn(`[Material] Bookkeeping post-alta falló (evento ${mi.eventoCrudoId}): ${e.message}`));
 
       await this.sessions.delete(phone);
-      await this.wa.confirmarMaterial({
-        telefono: phone,
-        nombre: sku.nombre,
-        codigo: sku.codigo,
-        proyecto: proyectoNombre,
-        bodega: bodegaNombre,
-        cantidad: mi.cantidad!,
-      });
-      this.logger.log(`[Material] Registrado SKU ${sku.id} + movimiento ${movimiento.id} (evento ${mi.eventoCrudoId})`);
+
+      if (registrados.length === 1) {
+        const r = registrados[0];
+        await this.wa.confirmarMaterial({
+          telefono: phone, nombre: r.nombre, codigo: r.codigo,
+          proyecto: proyectoNombre, bodega: bodegaNombre, cantidad: r.cantidad,
+        });
+      } else {
+        const lista = registrados.map((r) => `• ${r.nombre} — ID ${r.codigo} × ${r.cantidad}`).join('\n');
+        await this.wa.sendText(
+          phone,
+          `✅ *${registrados.length} materiales registrados*\n\n${lista}\n\nProyecto: ${proyectoNombre}\nBodega: ${bodegaNombre}\n\nControl Suite BTL ⚡`,
+        );
+      }
+      this.logger.log(`[Material] Registrados ${registrados.length} SKU(s) (evento ${mi.eventoCrudoId})`);
       return true;
     } catch (err: any) {
       this.logger.error(`[Material] Error registrando material (evento ${mi.eventoCrudoId}): ${err.message}`);
@@ -343,6 +379,33 @@ export class MaterialIntakeService {
       await this.wa.sendText(phone, 'No pude registrar el material. Un operador lo va a revisar. Gracias.');
       return true;
     }
+  }
+
+  /**
+   * Parsea la respuesta del nombre en ítems. Multi-ítem: una línea por ítem (o
+   * separadas por coma/;), con la cantidad inline al inicio ("6 canastos", "2x muebles").
+   * Un ítem sin número → cantidad null (se resuelve después). Un solo texto plano → 1 ítem.
+   */
+  private parseItems(text: string): { nombre: string; cantidad: number | null }[] {
+    const raw = (text ?? '').trim();
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    let parts: string[];
+    if (lines.length > 1) {
+      // Multi-línea = un ítem por línea.
+      parts = lines;
+    } else {
+      const single = lines[0] ?? '';
+      const byComma = single.split(/\s*[,;]\s*/).map((s) => s.trim()).filter(Boolean);
+      // La coma separa ítems SOLO si CADA parte arranca con una cantidad ("1 x, 2 y, 6 z").
+      // Si no, es un nombre con coma legítimo (ej "Mesa, con logo") → un solo ítem.
+      const hasQty = (s: string) => /^\d{1,4}\s*(?:x|×)?\s+/i.test(s);
+      parts = byComma.length > 1 && byComma.every(hasQty) ? byComma : (single ? [single] : []);
+    }
+    return parts.map((p) => {
+      const m = p.match(/^(\d{1,4})\s*(?:x|×)?\s+(.+)$/i);
+      if (m) return { cantidad: parseInt(m[1], 10), nombre: m[2].trim().slice(0, 200) };
+      return { cantidad: null, nombre: p.slice(0, 200) };
+    });
   }
 
   /**

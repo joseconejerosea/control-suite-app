@@ -119,6 +119,56 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE]).toBeUndefined();
   });
 
+  it('parses a multi-item reply (qty + name per line) and registers N SKUs, skipping the cantidad question', async () => {
+    // Usa el mock por defecto (2 proyectos + 2 bodegas) para pausar en cada paso.
+    // skus.create devuelve un id distinto por llamada para diferenciar los movimientos.
+    let n = 0;
+    skus.create = jest.fn(async (_c: string, dto: any) => ({ id: `sku-${++n}`, codigo: dto.codigo, nombre: dto.nombre }));
+
+    await svc.start({ eventoCrudoId: 'evt-multi', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/m.jpg' });
+
+    // 3 ítems con cantidad inline, uno por línea → se cachean y pasa a elegir proyecto.
+    expect(await svc.handleResponse(PHONE, '1 Volumétrico\n2 muebles\n6 canastos')).toBe(true);
+    expect(store[PHONE].materialIntake?.items?.length).toBe(3);
+    expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+
+    // proyecto → bodega.
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);
+    expect(store[PHONE].materialIntake?.step).toBe('bodega');
+
+    // bodega → como la cantidad viene inline (multi-ítem), NO pregunta cantidad: registra.
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);
+    expect(store[PHONE]).toBeUndefined();
+
+    expect(skus.create).toHaveBeenCalledTimes(3);
+    expect(movimientos.create).toHaveBeenCalledTimes(3);
+
+    const nombres = skus.create.mock.calls.map((c: any[]) => c[1].nombre);
+    expect(nombres).toEqual(['Volumétrico', 'muebles', 'canastos']);
+    const cantidades = movimientos.create.mock.calls.map((c: any[]) => c[1].cantidad);
+    expect(cantidades).toEqual([1, 2, 6]);
+
+    // Confirmación multi (no la de single-ítem).
+    expect(wa.confirmarMaterial).not.toHaveBeenCalled();
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toContain('materiales registrados');
+  });
+
+  it('does NOT split a single material name that contains a comma', async () => {
+    await svc.start({ eventoCrudoId: 'evt-comma', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/c.jpg' });
+
+    // Nombre legítimo con coma → UN solo ítem (no se parte), y como no trae cantidad
+    // inline, sigue el flujo clásico y pregunta la cantidad al final.
+    expect(await svc.handleResponse(PHONE, 'Mesa, con logo Coca-Cola')).toBe(true);
+    expect(store[PHONE].materialIntake?.items?.length).toBe(1);
+    expect(store[PHONE].materialIntake?.items?.[0].nombre).toBe('Mesa, con logo Coca-Cola');
+    expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // proyecto
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // bodega
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad'); // pregunta cantidad (1 ítem sin qty inline)
+  });
+
   it('a bookkeeping failure after commit does NOT roll back the SKU/movement nor block the confirmation', async () => {
     // El cierre del evento (bookkeeping) corre en una tx SEPARADA post-commit. Si falla,
     // el alta real (SKU + movimiento) ya está commiteada y la confirmación igual sale.

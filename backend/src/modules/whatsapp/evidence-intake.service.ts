@@ -5,6 +5,7 @@ import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { runWithTenant } from '../../common/tenant/tenant-context';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 const MAX_ATTEMPTS = 2;
 const STATE = 'awaiting_evidence';
@@ -49,10 +50,11 @@ export class EvidenceIntakeService {
 
     // Resolver la persona por dígitos del teléfono. El `from` de Meta llega 549...
     // y el phone guardado tiene '+', espacios, etc. Todo dentro de runWithTenant (RLS).
-    // Buscamos primero en promotores y, si no está, en colaboradores: los
-    // coordinadores/supervisores (collaborators) también hacen presencia en terreno
-    // y mandan su foto de la activación. checkins.persona_id NO tiene FK a promoters,
-    // así que el id de cualquiera de las dos tablas sirve como persona del check-in.
+    // Resolvemos al remitente contra las MISMAS tablas que autoriza el gate del bot
+    // (isAuthorizedSender): promotores, colaboradores y usuarios (Manager/Operador/
+    // Supervisor). Así cualquier staff autorizado que mande su foto de la activación
+    // queda asociado. checkins.persona_id NO tiene FK, así que el id de cualquiera de
+    // las tres tablas sirve como persona del check-in. Todo dentro de runWithTenant (RLS).
     const personaId: string | null = await runWithTenant(this.ds, opts.clientId, async () => {
       const prom = await this.ds.query(
         `SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
@@ -64,13 +66,23 @@ export class EvidenceIntakeService {
         `SELECT id FROM collaborators WHERE client_id=$1 AND is_active=true AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
         [opts.clientId, digits],
       );
-      return colab.length ? colab[0].id : null;
+      if (colab.length) return colab[0].id;
+
+      const usr = await this.ds.query(
+        `SELECT id FROM users
+          WHERE client_id=$1 AND is_active=true AND phone IS NOT NULL
+            AND role IN ($3, $4, $5)
+            AND regexp_replace(phone,'\\D','','g')=$2
+          LIMIT 1`,
+        [opts.clientId, digits, UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERVISOR],
+      );
+      return usr.length ? usr[0].id : null;
     }).catch(() => null);
 
     if (!personaId) {
       await this.escalate(
         opts.eventoCrudoId, opts.phoneNumber, opts.clientId,
-        'No te encuentro registrado como promotor ni colaborador para asociar esta evidencia. Lo derivo a un operador.',
+        'No te encuentro registrado para asociar esta evidencia. Lo derivo a un operador.',
         'evidence_unknown_persona',
       );
       return;
