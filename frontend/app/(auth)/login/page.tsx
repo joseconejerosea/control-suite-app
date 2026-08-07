@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api, saveAuth } from "@/lib/api";
-import { Zap, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Zap, Eye, EyeOff } from "lucide-react";
 
 function parseJwt(token: string) {
   try {
@@ -13,11 +13,12 @@ function parseJwt(token: string) {
 }
 
 export default function LoginPage() {
-  const [email, setEmail]     = useState("");
-  const [password, setPass]   = useState("");
-  const [show, setShow]       = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
+  const [email, setEmail]       = useState("");
+  const [password, setPass]     = useState("");
+  const [show, setShow]         = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +30,6 @@ export default function LoginPage() {
       const refresh = res?.data?.refreshToken ?? res?.refresh_token ?? res?.refreshToken;
       if (!token) throw new Error("No token received");
 
-      // Decode user from JWT payload
       const payload = parseJwt(token);
       const user = {
         id: payload?.sub ?? "",
@@ -48,92 +48,139 @@ export default function LoginPage() {
     }
   };
 
+  const inputClass =
+    "w-full px-3 py-2.5 rounded-lg text-sm bg-white border border-slate-200 outline-none transition-colors focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/10";
+  const labelClass =
+    "block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5";
+
   return (
-    <div className="min-h-screen flex" style={{ background: "var(--background)" }}>
-      <div className="flex-1 hidden lg:flex flex-col justify-center px-16 border-r" style={{ borderColor: "var(--border)", background: "var(--ai-gradient)" }}>
-        <div className="absolute inset-0 opacity-30" style={{
-          backgroundImage: "linear-gradient(oklch(1 0 0 / 4%) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0 / 4%) 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-          pointerEvents: "none",
-        }} />
+    <div className="min-h-screen flex" style={{ background: "var(--paper)" }}>
+      {/* Left — brand gradient panel */}
+      <div className="hidden lg:flex w-1/2 p-12 flex-col justify-between text-white relative overflow-hidden bg-gradient-to-br from-indigo-600 via-indigo-500 to-cyan-500">
+        <div
+          className="absolute inset-0 opacity-10"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 30%, white 1px, transparent 1px), radial-gradient(circle at 80% 70%, white 1px, transparent 1px)",
+            backgroundSize: "60px 60px",
+          }}
+        />
         <div className="relative">
-          <div className="flex items-center gap-3 mb-12">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--primary)", boxShadow: "0 6px 20px rgba(79,70,229,0.4)" }}>
-              <Zap size={20} color="#fff" strokeWidth={2.5} />
+          <div className="flex items-center gap-2 mb-12">
+            <div className="w-9 h-9 rounded-lg bg-white/15 backdrop-blur flex items-center justify-center">
+              <Zap size={20} strokeWidth={2.5} />
             </div>
-            <span className="text-lg font-bold">Control Suite</span>
+            <span className="font-semibold tracking-tight">Control Suite BTL</span>
           </div>
-          <h1 className="text-4xl font-bold leading-tight mb-4">
-            Operations.<br />
-            <span style={{ color: "#fff" }}>Unified.</span>
+          <h1 className="display-font text-5xl leading-tight mb-4">
+            La operación BTL,<br />
+            <em>sin fricción</em>.
           </h1>
-          <p className="text-sm leading-relaxed mb-10" style={{ color: "var(--muted-foreground)", maxWidth: 340 }}>
-            Complete platform for campaigns, activations, promoters, and AI-powered field operations.
+          <p className="text-white/80 text-sm leading-relaxed max-w-md">
+            Plataforma multi-tenant para agencias BTL. Documentos, rendiciones,
+            inventario POP, activaciones y monitoreo en terreno — orquestado por IA
+            agéntica desde WhatsApp y correo.
           </p>
-          {["Client isolation & role-based access", "AI-powered document ingestion", "Real-time KPI dashboard"].map((f) => (
-            <div key={f} className="flex items-center gap-2.5 mb-3 text-sm" style={{ color: "var(--muted-foreground)" }}>
-              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#fff" }} />
-              {f}
-            </div>
-          ))}
+        </div>
+        <div className="relative grid grid-cols-3 gap-6 text-xs">
+          <div>
+            <div className="text-2xl font-semibold mb-1">5</div>
+            <div className="text-white/70">flujos integrados<br />F1·F2·F3·F4·F5</div>
+          </div>
+          <div>
+            <div className="text-2xl font-semibold mb-1">3</div>
+            <div className="text-white/70">canales de entrada<br />WhatsApp · Mail · Manual</div>
+          </div>
+          <div>
+            <div className="text-2xl font-semibold mb-1">100%</div>
+            <div className="text-white/70">trazabilidad<br />multi-tenant</div>
+          </div>
         </div>
       </div>
 
-      <div className="w-full lg:w-96 flex items-center justify-center px-8" style={{ background: "var(--card)" }}>
+      {/* Right — sign-in form */}
+      <div className="w-full lg:w-1/2 p-8 lg:p-12 flex items-center justify-center">
         <div className="w-full max-w-sm animate-fade-up">
           <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--primary)" }}>
-              <Zap size={16} color="#fff" />
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-gradient-to-br from-indigo-600 to-cyan-500">
+              <Zap size={18} color="#fff" strokeWidth={2.5} />
             </div>
-            <span className="font-bold">Control Suite</span>
+            <span className="font-semibold tracking-tight">Control Suite BTL</span>
           </div>
 
-          <h2 className="text-xl font-bold mb-1">Sign in</h2>
-          <p className="text-sm mb-7" style={{ color: "var(--muted-foreground)" }}>Enter your credentials to continue</p>
+          <h2 className="display-font text-3xl mb-2">Bienvenido</h2>
+          <p className="text-sm text-slate-500 mb-8">Inicia sesión para continuar</p>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>Email</label>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className={labelClass}>Correo</label>
               <input
-                type="email" required value={email}
+                type="email"
+                required
+                value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
-                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
-                style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                placeholder="tu@empresa.cl"
+                className={inputClass}
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>Password</label>
+            <div>
+              <label className={labelClass}>Contraseña</label>
               <div className="relative">
                 <input
-                  type={show ? "text" : "password"} required value={password}
+                  type={show ? "text" : "password"}
+                  required
+                  value={password}
                   onChange={(e) => setPass(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3 py-2.5 pr-10 rounded-lg text-sm outline-none transition-colors"
-                  style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                  placeholder="••••••••••"
+                  className={`${inputClass} pr-10`}
                 />
-                <button type="button" onClick={() => setShow((s) => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
-                  style={{ color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer" }}>
-                  {show ? <EyeOff size={14} /> : <Eye size={14} />}
+                <button
+                  type="button"
+                  onClick={() => setShow((s) => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {show ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
             </div>
 
+            <div className="flex items-center justify-between text-xs">
+              <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="rounded"
+                />
+                Recordarme
+              </label>
+              <a className="text-indigo-600 hover:text-indigo-700 cursor-pointer">
+                ¿Olvidaste tu contraseña?
+              </a>
+            </div>
+
             {error && (
-              <div className="text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.12)", color: "var(--danger)" }}>
+              <div
+                className="text-xs px-3 py-2 rounded-lg"
+                style={{ background: "rgba(239,68,68,0.12)", color: "var(--danger)" }}
+              >
                 {error}
               </div>
             )}
 
-            <button type="submit" disabled={loading}
-              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg text-sm font-semibold mt-1 transition-opacity disabled:opacity-50"
-              style={{ background: "var(--primary)", color: "#fff", boxShadow: "0 4px 16px rgba(79,70,229,0.3)", border: "none", cursor: "pointer" }}>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
               {loading ? (
-                <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} />
+                <span
+                  className="w-4 h-4 border-2 rounded-full animate-spin"
+                  style={{ borderColor: "rgba(255,255,255,0.35)", borderTopColor: "#fff" }}
+                />
               ) : (
-                <> Sign in <ArrowRight size={14} /></>
+                <>Entrar a la plataforma →</>
               )}
             </button>
           </form>
