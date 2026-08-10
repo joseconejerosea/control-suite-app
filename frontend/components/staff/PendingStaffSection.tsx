@@ -32,7 +32,11 @@ interface PendingStaffApiResponse {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function PendingStaffSection() {
+export default function PendingStaffSection({
+  refreshSignal,
+}: {
+  refreshSignal?: number;
+}) {
   const router = useRouter();
   const [rows, setRows] = useState<PendingStaffRow[]>([]);
   const [actionId, setActionId] = useState<string | null>(null);
@@ -40,7 +44,9 @@ export default function PendingStaffSection() {
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get<PendingStaffApiResponse>("/pending-staff?estado=pendiente");
+      const res = await api.get<PendingStaffApiResponse>(
+        "/pending-staff?estado=pendiente",
+      );
       setRows(res?.data ?? []);
     } catch {
       // Non-fatal: section stays hidden on error
@@ -48,25 +54,19 @@ export default function PendingStaffSection() {
     }
   }, []);
 
+  // Re-fetch on mount and whenever the parent bumps refreshSignal (after a
+  // promoter is created from this list).
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshSignal]);
 
-  const handleAgregar = async (id: string) => {
-    setActionId(id);
-    setError(null);
-    try {
-      const res = await api.patch<{ data: { phone: string } }>(`/pending-staff/${id}/agregar`);
-      const phone = res?.data?.phone ?? "";
-      setRows((prev) => prev.filter((r) => r.id !== id));
-      // Navigate to promoter create, pre-filling the phone via query param.
-      // The promoters page reads ?phone= and initialises CrudTable's defaultForm with it.
-      router.push(`/client/promoters?phone=${encodeURIComponent(phone)}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al agregar");
-    } finally {
-      setActionId(null);
-    }
+  const handleAgregar = (row: PendingStaffRow) => {
+    // Do NOT mark 'agregado' here. Only navigate to a pre-filled create modal.
+    // The promoters page marks the row 'agregado' AFTER the promoter is actually
+    // created (CrudTable onCreated), so canceling leaves the row pending.
+    router.push(
+      `/client/promoters?phone=${encodeURIComponent(row.phone)}&pending=${row.id}`,
+    );
   };
 
   const handleDescartar = async (id: string) => {
@@ -93,7 +93,10 @@ export default function PendingStaffSection() {
           className="inline-block w-2 h-2 rounded-full shrink-0"
           style={{ background: "var(--danger)" }}
         />
-        <h2 className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>
+        <h2
+          className="text-sm font-semibold"
+          style={{ color: "var(--foreground)" }}
+        >
           Promotores a agregar
         </h2>
         <span
@@ -133,21 +136,33 @@ export default function PendingStaffSection() {
           >
             {/* Info */}
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>
+              <span
+                className="text-sm font-medium truncate"
+                style={{ color: "var(--foreground)" }}
+              >
                 {row.phone}
               </span>
               {row.motivo && (
-                <span className="text-xs truncate" style={{ color: "var(--muted-foreground)" }}>
+                <span
+                  className="text-xs truncate"
+                  style={{ color: "var(--muted-foreground)" }}
+                >
                   {row.motivo}
                 </span>
               )}
               {row.contexto?.eventoCrudoId && (
-                <span className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                <span
+                  className="text-[11px]"
+                  style={{ color: "var(--muted-foreground)" }}
+                >
                   Evento: {row.contexto.eventoCrudoId}
                 </span>
               )}
               {row.contexto?.activacion_probable_id && (
-                <span className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                <span
+                  className="text-[11px]"
+                  style={{ color: "var(--muted-foreground)" }}
+                >
                   Activación: {row.contexto.activacion_probable_id}
                 </span>
               )}
@@ -156,7 +171,7 @@ export default function PendingStaffSection() {
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => handleAgregar(row.id)}
+                onClick={() => handleAgregar(row)}
                 disabled={actionId === row.id}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors"
                 style={{
