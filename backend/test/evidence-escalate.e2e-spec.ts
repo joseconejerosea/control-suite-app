@@ -125,12 +125,14 @@ describe('Slice C — evidence escalate wiring persists to real Postgres', () =>
 
     // 3. In-app notification created for the Manager.
     const notifs = await ds.query(
-      `SELECT user_id, type FROM notifications WHERE client_id=$1`,
+      `SELECT user_id, type, metadata FROM notifications WHERE client_id=$1`,
       [CLIENT_A],
     );
     expect(notifs).toHaveLength(1);
     expect(notifs[0].user_id).toBe(MANAGER_ID);
     expect(notifs[0].type).toBe('evidence_unknown_persona');
+    // Deep-link persisted so the bell can navigate the operator to the action.
+    expect(notifs[0].metadata).toMatchObject({ link: '/client/promoters' });
 
     // 4. WhatsApp operator alert fired, and the sender still got a reply.
     expect(notificarCalls).toBe(1);

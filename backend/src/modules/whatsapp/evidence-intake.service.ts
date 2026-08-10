@@ -395,6 +395,13 @@ export class EvidenceIntakeService {
     }
 
     // Channel 3 — in-app notification for every Manager (needs manager resolution).
+    // metadata.link deep-links the notification to where the operator resolves it:
+    // unknown_persona -> Staff page ("Promotores a agregar"); otherwise the terreno
+    // view where activations live. The bell navigates to this link on click.
+    const link =
+      reason === 'evidence_unknown_persona'
+        ? '/client/promoters'
+        : '/client/terreno';
     try {
       const managerIds = await this.notifications.resolveManagerIds(clientId);
       await this.notifications.notifyUsers(clientId, managerIds, {
@@ -404,7 +411,7 @@ export class EvidenceIntakeService {
             ? 'Promotor desconocido — evidencia pendiente'
             : 'Evidencia sin activación activa',
         body: `Número ${phone} envió evidencia sin poder ser asociada.`,
-        metadata: { eventoCrudoId, phone },
+        metadata: { eventoCrudoId, phone, link },
       });
     } catch (err: any) {
       this.logger.error(

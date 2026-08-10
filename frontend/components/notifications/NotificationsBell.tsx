@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -13,6 +14,8 @@ interface Notification {
   type: string;
   title: string;
   body?: string;
+  // Optional deep-link: where the operator resolves this notification's action.
+  metadata?: { link?: string } | null;
   read_at: string | null;
   created_at: string;
 }
@@ -46,6 +49,7 @@ function relativeTime(iso: string): string {
 // ---------------------------------------------------------------------------
 
 export default function NotificationsBell() {
+  const router = useRouter();
   const [items, setItems] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
@@ -54,7 +58,9 @@ export default function NotificationsBell() {
   // Fetch notifications — same useCallback + useEffect pattern as CrudTable
   const fetchNotifications = useCallback(async () => {
     try {
-      const res = await api.get<NotificationsEnvelope>("/notifications?unread=true");
+      const res = await api.get<NotificationsEnvelope>(
+        "/notifications?unread=true",
+      );
       setItems(res?.data?.data ?? []);
       setUnreadCount(res?.data?.unreadCount ?? 0);
     } catch {
@@ -89,7 +95,9 @@ export default function NotificationsBell() {
     try {
       await api.patch(`/notifications/${id}/read`);
       setItems((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)),
+        prev.map((n) =>
+          n.id === id ? { ...n, read_at: new Date().toISOString() } : n,
+        ),
       );
       setUnreadCount((c) => Math.max(0, c - 1));
     } catch {
@@ -97,10 +105,22 @@ export default function NotificationsBell() {
     }
   };
 
+  // Click a notification: mark it read, then deep-link to where the action lives.
+  const handleClick = (n: Notification) => {
+    void markRead(n.id);
+    const link = n.metadata?.link;
+    if (link) {
+      setOpen(false);
+      router.push(link);
+    }
+  };
+
   const markAllRead = async () => {
     try {
       await api.post("/notifications/read-all");
-      setItems((prev) => prev.map((n) => ({ ...n, read_at: new Date().toISOString() })));
+      setItems((prev) =>
+        prev.map((n) => ({ ...n, read_at: new Date().toISOString() })),
+      );
       setUnreadCount(0);
     } catch {
       fetchNotifications();
@@ -114,13 +134,22 @@ export default function NotificationsBell() {
         onClick={() => setOpen((v) => !v)}
         aria-label="Notificaciones"
         className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors"
-        style={{ border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}
+        style={{
+          border: "none",
+          cursor: "pointer",
+          color: "var(--muted-foreground)",
+        }}
       >
         <Bell size={16} />
         {unreadCount > 0 && (
           <span
             className="absolute top-1.5 right-1.5 min-w-[14px] h-[14px] rounded-full border-2 border-white flex items-center justify-center text-[9px] font-bold text-white"
-            style={{ background: "var(--danger)", lineHeight: 1, paddingLeft: 2, paddingRight: 2 }}
+            style={{
+              background: "var(--danger)",
+              lineHeight: 1,
+              paddingLeft: 2,
+              paddingRight: 2,
+            }}
           >
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
@@ -131,21 +160,33 @@ export default function NotificationsBell() {
       {open && (
         <div
           className="absolute right-0 mt-1 w-80 rounded-xl border shadow-lg z-50 flex flex-col overflow-hidden"
-          style={{ background: "var(--card)", borderColor: "var(--border)", top: "100%" }}
+          style={{
+            background: "var(--card)",
+            borderColor: "var(--border)",
+            top: "100%",
+          }}
         >
           {/* Header */}
           <div
             className="flex items-center justify-between px-4 py-2.5 border-b"
             style={{ borderColor: "var(--border)" }}
           >
-            <span className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>
+            <span
+              className="text-sm font-semibold"
+              style={{ color: "var(--foreground)" }}
+            >
               Notificaciones
             </span>
             {unreadCount > 0 && (
               <button
                 onClick={markAllRead}
                 className="text-xs font-medium hover:underline"
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--primary)" }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--primary)",
+                }}
               >
                 Marcar todas
               </button>
@@ -165,7 +206,7 @@ export default function NotificationsBell() {
               items.map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => markRead(n.id)}
+                  onClick={() => handleClick(n)}
                   className="w-full text-left px-4 py-3 flex flex-col gap-0.5 hover:bg-slate-50 transition-colors"
                   style={{
                     background: n.read_at

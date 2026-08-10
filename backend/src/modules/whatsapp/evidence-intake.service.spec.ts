@@ -487,6 +487,7 @@ describe('EvidenceIntakeService', () => {
       expect(callPayload.metadata).toMatchObject({
         eventoCrudoId: 'esc-3',
         phone: PHONE,
+        link: '/client/promoters',
       });
     });
 
@@ -620,6 +621,7 @@ describe('EvidenceIntakeService', () => {
       expect(notifications.notifyUsers).toHaveBeenCalledTimes(1);
       const [, , callPayload] = notifications.notifyUsers.mock.calls[0];
       expect(callPayload.type).toBe('evidence_no_active_activation');
+      expect(callPayload.metadata).toMatchObject({ link: '/client/terreno' });
     });
 
     it('does NOT call pendingStaff.upsert', async () => {
