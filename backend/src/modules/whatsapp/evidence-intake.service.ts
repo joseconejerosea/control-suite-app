@@ -369,9 +369,20 @@ export class EvidenceIntakeService {
     // Channel 1 — pending_staff roster-gap entry (durable record; the core of the
     // feature). Only for unknown_persona. PendingStaffService normalizes the phone.
     if (reason === 'evidence_unknown_persona') {
+      // Best-effort: resolve WHICH activation the evidence likely belongs to so
+      // the operator has context. A failure here must NOT skip the upsert.
+      let activacion: { id: string; label: string } | null = null;
+      try {
+        activacion = await this.resolveProbableActivation(clientId);
+      } catch (err: any) {
+        this.logger.warn(
+          `[Evidence] probable activation resolution failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+        );
+      }
       try {
         await this.pendingStaff.upsert(clientId, phone, 'evidence_unknown', {
           eventoCrudoId,
+          activacion,
         });
       } catch (err: any) {
         this.logger.error(
@@ -421,6 +432,41 @@ export class EvidenceIntakeService {
 
     await this.wa.sendText(phone, message);
     this.logger.log(`[Evidence] Escalado evento ${eventoCrudoId} (${reason})`);
+  }
+
+  /**
+   * Resolves the single probable active activation for a tenant, so the operator
+   * knows which activation an unregistered sender's evidence likely relates to.
+   * Returns null when there are zero or multiple active activations — the UI then
+   * shows "por confirmar". Label combines the location name and the date.
+   */
+  private async resolveProbableActivation(
+    clientId: string,
+  ): Promise<{ id: string; label: string } | null> {
+    const rows = await runWithTenant(this.ds, clientId, () =>
+      this.ds.query(
+        `SELECT a.id, a.activation_date, l.name AS location_name
+           FROM activations a
+           LEFT JOIN locations l ON l.id = a.location_id
+          WHERE a.client_id = $1
+            AND a.status IN ('scheduled','in_progress')
+            AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+          ORDER BY a.activation_date DESC
+          LIMIT 2`,
+        [clientId],
+      ),
+    );
+
+    // 0 or ambiguous (>1) → let the operator confirm; don't guess.
+    if (rows.length !== 1) return null;
+
+    const a = rows[0];
+    const date = a.activation_date
+      ? new Date(a.activation_date).toLocaleDateString('es-CL')
+      : '';
+    const label =
+      [a.location_name, date].filter(Boolean).join(' · ') || 'Activación';
+    return { id: a.id, label };
   }
 
   private async retryOrEscalate(

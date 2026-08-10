@@ -521,6 +521,57 @@ describe('EvidenceIntakeService', () => {
       expect(callContexto).toMatchObject({ eventoCrudoId: 'esc-4' });
     });
 
+    it('includes the probable activation in contexto when exactly one is active', async () => {
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('FROM promoters')) return Promise.resolve([]);
+        if (sql.includes('FROM collaborators')) return Promise.resolve([]);
+        if (sql.includes('FROM users')) return Promise.resolve([]);
+        if (sql.includes('FROM activations'))
+          return Promise.resolve([
+            {
+              id: 'act-1',
+              activation_date: '2026-08-12',
+              location_name: 'Jumbo Maipú',
+            },
+          ]);
+        return Promise.resolve([]);
+      });
+
+      await svc.start({
+        eventoCrudoId: 'esc-act',
+        phoneNumber: PHONE,
+        clientId: CLIENT,
+        storagePath: 'evidence/act.jpg',
+      });
+
+      const [, , , callContexto] = pendingStaff.upsert.mock.calls[0];
+      expect(callContexto.activacion).toMatchObject({ id: 'act-1' });
+      expect(callContexto.activacion.label).toContain('Jumbo Maipú');
+    });
+
+    it('leaves activacion null when zero or multiple activations are active', async () => {
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('FROM promoters')) return Promise.resolve([]);
+        if (sql.includes('FROM collaborators')) return Promise.resolve([]);
+        if (sql.includes('FROM users')) return Promise.resolve([]);
+        if (sql.includes('FROM activations'))
+          return Promise.resolve([{ id: 'a' }, { id: 'b' }]); // ambiguous
+        return Promise.resolve([]);
+      });
+
+      await svc.start({
+        eventoCrudoId: 'esc-amb',
+        phoneNumber: PHONE,
+        clientId: CLIENT,
+        storagePath: 'evidence/amb.jpg',
+      });
+
+      const [, , , callContexto] = pendingStaff.upsert.mock.calls[0];
+      expect(callContexto.activacion).toBeNull();
+    });
+
     it('isolates the three operator channels: a failure in one does NOT suppress the others', async () => {
       // In-app resolution (channel 3) fails; the WhatsApp alert (channel 2) and the
       // pending_staff roster entry (channel 1) MUST still run — they are independent.

@@ -12,12 +12,10 @@ interface PendingStaffRow {
   id: string;
   phone: string;
   motivo: string | null;
-  // Slice C (evidence-intake escalate) writes contexto as { eventoCrudoId }.
+  // Slice C (evidence-intake escalate) writes contexto with the probable activation.
   contexto: {
     eventoCrudoId?: string;
-    foto_key?: string;
-    activacion_probable_id?: string;
-    sent_at?: string;
+    activacion?: { id: string; label: string } | null;
   } | null;
   estado: string;
   created_at: string;
@@ -26,6 +24,34 @@ interface PendingStaffRow {
 // Backend ResponseInterceptor wraps the list as { data: PendingStaffRow[] }.
 interface PendingStaffApiResponse {
   data: PendingStaffRow[];
+}
+
+// Human-readable label for the internal motivo code.
+const MOTIVO_LABELS: Record<string, string> = {
+  evidence_unknown:
+    "Envió evidencia por WhatsApp sin estar registrado como promotor",
+};
+function motivoText(m: string | null): string {
+  return (m && MOTIVO_LABELS[m]) || "Requiere revisión";
+}
+
+// Light, display-only phone formatting. Common 12–13 digit LATAM mobiles get
+// grouped; anything else falls back to a plain "+<digits>".
+function formatPhone(raw: string): string {
+  const d = String(raw ?? "").replace(/\D/g, "");
+  const m = d.match(/^(\d{2})(\d)(\d{2})(\d{4})(\d{4})$/);
+  if (m) return `+${m[1]} ${m[2]} ${m[3]} ${m[4]}-${m[5]}`;
+  return d ? `+${d}` : "";
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "recién";
+  if (mins < 60) return `hace ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `hace ${hrs} h`;
+  return `hace ${Math.floor(hrs / 24)} d`;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,32 +166,22 @@ export default function PendingStaffSection({
                 className="text-sm font-medium truncate"
                 style={{ color: "var(--foreground)" }}
               >
-                {row.phone}
+                {formatPhone(row.phone)}
               </span>
-              {row.motivo && (
-                <span
-                  className="text-xs truncate"
-                  style={{ color: "var(--muted-foreground)" }}
-                >
-                  {row.motivo}
-                </span>
-              )}
-              {row.contexto?.eventoCrudoId && (
-                <span
-                  className="text-[11px]"
-                  style={{ color: "var(--muted-foreground)" }}
-                >
-                  Evento: {row.contexto.eventoCrudoId}
-                </span>
-              )}
-              {row.contexto?.activacion_probable_id && (
-                <span
-                  className="text-[11px]"
-                  style={{ color: "var(--muted-foreground)" }}
-                >
-                  Activación: {row.contexto.activacion_probable_id}
-                </span>
-              )}
+              <span
+                className="text-xs"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                {motivoText(row.motivo)}
+              </span>
+              <span
+                className="text-[11px]"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                Activación: {row.contexto?.activacion?.label ?? "por confirmar"}
+                {" · recibido "}
+                {relativeTime(row.created_at)}
+              </span>
             </div>
 
             {/* Actions */}

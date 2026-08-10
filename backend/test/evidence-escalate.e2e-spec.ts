@@ -121,7 +121,9 @@ describe('Slice C — evidence escalate wiring persists to real Postgres', () =>
     expect(pending).toHaveLength(1);
     expect(pending[0].phone).toBe(SENDER_DIGITS);
     expect(pending[0].estado).toBe('pendiente');
-    expect(pending[0].contexto).toEqual({ eventoCrudoId: EVENTO_ID });
+    expect(pending[0].contexto).toMatchObject({ eventoCrudoId: EVENTO_ID });
+    // No active activation seeded for this tenant → "por confirmar" (null).
+    expect(pending[0].contexto.activacion).toBeNull();
 
     // 3. In-app notification created for the Manager.
     const notifs = await ds.query(
