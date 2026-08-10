@@ -5,6 +5,8 @@ import { EvidenceIntakeService } from './evidence-intake.service';
 import { WhatsAppModule } from './whatsapp.module';
 import { SkusModule } from '../skus/skus.module';
 import { MovimientosPopModule } from '../movimientos-pop/movimientos-pop.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { PendingStaffModule } from '../pending-staff/pending-staff.module';
 
 /**
  * F3 · Intake de material POP + F5 · Intake de evidencia por WhatsApp.
@@ -13,6 +15,10 @@ import { MovimientosPopModule } from '../movimientos-pop/movimientos-pop.module'
  * OcrProcessor (QueueModule) inyectan MaterialIntakeService/EvidenceIntakeService
  * sin importar este módulo, evitando el ciclo WhatsAppModule ↔ MovimientosPopModule
  * (este último ya importa WhatsAppModule).
+ *
+ * NotificationsModule + PendingStaffModule are imported here so EvidenceIntakeService
+ * can inject NotificationsService and PendingStaffService for the operator-alert
+ * block added in Slice C.
  */
 @Global()
 @Module({
@@ -21,6 +27,8 @@ import { MovimientosPopModule } from '../movimientos-pop/movimientos-pop.module'
     SkusModule,
     MovimientosPopModule,
     BullModule.registerQueue({ name: 'classify' }),
+    NotificationsModule,
+    PendingStaffModule,
   ],
   providers: [MaterialIntakeService, EvidenceIntakeService],
   exports: [MaterialIntakeService, EvidenceIntakeService],

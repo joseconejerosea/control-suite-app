@@ -2,7 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from './whatsapp.service';
-import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
+import {
+  WhatsAppSessionService,
+  WhatsAppSession,
+} from './whatsapp-session.service';
+import { OperatorNotifierService } from './operator-notifier.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PendingStaffService } from '../pending-staff/pending-staff.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { runWithTenant } from '../../common/tenant/tenant-context';
 import { UserRole } from '../../common/enums/user-role.enum';
@@ -33,6 +39,9 @@ export class EvidenceIntakeService {
     @InjectDataSource() private readonly ds: DataSource,
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
+    private readonly notifier: OperatorNotifierService,
+    private readonly notifications: NotificationsService,
+    private readonly pendingStaff: PendingStaffService,
   ) {}
 
   /**
@@ -55,33 +64,45 @@ export class EvidenceIntakeService {
     // Supervisor). Así cualquier staff autorizado que mande su foto de la activación
     // queda asociado. checkins.persona_id NO tiene FK, así que el id de cualquiera de
     // las tres tablas sirve como persona del check-in. Todo dentro de runWithTenant (RLS).
-    const personaId: string | null = await runWithTenant(this.ds, opts.clientId, async () => {
-      const prom = await this.ds.query(
-        `SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
-        [opts.clientId, digits],
-      );
-      if (prom.length) return prom[0].id;
+    const personaId: string | null = await runWithTenant(
+      this.ds,
+      opts.clientId,
+      async () => {
+        const prom = await this.ds.query(
+          `SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
+          [opts.clientId, digits],
+        );
+        if (prom.length) return prom[0].id;
 
-      const colab = await this.ds.query(
-        `SELECT id FROM collaborators WHERE client_id=$1 AND is_active=true AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
-        [opts.clientId, digits],
-      );
-      if (colab.length) return colab[0].id;
+        const colab = await this.ds.query(
+          `SELECT id FROM collaborators WHERE client_id=$1 AND is_active=true AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
+          [opts.clientId, digits],
+        );
+        if (colab.length) return colab[0].id;
 
-      const usr = await this.ds.query(
-        `SELECT id FROM users
+        const usr = await this.ds.query(
+          `SELECT id FROM users
           WHERE client_id=$1 AND is_active=true AND phone IS NOT NULL
             AND role IN ($3, $4, $5)
             AND regexp_replace(phone,'\\D','','g')=$2
           LIMIT 1`,
-        [opts.clientId, digits, UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERVISOR],
-      );
-      return usr.length ? usr[0].id : null;
-    }).catch(() => null);
+          [
+            opts.clientId,
+            digits,
+            UserRole.MANAGER,
+            UserRole.OPERATOR,
+            UserRole.SUPERVISOR,
+          ],
+        );
+        return usr.length ? usr[0].id : null;
+      },
+    ).catch(() => null);
 
     if (!personaId) {
       await this.escalate(
-        opts.eventoCrudoId, opts.phoneNumber, opts.clientId,
+        opts.eventoCrudoId,
+        opts.phoneNumber,
+        opts.clientId,
         'No te encuentro registrado para asociar esta evidencia. Lo derivo a un operador.',
         'evidence_unknown_persona',
       );
@@ -120,7 +141,9 @@ export class EvidenceIntakeService {
 
     if (!activaciones.length) {
       await this.escalate(
-        opts.eventoCrudoId, opts.phoneNumber, opts.clientId,
+        opts.eventoCrudoId,
+        opts.phoneNumber,
+        opts.clientId,
         'No encontré una activación activa a tu nombre para esta evidencia. Lo derivo a un operador.',
         'evidence_no_active_activation',
       );
@@ -132,7 +155,9 @@ export class EvidenceIntakeService {
       label: `Activación ${a.activation_date ?? ''}`.trim(),
     }));
 
-    const session = (await this.sessions.get(opts.phoneNumber)) ?? this.emptySession(opts.clientId);
+    const session =
+      (await this.sessions.get(opts.phoneNumber)) ??
+      this.emptySession(opts.clientId);
     session.clientId = opts.clientId;
     session.state = STATE;
     session.evidenceIntake = {
@@ -148,7 +173,9 @@ export class EvidenceIntakeService {
       session.evidenceIntake.activacionId = opciones[0].id;
       await this.sessions.set(opts.phoneNumber, session);
       await this.askObservacion(opts.phoneNumber);
-      this.logger.log(`[Evidence] Intake iniciado (auto-activación) para evento ${opts.eventoCrudoId}`);
+      this.logger.log(
+        `[Evidence] Intake iniciado (auto-activación) para evento ${opts.eventoCrudoId}`,
+      );
       return;
     }
 
@@ -156,12 +183,16 @@ export class EvidenceIntakeService {
     session.evidenceIntake.step = 'activacion';
     session.evidenceIntake.activaciones = opciones;
     await this.sessions.set(opts.phoneNumber, session);
-    const list = opciones.map((o: { label: string }, i: number) => `${i + 1}. ${o.label}`).join('\n');
+    const list = opciones
+      .map((o: { label: string }, i: number) => `${i + 1}. ${o.label}`)
+      .join('\n');
     await this.wa.sendText(
       opts.phoneNumber,
       `¿A qué activación corresponde esta evidencia?\n\n${list}\n\nRespondé con el número.`,
     );
-    this.logger.log(`[Evidence] Intake iniciado (${opciones.length} activaciones) para evento ${opts.eventoCrudoId}`);
+    this.logger.log(
+      `[Evidence] Intake iniciado (${opciones.length} activaciones) para evento ${opts.eventoCrudoId}`,
+    );
   }
 
   /**
@@ -174,20 +205,31 @@ export class EvidenceIntakeService {
 
     const ei = session.evidenceIntake;
     switch (ei.step) {
-      case 'activacion':  return this.handleActivacion(phoneNumber, text, session);
-      case 'observacion': return this.handleObservacion(phoneNumber, text, session);
-      default:            return false;
+      case 'activacion':
+        return this.handleActivacion(phoneNumber, text, session);
+      case 'observacion':
+        return this.handleObservacion(phoneNumber, text, session);
+      default:
+        return false;
     }
   }
 
   // ── Pasos ───────────────────────────────────────────────────────────────
 
-  private async handleActivacion(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
-    const ei = session.evidenceIntake!;
+  private async handleActivacion(
+    phone: string,
+    text: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
     const opts = ei.activaciones ?? [];
     const num = parseInt(text.trim(), 10);
     if (isNaN(num) || num < 1 || num > opts.length) {
-      return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
+      return this.retryOrEscalate(
+        phone,
+        session,
+        `Respondé con un número entre 1 y ${opts.length}.`,
+      );
     }
     ei.activacionId = opts[num - 1].id;
     ei.step = 'observacion';
@@ -197,10 +239,16 @@ export class EvidenceIntakeService {
     return true;
   }
 
-  private async handleObservacion(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
-    const ei = session.evidenceIntake!;
+  private async handleObservacion(
+    phone: string,
+    text: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
     const raw = (text ?? '').trim();
-    const skip = ['listo', 'no', 'omitir', 'skip', '-', ''].includes(raw.toLowerCase());
+    const skip = ['listo', 'no', 'omitir', 'skip', '-', ''].includes(
+      raw.toLowerCase(),
+    );
     const observacion = skip ? null : raw.slice(0, 500);
     return this.register(phone, session, observacion);
   }
@@ -214,9 +262,13 @@ export class EvidenceIntakeService {
 
   // ── Registro ──────────────────────────────────────────────────────────────
 
-  private async register(phone: string, session: WhatsAppSession, observacion: string | null): Promise<boolean> {
-    const ei = session.evidenceIntake!;
-    const clientId = session.clientId!;
+  private async register(
+    phone: string,
+    session: WhatsAppSession,
+    observacion: string | null,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
+    const clientId = session.clientId;
 
     try {
       // Alta CRÍTICA: el checkin (la prueba de presencia que DEBE persistir).
@@ -224,7 +276,13 @@ export class EvidenceIntakeService {
         this.ds.query(
           `INSERT INTO checkins (client_id, activacion_id, persona_id, foto_key, observacion)
            VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-          [clientId, ei.activacionId, ei.personaId, ei.storagePath, observacion],
+          [
+            clientId,
+            ei.activacionId,
+            ei.personaId,
+            ei.storagePath,
+            observacion,
+          ],
         ),
       );
       const checkinId = rows[0]?.id;
@@ -240,19 +298,36 @@ export class EvidenceIntakeService {
            WHERE id=$1`,
           [
             ei.eventoCrudoId,
-            JSON.stringify({ checkin_id: checkinId, evidence_registered_at: new Date().toISOString() }),
+            JSON.stringify({
+              checkin_id: checkinId,
+              evidence_registered_at: new Date().toISOString(),
+            }),
           ],
         ),
-      ).catch((e: any) => this.logger.warn(`[Evidence] Bookkeeping post-alta falló (evento ${ei.eventoCrudoId}): ${e.message}`));
+      ).catch((e: any) =>
+        this.logger.warn(
+          `[Evidence] Bookkeeping post-alta falló (evento ${ei.eventoCrudoId}): ${e.message}`,
+        ),
+      );
 
       await this.sessions.delete(phone);
-      await this.wa.sendText(phone, '✅ Evidencia guardada en la activación. ¡Gracias!');
-      this.logger.log(`[Evidence] Registrado checkin ${checkinId} (evento ${ei.eventoCrudoId})`);
+      await this.wa.sendText(
+        phone,
+        '✅ Evidencia guardada en la activación. ¡Gracias!',
+      );
+      this.logger.log(
+        `[Evidence] Registrado checkin ${checkinId} (evento ${ei.eventoCrudoId})`,
+      );
       return true;
     } catch (err: any) {
-      this.logger.error(`[Evidence] Error registrando evidencia (evento ${ei.eventoCrudoId}): ${err.message}`);
+      this.logger.error(
+        `[Evidence] Error registrando evidencia (evento ${ei.eventoCrudoId}): ${err.message}`,
+      );
       await this.sessions.delete(phone);
-      await this.wa.sendText(phone, 'No pude guardar la evidencia. Un operador lo va a revisar.');
+      await this.wa.sendText(
+        phone,
+        'No pude guardar la evidencia. Un operador lo va a revisar.',
+      );
       return true;
     }
   }
@@ -264,7 +339,11 @@ export class EvidenceIntakeService {
    * NO deja sesión (no hay conversación que continuar).
    */
   private async escalate(
-    eventoCrudoId: string, phone: string, clientId: string, message: string, reason: string,
+    eventoCrudoId: string,
+    phone: string,
+    clientId: string,
+    message: string,
+    reason: string,
   ): Promise<void> {
     // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
     // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
@@ -272,27 +351,98 @@ export class EvidenceIntakeService {
       this.ds.query(
         `UPDATE eventos_crudos SET status='escalated',
            parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-        [eventoCrudoId, JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: reason })],
+        [
+          eventoCrudoId,
+          JSON.stringify({
+            escalated_at: new Date().toISOString(),
+            escalation_reason: reason,
+          }),
+        ],
       ),
     ).catch(() => {});
+
+    // Operator alerting: three INDEPENDENT channels. Each is isolated in its own
+    // try/catch so a failure in one (e.g. a users-table hiccup while resolving
+    // managers) never suppresses the others. Errors are logged, never swallowed
+    // silently, and none of them block the sender reply below.
+
+    // Channel 1 — pending_staff roster-gap entry (durable record; the core of the
+    // feature). Only for unknown_persona. PendingStaffService normalizes the phone.
+    if (reason === 'evidence_unknown_persona') {
+      try {
+        await this.pendingStaff.upsert(clientId, phone, 'evidence_unknown', {
+          eventoCrudoId,
+        });
+      } catch (err: any) {
+        this.logger.error(
+          `[Evidence] pending_staff upsert failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+        );
+      }
+    }
+
+    // Channel 2 — WhatsApp alert to operators (independent of manager resolution).
+    try {
+      const operatorMsg = `Evidencia sin asociar (${reason}) del número ${phone}. Revisar en el panel.`;
+      await this.notifier.notificar(
+        clientId,
+        operatorMsg,
+        `evidence-${reason}:${eventoCrudoId}`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[Evidence] operator WhatsApp alert failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+      );
+    }
+
+    // Channel 3 — in-app notification for every Manager (needs manager resolution).
+    try {
+      const managerIds = await this.notifications.resolveManagerIds(clientId);
+      await this.notifications.notifyUsers(clientId, managerIds, {
+        type: reason,
+        title:
+          reason === 'evidence_unknown_persona'
+            ? 'Promotor desconocido — evidencia pendiente'
+            : 'Evidencia sin activación activa',
+        body: `Número ${phone} envió evidencia sin poder ser asociada.`,
+        metadata: { eventoCrudoId, phone },
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `[Evidence] in-app operator notification failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+      );
+    }
+
     await this.wa.sendText(phone, message);
     this.logger.log(`[Evidence] Escalado evento ${eventoCrudoId} (${reason})`);
   }
 
-  private async retryOrEscalate(phone: string, session: WhatsAppSession, retryMsg: string): Promise<boolean> {
-    const ei = session.evidenceIntake!;
+  private async retryOrEscalate(
+    phone: string,
+    session: WhatsAppSession,
+    retryMsg: string,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
     ei.attempts = (ei.attempts ?? 0) + 1;
 
     if (ei.attempts >= MAX_ATTEMPTS) {
-      await runWithTenant(this.ds, session.clientId!, () =>
+      await runWithTenant(this.ds, session.clientId, () =>
         this.ds.query(
           `UPDATE eventos_crudos SET status='escalated',
              parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-          [ei.eventoCrudoId, JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: 'evidence_intake_max_attempts' })],
+          [
+            ei.eventoCrudoId,
+            JSON.stringify({
+              escalated_at: new Date().toISOString(),
+              escalation_reason: 'evidence_intake_max_attempts',
+            }),
+          ],
         ),
       ).catch(() => {});
       await this.sessions.delete(phone);
-      await this.wa.sendText(phone, 'Voy a derivar esto a un operador para que lo cargue manualmente. Gracias.');
+      await this.wa.sendText(
+        phone,
+        'Voy a derivar esto a un operador para que lo cargue manualmente. Gracias.',
+      );
       return true;
     }
 

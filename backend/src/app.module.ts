@@ -53,6 +53,8 @@ import { ProjectResolverModule } from './modules/project-resolver/project-resolv
 import { F1ReviewModule } from './modules/f1-review/f1-review.module';
 import { ProjectInboxModule } from './modules/project-inbox/project-inbox.module';
 import { SupportModule } from './modules/support/support.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PendingStaffModule } from './modules/pending-staff/pending-staff.module';
 
 @Module({
   imports: [
@@ -109,6 +111,8 @@ import { SupportModule } from './modules/support/support.module';
     F1ReviewModule,
     ProjectInboxModule,
     SupportModule,
+    NotificationsModule,
+    PendingStaffModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
