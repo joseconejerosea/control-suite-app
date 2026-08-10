@@ -2,19 +2,21 @@
 
 import { useRouter } from "next/navigation";
 import { clearAuth } from "@/lib/api";
-import { Zap, Bell, LogOut } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Zap, LogOut } from "lucide-react";
+import { useState } from "react";
+import NotificationsBell from "@/components/notifications/NotificationsBell";
 
 export default function Topbar() {
   const router = useRouter();
-  const [user, setUser] = useState<Record<string, string> | null>(null);
-
-  useEffect(() => {
+  const [user] = useState<Record<string, string> | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
       const stored = localStorage.getItem("cs_user");
-      if (stored) setUser(JSON.parse(stored));
-    } catch { /* ignore */ }
-  }, []);
+      return stored ? (JSON.parse(stored) as Record<string, string>) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "CS";
 
@@ -40,13 +42,7 @@ export default function Topbar() {
 
       {/* Actions */}
       <div className="flex items-center gap-3">
-        <button
-          className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors"
-          style={{ border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}
-        >
-          <Bell size={16} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2 border-white" style={{ background: "var(--danger)" }} />
-        </button>
+        <NotificationsBell />
 
         <button
           onClick={logout}

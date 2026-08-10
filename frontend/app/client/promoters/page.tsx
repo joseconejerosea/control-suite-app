@@ -1,16 +1,31 @@
 "use client";
 
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/layout/app-shell";
 import CrudTable, { StatusBadge } from "@/components/CrudTable";
+import PendingStaffSection from "@/components/staff/PendingStaffSection";
 
-export default function PromotersPage() {
+function PromotersContent() {
+  const searchParams = useSearchParams();
+  // Pre-fill phone when navigated from PendingStaffSection "Agregar" action.
+  const prefillPhone = searchParams.get("phone") ?? "";
+
   return (
     <AppShell>
+      <PendingStaffSection />
       <CrudTable
         title="Staff"
         subtitle="Personal de terreno asignado a activaciones"
         endpoint="/promoters"
-        defaultForm={{ first_name: "", last_name: "", email: "", phone: "", rol: "", status: "active" }}
+        defaultForm={{
+          first_name: "",
+          last_name: "",
+          email: "",
+          phone: prefillPhone,
+          rol: "",
+          status: "active",
+        }}
         columns={[
           { key: "first_name", label: "Nombre" },
           { key: "last_name",  label: "Apellido" },
@@ -30,5 +45,14 @@ export default function PromotersPage() {
         ]}
       />
     </AppShell>
+  );
+}
+
+export default function PromotersPage() {
+  // useSearchParams requires a Suspense boundary during prerender (Next 16).
+  return (
+    <Suspense>
+      <PromotersContent />
+    </Suspense>
   );
 }
