@@ -60,8 +60,10 @@ function relativeTime(iso: string): string {
 
 export default function PendingStaffSection({
   refreshSignal,
+  onCount,
 }: {
   refreshSignal?: number;
+  onCount?: (n: number) => void;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState<PendingStaffRow[]>([]);
@@ -75,7 +77,7 @@ export default function PendingStaffSection({
       );
       setRows(res?.data ?? []);
     } catch {
-      // Non-fatal: section stays hidden on error
+      // Non-fatal: show empty on error
       setRows([]);
     }
   }, []);
@@ -85,6 +87,11 @@ export default function PendingStaffSection({
   useEffect(() => {
     load();
   }, [load, refreshSignal]);
+
+  // Report the current count to the parent (for the tab badge).
+  useEffect(() => {
+    onCount?.(rows.length);
+  }, [rows, onCount]);
 
   const handleAgregar = (row: PendingStaffRow) => {
     // Do NOT mark 'agregado' here. Only navigate to a pre-filled create modal.
@@ -108,34 +115,8 @@ export default function PendingStaffSection({
     }
   };
 
-  // Empty state: render nothing — section must not error when the list is empty
-  if (rows.length === 0) return null;
-
   return (
-    <section className="mb-6">
-      {/* Section header */}
-      <div className="flex items-center gap-2 mb-3">
-        <span
-          className="inline-block w-2 h-2 rounded-full shrink-0"
-          style={{ background: "var(--danger)" }}
-        />
-        <h2
-          className="text-sm font-semibold"
-          style={{ color: "var(--foreground)" }}
-        >
-          Promotores a agregar
-        </h2>
-        <span
-          className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
-          style={{
-            background: "color-mix(in srgb, var(--danger) 12%, transparent)",
-            color: "var(--danger)",
-          }}
-        >
-          {rows.length}
-        </span>
-      </div>
-
+    <div>
       {/* Error message */}
       {error && (
         <div
@@ -149,73 +130,87 @@ export default function PendingStaffSection({
         </div>
       )}
 
-      {/* Row cards */}
-      <div className="flex flex-col gap-2">
-        {rows.map((row) => (
-          <div
-            key={row.id}
-            className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border"
-            style={{
-              background: "var(--card)",
-              borderColor: "var(--border)",
-            }}
-          >
-            {/* Info */}
-            <div className="flex flex-col gap-0.5 min-w-0">
-              <span
-                className="text-sm font-medium truncate"
-                style={{ color: "var(--foreground)" }}
-              >
-                {formatPhone(row.phone)}
-              </span>
-              <span
-                className="text-xs"
-                style={{ color: "var(--muted-foreground)" }}
-              >
-                {motivoText(row.motivo)}
-              </span>
-              <span
-                className="text-[11px]"
-                style={{ color: "var(--muted-foreground)" }}
-              >
-                Activación: {row.contexto?.activacion?.label ?? "por confirmar"}
-                {" · recibido "}
-                {relativeTime(row.created_at)}
-              </span>
-            </div>
+      {rows.length === 0 ? (
+        <div
+          className="px-4 py-12 text-center text-sm rounded-xl border"
+          style={{
+            color: "var(--muted-foreground)",
+            borderColor: "var(--border)",
+            background: "var(--card)",
+          }}
+        >
+          No hay promotores pendientes por agregar.
+        </div>
+      ) : (
+        /* Row cards */
+        <div className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <div
+              key={row.id}
+              className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border"
+              style={{
+                background: "var(--card)",
+                borderColor: "var(--border)",
+              }}
+            >
+              {/* Info */}
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <span
+                  className="text-sm font-medium truncate"
+                  style={{ color: "var(--foreground)" }}
+                >
+                  {formatPhone(row.phone)}
+                </span>
+                <span
+                  className="text-xs"
+                  style={{ color: "var(--muted-foreground)" }}
+                >
+                  {motivoText(row.motivo)}
+                </span>
+                <span
+                  className="text-[11px]"
+                  style={{ color: "var(--muted-foreground)" }}
+                >
+                  Activación:{" "}
+                  {row.contexto?.activacion?.label ?? "por confirmar"}
+                  {" · recibido "}
+                  {relativeTime(row.created_at)}
+                </span>
+              </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => handleAgregar(row)}
-                disabled={actionId === row.id}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors"
-                style={{
-                  background: "var(--primary)",
-                  color: "#fff",
-                  border: "none",
-                  cursor: actionId === row.id ? "default" : "pointer",
-                }}
-              >
-                {actionId === row.id ? "..." : "Agregar"}
-              </button>
-              <button
-                onClick={() => handleDescartar(row.id)}
-                disabled={actionId === row.id}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors hover:bg-slate-100"
-                style={{
-                  background: "var(--secondary)",
-                  color: "var(--foreground)",
-                  border: "none",
-                  cursor: actionId === row.id ? "default" : "pointer",
-                }}
-              >
-                Descartar
-              </button>
+              {/* Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleAgregar(row)}
+                  disabled={actionId === row.id}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors"
+                  style={{
+                    background: "var(--primary)",
+                    color: "#fff",
+                    border: "none",
+                    cursor: actionId === row.id ? "default" : "pointer",
+                  }}
+                >
+                  {actionId === row.id ? "..." : "Agregar"}
+                </button>
+                <button
+                  onClick={() => handleDescartar(row.id)}
+                  disabled={actionId === row.id}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors hover:bg-slate-100"
+                  style={{
+                    background: "var(--secondary)",
+                    color: "var(--foreground)",
+                    border: "none",
+                    cursor: actionId === row.id ? "default" : "pointer",
+                  }}
+                >
+                  Descartar
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
-    </section>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
