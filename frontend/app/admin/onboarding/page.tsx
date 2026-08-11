@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
-import { CheckCircle, Building2, Radio, ShieldCheck, UserPlus, Rocket, ArrowRight, ArrowLeft, Sheet, Phone } from "lucide-react";
+import { CheckCircle, Building2, Radio, ShieldCheck, UserPlus, Rocket, ArrowRight, ArrowLeft, Sheet } from "lucide-react";
 
 type StepData = { client?: Record<string, string>; channel?: Record<string, string>; admin?: Record<string, string> };
 
@@ -14,57 +14,6 @@ const STEPS = [
   { id: 3, label: "Verify",  icon: ShieldCheck, title: "Verificar Canal",  sub: "Confirmar que el canal esta activo" },
   { id: 4, label: "Admin",   icon: UserPlus,    title: "Crear Admin",      sub: "Primer administrador del cliente" },
   { id: 5, label: "Listo",   icon: Rocket,      title: "Activar Cliente",  sub: "El cliente entra en produccion" },
-];
-
-const COUNTRY_CODES = [
-  { cc: "54",  flag: "AR", name: "Argentina" },
-  { cc: "591", flag: "BO", name: "Bolivia" },
-  { cc: "55",  flag: "BR", name: "Brazil" },
-  { cc: "56",  flag: "CL", name: "Chile" },
-  { cc: "57",  flag: "CO", name: "Colombia" },
-  { cc: "506", flag: "CR", name: "Costa Rica" },
-  { cc: "53",  flag: "CU", name: "Cuba" },
-  { cc: "593", flag: "EC", name: "Ecuador" },
-  { cc: "503", flag: "SV", name: "El Salvador" },
-  { cc: "502", flag: "GT", name: "Guatemala" },
-  { cc: "504", flag: "HN", name: "Honduras" },
-  { cc: "52",  flag: "MX", name: "Mexico" },
-  { cc: "505", flag: "NI", name: "Nicaragua" },
-  { cc: "507", flag: "PA", name: "Panama" },
-  { cc: "595", flag: "PY", name: "Paraguay" },
-  { cc: "51",  flag: "PE", name: "Peru" },
-  { cc: "1787",flag: "PR", name: "Puerto Rico" },
-  { cc: "1",   flag: "US", name: "United States" },
-  { cc: "44",  flag: "GB", name: "United Kingdom" },
-  { cc: "34",  flag: "ES", name: "Spain" },
-  { cc: "598", flag: "UY", name: "Uruguay" },
-  { cc: "58",  flag: "VE", name: "Venezuela" },
-  { cc: "92",  flag: "PK", name: "Pakistan" },
-  { cc: "91",  flag: "IN", name: "India" },
-  { cc: "62",  flag: "ID", name: "Indonesia" },
-  { cc: "212", flag: "MA", name: "Morocco" },
-  { cc: "234", flag: "NG", name: "Nigeria" },
-  { cc: "27",  flag: "ZA", name: "South Africa" },
-  { cc: "20",  flag: "EG", name: "Egypt" },
-  { cc: "49",  flag: "DE", name: "Germany" },
-  { cc: "33",  flag: "FR", name: "France" },
-  { cc: "39",  flag: "IT", name: "Italy" },
-  { cc: "31",  flag: "NL", name: "Netherlands" },
-  { cc: "351", flag: "PT", name: "Portugal" },
-  { cc: "7",   flag: "RU", name: "Russia" },
-  { cc: "86",  flag: "CN", name: "China" },
-  { cc: "81",  flag: "JP", name: "Japan" },
-  { cc: "82",  flag: "KR", name: "South Korea" },
-  { cc: "966", flag: "SA", name: "Saudi Arabia" },
-  { cc: "971", flag: "AE", name: "UAE" },
-  { cc: "972", flag: "IL", name: "Israel" },
-  { cc: "90",  flag: "TR", name: "Turkey" },
-  { cc: "380", flag: "UA", name: "Ukraine" },
-  { cc: "61",  flag: "AU", name: "Australia" },
-  { cc: "64",  flag: "NZ", name: "New Zealand" },
-  { cc: "63",  flag: "PH", name: "Philippines" },
-  { cc: "66",  flag: "TH", name: "Thailand" },
-  { cc: "84",  flag: "VN", name: "Vietnam" },
 ];
 
 function Field({ label, type = "text", placeholder, value, onChange, required, hint }: {
@@ -119,10 +68,6 @@ export default function OnboardingPage() {
   const [channel, setChan]  = useState({ nombre: "", tipo: "email", sheets_url: "" });
   const [admin, setAdmin]   = useState({ email: "", password: "", full_name: "" });
 
-  const [waForm, setWaForm] = useState({ cc: "56", phone_number: "", verified_name: "" });
-  const [otp, setOtp]       = useState("");
-  const [waStep, setWaStep] = useState<"provision" | "verify">("provision");
-
   const run = async (action: () => Promise<void>) => {
     setError(""); setLoading(true);
     try { await action(); }
@@ -147,27 +92,9 @@ export default function OnboardingPage() {
       config: { webhook_secret: genSecret(), sheets_id: sheetsId || undefined },
     });
     setData((d) => ({ ...d, channel: res?.data ?? res }));
-    setWaStep("provision");
-    setStep(3);
-  });
-
-  const stepWaProvision = () => run(async () => {
-    const clientId  = data.client?.id;
-    const channelId = data.channel?.id;
-    await api.post(`/onboarding/${clientId}/provision-whatsapp/${channelId}`, {
-      cc:            waForm.cc,
-      phone_number:  waForm.phone_number,
-      verified_name: waForm.verified_name,
-      code_method:   "SMS",
-    });
-    setWaStep("verify");
-  });
-
-  const stepWaVerify = () => run(async () => {
-    const clientId  = data.client?.id;
-    const channelId = data.channel?.id;
-    await api.post(`/onboarding/${clientId}/verify-whatsapp-otp/${channelId}`, { code: otp });
-    setStep(4);
+    // WhatsApp channels use the single global number: they are already active on
+    // configuration, so skip the verify step and go straight to create-admin.
+    setStep(channel.tipo === "whatsapp" ? 4 : 3);
   });
 
   const stepVerify = () => run(async () => {
@@ -200,10 +127,6 @@ export default function OnboardingPage() {
         : children}
     </button>
   );
-
-  const isWA = channel.tipo === "whatsapp";
-
-  const selectedCountry = COUNTRY_CODES.find(c => c.cc === waForm.cc);
 
   return (
     <AppShell>
@@ -298,98 +221,16 @@ export default function OnboardingPage() {
                 <div style={{ color: "var(--muted-foreground)" }}>Tipo: <span style={{ color: "var(--foreground)" }}>{data.channel?.tipo}</span></div>
               </div>
 
-              {isWA ? (
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center gap-2 pb-2" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <Phone size={14} style={{ color: "var(--primary)" }} />
-                    <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--muted-foreground)" }}>
-                      {waStep === "provision" ? "Registrar numero WhatsApp" : "Verificar OTP"}
-                    </span>
-                  </div>
-
-                  {waStep === "provision" && (
-                    <>
-                      {/* Country code dropdown */}
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>Pais *</label>
-                        <select
-                          value={waForm.cc}
-                          onChange={(e) => setWaForm((f) => ({ ...f, cc: e.target.value }))}
-                          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                          style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
-                          {COUNTRY_CODES.map((c) => (
-                            <option key={c.cc + c.flag} value={c.cc}>
-                              {c.name} (+{c.cc})
-                            </option>
-                          ))}
-                        </select>
-                        {selectedCountry && (
-                          <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                            Codigo: +{selectedCountry.cc}
-                          </p>
-                        )}
-                      </div>
-
-                      <Field label="Numero de telefono *" required value={waForm.phone_number}
-                        onChange={(v) => setWaForm((f) => ({ ...f, phone_number: v }))}
-                        placeholder="912345678"
-                        hint={`Sin codigo de pais. Numero completo: +${waForm.cc}${waForm.phone_number || "XXXXXXXXX"}`} />
-
-                      <Field label="Nombre verificado *" required value={waForm.verified_name}
-                        onChange={(v) => setWaForm((f) => ({ ...f, verified_name: v }))}
-                        placeholder="Acme Corp BTL"
-                        hint="Nombre que aparecera en WhatsApp Business. Debe coincidir con el nombre en Meta." />
-
-                      <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                        Se enviara un codigo OTP via SMS al numero ingresado para verificar con Meta WhatsApp Business API.
-                      </p>
-
-                      <div className="flex gap-3">
-                        <button onClick={() => setStep(2)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm"
-                          style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>
-                          <ArrowLeft size={13} /> Atras
-                        </button>
-                        <Btn onClick={stepWaProvision} disabled={!waForm.phone_number || !waForm.verified_name}>
-                          <span>Enviar OTP</span><ArrowRight size={14} />
-                        </Btn>
-                      </div>
-                    </>
-                  )}
-
-                  {waStep === "verify" && (
-                    <>
-                      <div className="p-3 rounded-lg text-xs"
-                        style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 20%, transparent)", color: "var(--success)" }}>
-                        Codigo OTP enviado a +{waForm.cc} {waForm.phone_number}. Revisa tus mensajes SMS.
-                      </div>
-                      <Field label="Codigo OTP *" required value={otp} onChange={setOtp}
-                        placeholder="123456" hint="Codigo de 6 digitos recibido por SMS de Meta." />
-                      <div className="flex gap-3">
-                        <button onClick={() => setWaStep("provision")} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm"
-                          style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>
-                          <ArrowLeft size={13} /> Reenviar
-                        </button>
-                        <Btn onClick={stepWaVerify} disabled={otp.length !== 6}>
-                          <ShieldCheck size={14} /><span>Verificar numero</span>
-                        </Btn>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>
-                    Verifica que el canal este correctamente configurado.
-                  </p>
-                  <div className="flex gap-3">
-                    <button onClick={() => setStep(2)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm"
-                      style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>
-                      <ArrowLeft size={13} /> Atras
-                    </button>
-                    <Btn onClick={stepVerify}><ShieldCheck size={14} /><span>Verificar canal</span></Btn>
-                  </div>
-                </>
-              )}
+              <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>
+                Verifica que el canal este correctamente configurado.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setStep(2)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm"
+                  style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>
+                  <ArrowLeft size={13} /> Atras
+                </button>
+                <Btn onClick={stepVerify}><ShieldCheck size={14} /><span>Verificar canal</span></Btn>
+              </div>
             </div>
           )}
 
@@ -400,7 +241,7 @@ export default function OnboardingPage() {
               <Field label="Email" type="email" required value={admin.email} onChange={(v) => setAdmin((a) => ({ ...a, email: v }))} placeholder="admin@empresa.com" />
               <Field label="Password" type="password" required value={admin.password} onChange={(v) => setAdmin((a) => ({ ...a, password: v }))} placeholder="Minimo 8 caracteres" />
               <div className="flex gap-3">
-                <button onClick={() => setStep(3)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm"
+                <button onClick={() => setStep(data.channel?.tipo === "whatsapp" ? 2 : 3)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm"
                   style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>
                   <ArrowLeft size={13} /> Atras
                 </button>

@@ -14,8 +14,6 @@ import { OnboardingService } from './onboarding.service';
 import { ConfigureChannelDto } from './dto/configure-channel.dto';
 import { VerifyChannelDto } from './dto/verify-channel.dto';
 import { CreateAdminUserDto } from './dto/create-admin-user.dto';
-import { ProvisionWhatsAppDto } from './dto/provision-whatsapp.dto';
-import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
 
 /**
  * OnboardingController — structured F0 flow.
@@ -24,13 +22,8 @@ import { VerifyWhatsAppOtpDto } from './dto/verify-whatsapp-otp.dto';
  *
  *   1. Client created (via ClientsController)
  *   2. POST /onboarding/:clientId/configure-channel
- *
- *   ── WhatsApp channel only (tipo='whatsapp') ──────────────────────────
- *   2b. POST /onboarding/:clientId/provision-whatsapp/:canalEntradaId
- *         → Registers number with Meta WABA, triggers OTP via SMS/VOICE
- *   2c. POST /onboarding/:clientId/verify-whatsapp-otp/:canalEntradaId
- *         → Admin enters 6-digit OTP; number goes live; canal marked active
- *   ─────────────────────────────────────────────────────────────────────
+ *         → WhatsApp channels (tipo='whatsapp') use the single global number, so
+ *           they are marked active on configuration (no Meta registration/OTP).
  *
  *   ── Non-WA channels (email, REST API, etc.) ──────────────────────────
  *   3.  POST /onboarding/:clientId/verify-channel/:canalEntradaId
@@ -53,43 +46,6 @@ export class OnboardingController {
     @Body() dto: ConfigureChannelDto,
   ) {
     return this.onboardingService.configureChannel(clientId, dto);
-  }
-
-  /**
-   * Step 2b — WhatsApp only.
-   * Calls Meta Business Management API to register the phone number on the
-   * Control Suite WABA.  Meta will send an OTP to the number via SMS or VOICE.
-   *
-   * Required env vars: META_WABA_ID, META_SYSTEM_USER_TOKEN
-   *
-   * Body: { cc, phone_number, verified_name, code_method? }
-   * Returns: { phone_number_id, message }
-   */
-  @Post(':clientId/provision-whatsapp/:canalEntradaId')
-  provisionWhatsApp(
-    @Param('clientId', ParseUUIDPipe) clientId: string,
-    @Param('canalEntradaId', ParseUUIDPipe) canalEntradaId: string,
-    @Body() dto: ProvisionWhatsAppDto,
-  ) {
-    return this.onboardingService.provisionWhatsApp(clientId, canalEntradaId, dto);
-  }
-
-  /**
-   * Step 2c — WhatsApp only.
-   * Validates the 6-digit OTP the admin received on their phone.
-   * On success: canal_entrada.is_active = true; number is live on Meta Cloud API.
-   * The webhook controller will route messages by phone_number_id automatically.
-   *
-   * Body: { code }
-   * Returns: { verified, phone_number_id, display_phone_number }
-   */
-  @Post(':clientId/verify-whatsapp-otp/:canalEntradaId')
-  verifyWhatsAppOtp(
-    @Param('clientId', ParseUUIDPipe) clientId: string,
-    @Param('canalEntradaId', ParseUUIDPipe) canalEntradaId: string,
-    @Body() dto: VerifyWhatsAppOtpDto,
-  ) {
-    return this.onboardingService.verifyWhatsAppOtp(clientId, canalEntradaId, dto);
   }
 
   /** Step 3 — Non-WA channels. HMAC self-test; marks channel active. */

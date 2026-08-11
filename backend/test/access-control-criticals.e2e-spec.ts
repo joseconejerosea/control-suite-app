@@ -32,7 +32,7 @@ const CLIENT = randomUUID();
 
 const noop = async () => ({});
 const onboardingMock = {
-  configureChannel: noop, provisionWhatsApp: noop, verifyWhatsAppOtp: noop,
+  configureChannel: noop,
   verifyChannel: noop, createAdminUser: noop, completeOnboarding: noop,
 };
 const authMock = {
