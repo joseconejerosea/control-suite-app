@@ -5,6 +5,7 @@ import {
   Save, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
 import GmailConnect from "@/components/integrations/gmail-connect";
+import AffiliationCode from "@/components/integrations/affiliation-code";
 import AppShell from "@/components/layout/app-shell";
 
 // NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
@@ -216,6 +217,12 @@ export default function ConfigPage() {
   const tabIntegraciones = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <GmailConnect onToast={showToast} />
+
+      {/* Solo Manager (admin_cliente) o super_admin. El backend igual devuelve 403
+          al resto; la card lo maneja mostrando un mensaje suave sin romper. */}
+      {(user.role === "admin_cliente" || user.role === "super_admin") && (
+        <AffiliationCode onToast={showToast} />
+      )}
 
       {card(<>
         {sectionTitle("Google Sheets — destino de exportación")}
