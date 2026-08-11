@@ -383,7 +383,7 @@ export class MaterialIntakeService {
 
   /**
    * Parsea la respuesta del nombre en ítems. Multi-ítem: una línea por ítem (o
-   * separadas por coma/;), con la cantidad inline al inicio ("6 canastos", "2x muebles").
+   * separadas por coma/;// "/"), con la cantidad inline al inicio ("6 canastos", "2x muebles").
    * Un ítem sin número → cantidad null (se resuelve después). Un solo texto plano → 1 ítem.
    */
   private parseItems(text: string): { nombre: string; cantidad: number | null }[] {
@@ -395,11 +395,12 @@ export class MaterialIntakeService {
       parts = lines;
     } else {
       const single = lines[0] ?? '';
-      const byComma = single.split(/\s*[,;]\s*/).map((s) => s.trim()).filter(Boolean);
-      // La coma separa ítems SOLO si CADA parte arranca con una cantidad ("1 x, 2 y, 6 z").
-      // Si no, es un nombre con coma legítimo (ej "Mesa, con logo") → un solo ítem.
+      const byDelim = single.split(/\s*[,;/]\s*/).map((s) => s.trim()).filter(Boolean);
+      // El delimitador (coma/;/ "/") separa ítems SOLO si CADA parte arranca con una
+      // cantidad ("1 x, 2 y" o "1 x / 2 y / 6 z"). Si no, es un nombre legítimo con ese
+      // carácter (ej "Mesa, con logo", "Banner blanco/negro") → un solo ítem.
       const hasQty = (s: string) => /^\d{1,4}\s*(?:x|×)?\s+/i.test(s);
-      parts = byComma.length > 1 && byComma.every(hasQty) ? byComma : (single ? [single] : []);
+      parts = byDelim.length > 1 && byDelim.every(hasQty) ? byDelim : (single ? [single] : []);
     }
     return parts.map((p) => {
       const m = p.match(/^(\d{1,4})\s*(?:x|×)?\s+(.+)$/i);
