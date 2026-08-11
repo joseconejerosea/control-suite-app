@@ -20,6 +20,7 @@ import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant } from '../../common/tenant/tenant-context';
 import { SenderTenantResolverService } from './sender-tenant-resolver.service';
 import { WhatsAppTenantSelectionService } from './tenant-selection.service';
+import { WhatsAppActionMenuService } from './action-menu.service';
 import { AffiliationCodeService } from '../clients/affiliation-code.service';
 import { AffiliationService } from '../clients/affiliation.service';
 
@@ -46,6 +47,7 @@ export class WhatsAppWebhookController {
     private readonly shield: PromptShieldService,
     private readonly senderResolver: SenderTenantResolverService,
     private readonly selection: WhatsAppTenantSelectionService,
+    private readonly actionMenu: WhatsAppActionMenuService,
     private readonly affiliationCode: AffiliationCodeService,
     private readonly affiliation: AffiliationService,
   ) {}
@@ -131,6 +133,10 @@ export class WhatsAppWebhookController {
 
             this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${dispatchMsgId} clientId=${clientId}`);
 
+            // A media message IS the action's content, so leave the action-menu state
+            // (if any) so the follow-up reply isn't parsed as another menu choice.
+            if (msgType !== 'text') await this.sessions.clearActionMenu(from);
+
             try {
               switch (msgType) {
                 case 'image':
@@ -187,6 +193,7 @@ export class WhatsAppWebhookController {
     'awaiting_evidence',
     'awaiting_clarification',
     'awaiting_project',
+    'awaiting_action',
   ];
 
   // Cap on invalid agency-selection / affiliation-code attempts before aborting the
@@ -709,7 +716,7 @@ export class WhatsAppWebhookController {
             ).catch(() => {});
           }
           await this.wa.sendText(from,
-            `Ubicacion verificada. Estas a ${Math.round(distance)}m del punto de activacion.`);
+            `Ubicacion verificada. Estas a ${Math.round(distance)}m del punto de activacion.${this.actionMenu.closingLine()}`);
           matched = true;
           break;
         } else {
@@ -777,11 +784,34 @@ export class WhatsAppWebhookController {
       return;
     }
 
+    // ¿El remitente tiene una convocatoria abierta? (F4). Se calcula UNA sola vez y
+    //    ANTES del menú porque un pedido del operador (convocatoria) tiene prioridad
+    //    sobre el estado "blando" awaiting_action: un "si"/"no" no debe quedar atrapado
+    //    como una opción de menú inválida y perderse.
+    const hasConvocatoria = await this.tieneConvocatoriaAbierta(from, clientId);
+
+    // ── Menú de acciones: el remitente está eligiendo "¿qué querés hacer?".
+    //    Un número VÁLIDO siempre es una elección del menú (aunque haya convocatoria:
+    //    un "1" no es una confirmación natural). Cualquier otra respuesta cede ante una
+    //    convocatoria abierta (cae al bloque F4 de abajo) y, si no hay, re-muestra el menú.
+    if (session?.state === 'awaiting_action') {
+      const choice = this.actionMenu.parse(text);
+      if (choice.kind !== 'invalid') {
+        await this.wa.sendText(from, this.actionMenu.buildGuide(choice.kind));
+        return;
+      }
+      if (!hasConvocatoria) {
+        await this.wa.sendText(from, `No entendí 🤔\n${this.actionMenu.buildMenu()}`);
+        return;
+      }
+      // fall-through: la convocatoria abierta maneja la respuesta abajo.
+    }
+
     // ── F4 Fase 2: si el sender tiene una convocatoria abierta, cualquier texto
     //    es una respuesta a la convocatoria. NO se parsea si/no acá: se persiste
     //    el evento y se delega la clasificación (confirma/rechaza/ambiguo) al
     //    processor 'convocatoria-classify' (IA con Claude, igual que F1).
-    if (await this.tieneConvocatoriaAbierta(from, clientId)) {
+    if (hasConvocatoria) {
       // Persistir el evento entrante ANTES de procesar la respuesta (invariante eventos_crudos)
       const eventId = await this.persistEvent({
         clientId, canalId, messageId, from, type: 'text', flow: 'F4',
@@ -800,7 +830,11 @@ export class WhatsAppWebhookController {
       payload: { text },
     });
 
-    await this.wa.sendText(from, 'Mensaje recibido. Envia una imagen o documento para procesarlo con IA.');
+    // Plain text, not part of any flow → offer the action menu so the sender knows what
+    // they can do. Persist client_id (awaiting_action is a continuation state) so the
+    // choice and the media that follows don't re-ask the agency.
+    await this.sessions.setActionMenu(from, clientId);
+    await this.wa.sendText(from, this.actionMenu.buildMenu());
   }
 
   // ── Project selection (multi-project disambiguation) ──────────────────────

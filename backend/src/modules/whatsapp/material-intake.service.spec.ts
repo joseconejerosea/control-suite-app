@@ -169,6 +169,37 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE].materialIntake?.step).toBe('cantidad'); // pregunta cantidad (1 ítem sin qty inline)
   });
 
+  it('parses a slash-separated multi-item reply ("1 x / 2 y / 6 z") the same as one-per-line', async () => {
+    let n = 0;
+    skus.create = jest.fn(async (_c: string, dto: any) => ({ id: `sku-${++n}`, codigo: dto.codigo, nombre: dto.nombre }));
+
+    await svc.start({ eventoCrudoId: 'evt-slash', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/s.jpg' });
+
+    // Slash-separated, cantidad inline en cada parte → 3 ítems, salta la pregunta de cantidad.
+    expect(await svc.handleResponse(PHONE, '1 Volumétrico / 2 muebles / 6 canastos')).toBe(true);
+    expect(store[PHONE].materialIntake?.items?.length).toBe(3);
+    expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // proyecto → bodega
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // bodega → registra
+    expect(store[PHONE]).toBeUndefined();
+
+    const nombres = skus.create.mock.calls.map((c: any[]) => c[1].nombre);
+    expect(nombres).toEqual(['Volumétrico', 'muebles', 'canastos']);
+    const cantidades = movimientos.create.mock.calls.map((c: any[]) => c[1].cantidad);
+    expect(cantidades).toEqual([1, 2, 6]);
+  });
+
+  it('does NOT split a single material name that contains a slash (no inline qty)', async () => {
+    await svc.start({ eventoCrudoId: 'evt-slash1', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/s1.jpg' });
+
+    // Nombre legítimo con "/" y sin cantidad inline → UN solo ítem (no se parte).
+    expect(await svc.handleResponse(PHONE, 'Banner blanco/negro')).toBe(true);
+    expect(store[PHONE].materialIntake?.items?.length).toBe(1);
+    expect(store[PHONE].materialIntake?.items?.[0].nombre).toBe('Banner blanco/negro');
+    expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+  });
+
   it('a bookkeeping failure after commit does NOT roll back the SKU/movement nor block the confirmation', async () => {
     // El cierre del evento (bookkeeping) corre en una tx SEPARADA post-commit. Si falla,
     // el alta real (SKU + movimiento) ya está commiteada y la confirmación igual sale.

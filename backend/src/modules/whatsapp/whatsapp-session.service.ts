@@ -182,6 +182,40 @@ export class WhatsAppSessionService implements OnModuleInit {
     await this.set(phoneNumber, session);
   }
 
+  // ── Menú de acciones (single-global-number) ─────────────────────────────────
+
+  /**
+   * Deja la sesión esperando que el remitente elija del menú "¿qué querés hacer?".
+   * Persiste el client_id para que la elección + el media que venga después NO
+   * vuelvan a preguntar la agencia (state='awaiting_action' es de continuación).
+   */
+  async setActionMenu(phoneNumber: string, clientId: string): Promise<void> {
+    const existing = await this.get(phoneNumber);
+    const session: WhatsAppSession = {
+      projects: existing?.projects ?? [],
+      base64: existing?.base64 ?? '',
+      mimeType: existing?.mimeType ?? '',
+      caption: existing?.caption ?? '',
+      canalId: existing?.canalId ?? null,
+      lastProjectId: existing?.lastProjectId,
+      updatedAt: '',
+      ...existing,
+      clientId,
+      state: 'awaiting_action',
+    };
+    await this.set(phoneNumber, session);
+  }
+
+  /** Sale del estado de menú (al arrancar una acción o abandonarla). */
+  async clearActionMenu(phoneNumber: string): Promise<void> {
+    const session = await this.get(phoneNumber);
+    if (!session) return;
+    if (session.state === 'awaiting_action') {
+      session.state = '';
+      await this.set(phoneNumber, session);
+    }
+  }
+
   // ── Dedup atómico de mensajes entrantes ─────────────────────────────────────
   //
   // SET NX es el primitivo atómico de dedup que reemplaza el chequeo racy contra
