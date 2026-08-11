@@ -8,6 +8,7 @@ import { OperatorNotifierService } from './operator-notifier.service';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
 import { SenderTenantResolverService } from './sender-tenant-resolver.service';
 import { WhatsAppTenantSelectionService } from './tenant-selection.service';
+import { WhatsAppActionMenuService } from './action-menu.service';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { ClientsModule } from '../clients/clients.module';
 
@@ -26,7 +27,7 @@ const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
     ClientsModule,
   ],
   controllers: [WhatsAppWebhookController],
-  providers:   [WhatsAppService, WhatsAppSessionService, WhatsAppMediaService, WhatsappOutputService, OperatorNotifierService, PromptShieldService, SenderTenantResolverService, WhatsAppTenantSelectionService],
+  providers:   [WhatsAppService, WhatsAppSessionService, WhatsAppMediaService, WhatsappOutputService, OperatorNotifierService, PromptShieldService, SenderTenantResolverService, WhatsAppTenantSelectionService, WhatsAppActionMenuService],
   exports:     [WhatsAppService, WhatsAppSessionService, WhatsappOutputService, OperatorNotifierService],
 })
 export class WhatsAppModule {}

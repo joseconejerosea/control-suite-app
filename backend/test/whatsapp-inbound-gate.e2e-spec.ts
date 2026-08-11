@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { WhatsAppWebhookController } from '../src/modules/whatsapp/whatsapp.webhook.controller';
 import { WhatsAppTenantSelectionService } from '../src/modules/whatsapp/tenant-selection.service';
+import { WhatsAppActionMenuService } from '../src/modules/whatsapp/action-menu.service';
 import { normalizePhone } from '../src/common/utils/normalize-phone';
 
 /**
@@ -80,6 +81,8 @@ function buildController(opts: {
     updateLastProject: jest.fn(),
     setTenantSelection: jest.fn(),
     clearTenantSelection: jest.fn(),
+    setActionMenu: jest.fn(),
+    clearActionMenu: jest.fn(),
     claimMessage: opts.claimMessage ?? jest.fn().mockResolvedValue(true),
     releaseMessage: jest.fn().mockResolvedValue(undefined),
   } as any;
@@ -105,6 +108,7 @@ function buildController(opts: {
     { checkLocal: jest.fn(() => ({ safe: true, sanitized: 'hola', category: 'safe' })) } as any,   // shield
     senderResolver,                                                                                // senderResolver
     new WhatsAppTenantSelectionService(),                                                          // selection (real)
+    new WhatsAppActionMenuService(),                                                                // actionMenu (real)
     affiliationCode,                                                                               // affiliationCode
     affiliation,                                                                                   // affiliation
   );
@@ -372,6 +376,99 @@ describe('WhatsApp inbound tenant resolution (single global number)', () => {
     // The ongoing flow handled it; the tenant was NOT re-resolved.
     expect(materialIntake.handleResponse).toHaveBeenCalled();
     expect(senderResolver.candidatesFor).not.toHaveBeenCalled();
+  });
+});
+
+describe('WhatsApp action menu (text-only after agency)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('plain text with a resolved tenant (no active flow) → shows the menu and arms awaiting_action', async () => {
+    // Resume path: the sender picked their agency; the buffered free-text now reaches
+    // handleText with no matching intake, so we offer the action menu instead of a
+    // generic "message received".
+    const pendingMsg = textMsg(PHONE_DIGITS, 'buenas', 'buffered-menu');
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_tenant',
+      tenantSelection: {
+        candidates: [{ clientId: 'c1', clientName: 'Agencia Uno' }],
+        pendingMsg,
+        canalId: null,
+        attempts: 0,
+      },
+    }));
+    const { ctrl, sendText, sessions } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, '1')));
+
+    expect(replySent(sendText, '¿Qué querés hacer')).toBe(true);
+    expect(sessions.setActionMenu).toHaveBeenCalledWith(expect.any(String), 'c1');
+  });
+
+  it('awaiting_action + valid number → guides the sender to send that content, no new menu', async () => {
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_action',
+      clientId: 'c1',
+      canalId: null,
+    }));
+    const { ctrl, sendText, sessions, ds } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, '1')));
+
+    expect(replySent(sendText, 'foto de la factura')).toBe(true);
+    expect(replySent(sendText, '¿Qué querés hacer')).toBe(false);
+    expect(sessions.setActionMenu).not.toHaveBeenCalled();
+    expect(insertHappened(ds)).toBe(false);
+  });
+
+  it('awaiting_action + unrecognized reply → re-shows the menu, does not persist', async () => {
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_action',
+      clientId: 'c1',
+      canalId: null,
+    }));
+    const { ctrl, sendText, ds } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'no sé')));
+
+    expect(replySent(sendText, 'No entendí')).toBe(true);
+    expect(replySent(sendText, '¿Qué querés hacer')).toBe(true);
+    expect(insertHappened(ds)).toBe(false);
+  });
+
+  it('awaiting_action + open convocatoria + free-text reply → routes to F4, not the menu', async () => {
+    // A sender parked in awaiting_action who then gets convoked and replies "si" must
+    // reach the F4 classifier — the soft menu state must NOT swallow the convocatoria reply.
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_action',
+      clientId: 'c1',
+      canalId: null,
+    }));
+    const withConvocatoria = (sql: string) => {
+      if (sql.includes('FROM convocatorias')) return [{ ok: 1 }];
+      return persistQuery(sql);
+    };
+    const { ctrl, sendText, ds } = buildController({ queryMocks: withConvocatoria, sessionGet });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'si')));
+
+    expect(insertHappened(ds)).toBe(true);          // persisted as an F4 reply
+    expect(replySent(sendText, 'No entendí')).toBe(false);
+    expect(replySent(sendText, '¿Qué querés hacer')).toBe(false);
+  });
+
+  it('media while awaiting_action → clears the menu state so the follow-up is not parsed as a choice', async () => {
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_action',
+      clientId: 'c1',
+      canalId: null,
+    }));
+    const { ctrl, sessions } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    await ctrl.handleIncoming(
+      metaBody({ id: 'img-act', from: PHONE_DIGITS, type: 'image', image: { id: 'meta-media-2' } }),
+    );
+
+    expect(sessions.clearActionMenu).toHaveBeenCalledWith(expect.any(String));
   });
 });
 

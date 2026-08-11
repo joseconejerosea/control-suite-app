@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ACTION_MENU_CLOSING_INVITE } from './action-menu.service';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -159,7 +160,7 @@ Tipo: ${opts.tipo}
 Proveedor: ${opts.proveedor}
 Monto: ${opts.monto}
 Proyecto: ${opts.proyecto}
-Estado: ${opts.estado}${nuevoSection}
+Estado: ${opts.estado}${nuevoSection}${ACTION_MENU_CLOSING_INVITE}
 
 Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);
@@ -170,7 +171,7 @@ Control Suite BTL ⚡`;
   async avisarDuplicado(telefono: string): Promise<boolean> {
     const msg = `ℹ️ *Documento duplicado*
 
-Este documento ya estaba registrado, así que no lo cargamos de nuevo.
+Este documento ya estaba registrado, así que no lo cargamos de nuevo.${ACTION_MENU_CLOSING_INVITE}
 
 Control Suite BTL ⚡`;
     return this.sendText(telefono, msg);
@@ -205,7 +206,7 @@ Control Suite BTL ⚡`;
 ID: ${opts.codigo}
 Proyecto: ${opts.proyecto}
 Bodega: ${opts.bodega}
-Cantidad: ${opts.cantidad}
+Cantidad: ${opts.cantidad}${ACTION_MENU_CLOSING_INVITE}
 
 Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);

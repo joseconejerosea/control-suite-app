@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from './whatsapp.service';
+import { ACTION_MENU_CLOSING_INVITE } from './action-menu.service';
 import {
   WhatsAppSessionService,
   WhatsAppSession,
@@ -313,7 +314,7 @@ export class EvidenceIntakeService {
       await this.sessions.delete(phone);
       await this.wa.sendText(
         phone,
-        '✅ Evidencia guardada en la activación. ¡Gracias!',
+        `✅ Evidencia guardada en la activación. ¡Gracias!${ACTION_MENU_CLOSING_INVITE}`,
       );
       this.logger.log(
         `[Evidence] Registrado checkin ${checkinId} (evento ${ei.eventoCrudoId})`,
