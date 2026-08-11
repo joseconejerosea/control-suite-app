@@ -57,7 +57,9 @@ export default function ConfigPage() {
     // Workspace context (nombre, plan, rut)
     fetch(`${API}/workspace/context`, { headers: h })
       .then(r => r.json())
-      .then(d => {
+      // Backend wraps responses as { data, timestamp, path }; unwrap defensively.
+      .then(res => {
+        const d = res?.data ?? res;
         if (d?.client) {
           setCuenta(prev => ({
             ...prev,
@@ -71,13 +73,13 @@ export default function ConfigPage() {
     // Bodegas
     fetch(`${API}/v1/app/bodegas`, { headers: h })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setBodegas(d); })
+      .then(res => { const d = res?.data ?? res; if (Array.isArray(d)) setBodegas(d); })
       .catch(() => {});
 
     // Canales
     fetch(`${API}/canal-entrada`, { headers: h })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setCanales(d); })
+      .then(res => { const d = res?.data ?? res; if (Array.isArray(d)) setCanales(d); })
       .catch(() => {});
   }, []);
 
