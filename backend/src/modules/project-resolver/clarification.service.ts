@@ -262,8 +262,8 @@ export class ClarificationService {
     // Valid name: park evento(s) + create draft atomically, then confirm and clear.
     const pendingEventoIds: string[] = clarification.pendingEventoIds ?? [clarification.eventoCrudoId];
 
-    // [JBA-005/JBA-004] The name-reply path reaches here under runWithWaFrom only
-    // (webhook is @Public, no tenant GUC). The park UPDATE and the createDraftFromWhatsApp
+    // [JBA-005/JBA-004] The name-reply path reaches here from the @Public webhook with
+    // no tenant GUC set. The park UPDATE and the createDraftFromWhatsApp
     // INSERT touch RLS tables (eventos_crudos, project_inbox) that read app.current_tenant.
     // Wrap both in a single runWithTenant transaction so (a) the tenant GUC is set and
     // (b) park + insert are atomic — a failed INSERT rolls back the park UPDATEs, so no

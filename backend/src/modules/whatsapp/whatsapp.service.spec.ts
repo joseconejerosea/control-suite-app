@@ -1,6 +1,5 @@
 /// <reference types="jest" />
 import { WhatsAppService } from './whatsapp.service';
-import { runWithWaFrom } from './whatsapp-send-context';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -14,7 +13,7 @@ function fetchResponse(ok: boolean, body: unknown): Response {
   } as unknown as Response;
 }
 
-describe('WhatsAppService — outbound phone_number_id resolution', () => {
+describe('WhatsAppService — outbound to the single global number', () => {
   const GLOBAL_PN = '100000000000000';
   const TO = '5215512345678';
 
@@ -38,7 +37,6 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
-    // R3-011 — restore mutated env vars.
     if (savedPn === undefined) delete process.env.WHATSAPP_PHONE_NUMBER_ID;
     else process.env.WHATSAPP_PHONE_NUMBER_ID = savedPn;
     if (savedToken === undefined) delete process.env.WHATSAPP_ACCESS_TOKEN;
@@ -54,29 +52,9 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
   }
 
   describe('sendText', () => {
-    it('uses the explicit fromPhoneNumberId argument when provided', async () => {
-      await service.sendText(TO, 'hola', '222222222222222');
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(urlOfCall()).toBe(`${API}/222222222222222/messages`);
-    });
-
-    it('uses the ALS waFrom when no explicit argument is given', async () => {
-      await runWithWaFrom('333333333333333', async () => {
-        await service.sendText(TO, 'hola');
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(urlOfCall()).toBe(`${API}/333333333333333/messages`);
-    });
-
-    it('prefers the explicit argument over the ALS value', async () => {
-      await runWithWaFrom('333333333333333', async () => {
-        await service.sendText(TO, 'hola', '222222222222222');
-      });
-      expect(urlOfCall()).toBe(`${API}/222222222222222/messages`);
-    });
-
-    it('falls back to the global env id when neither an argument nor ALS is set', async () => {
+    it('sends from the single global WHATSAPP_PHONE_NUMBER_ID', async () => {
       await service.sendText(TO, 'hola');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(urlOfCall()).toBe(`${API}/${GLOBAL_PN}/messages`);
     });
 
@@ -93,14 +71,16 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
       expect(body.to).toBe('5215512345678');
     });
 
-    // R1-002 — a non-numeric resolved id must NOT hit fetch and returns false.
-    it('refuses to fetch when the resolved id is non-numeric (R1-002)', async () => {
-      const ok = await service.sendText(TO, 'hola', 'evil.example.com/../path');
+    // R1-002 — a non-numeric configured id must NOT hit fetch and returns false.
+    it('refuses to fetch when the global id is non-numeric (R1-002)', async () => {
+      process.env.WHATSAPP_PHONE_NUMBER_ID = 'evil.example.com/../path';
+      const svc = new WhatsAppService();
+      const ok = await svc.sendText(TO, 'hola');
       expect(ok).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('refuses to fetch when no id resolves at all (R1-002)', async () => {
+    it('refuses to fetch when no id is configured (R1-002)', async () => {
       delete process.env.WHATSAPP_PHONE_NUMBER_ID;
       const svc = new WhatsAppService(); // constructs with undefined global id
       const ok = await svc.sendText(TO, 'hola');
@@ -110,19 +90,7 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
   });
 
   describe('sendTemplate', () => {
-    it('uses the explicit fromPhoneNumberId argument when provided', async () => {
-      await service.sendTemplate(TO, 'tpl', [], '222222222222222');
-      expect(urlOfCall()).toBe(`${API}/222222222222222/messages`);
-    });
-
-    it('uses the ALS waFrom when no explicit argument is given', async () => {
-      await runWithWaFrom('333333333333333', async () => {
-        await service.sendTemplate(TO, 'tpl', []);
-      });
-      expect(urlOfCall()).toBe(`${API}/333333333333333/messages`);
-    });
-
-    it('falls back to the global env id when neither an argument nor ALS is set', async () => {
+    it('sends from the single global WHATSAPP_PHONE_NUMBER_ID', async () => {
       await service.sendTemplate(TO, 'tpl', []);
       expect(urlOfCall()).toBe(`${API}/${GLOBAL_PN}/messages`);
     });
@@ -138,9 +106,11 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
       expect(body.to).toBe('5215512345678');
     });
 
-    // R1-002 — non-numeric resolved id blocks fetch and returns false.
-    it('refuses to fetch when the resolved id is non-numeric (R1-002)', async () => {
-      const ok = await service.sendTemplate(TO, 'tpl', [], 'not-a-number');
+    // R1-002 — non-numeric configured id blocks fetch and returns false.
+    it('refuses to fetch when the global id is non-numeric (R1-002)', async () => {
+      process.env.WHATSAPP_PHONE_NUMBER_ID = 'not-a-number';
+      const svc = new WhatsAppService();
+      const ok = await svc.sendTemplate(TO, 'tpl', []);
       expect(ok).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
     });

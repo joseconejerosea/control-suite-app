@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getWaFrom } from './whatsapp-send-context';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -21,30 +20,20 @@ export class WhatsAppService {
   }
 
   /**
-   * WhatsApp gap 2 — multi-tenant: resuelve el phone_number_id DESDE el cual sale
-   * el mensaje. Orden: (a) el explícito pasado por el caller; (b) el del contexto
-   * de tenant (seteado por el webhook con el número entrante); (c) el global de
-   * env como fallback (comportamiento previo intacto).
-   */
-  private resolveFrom(fromPhoneNumberId?: string): string | undefined {
-    return fromPhoneNumberId ?? getWaFrom() ?? this.phoneNumberId;
-  }
-
-  /**
-   * R1-002 (SSRF defense) — the resolved phone_number_id is interpolated into
-   * the Graph API URL, so it MUST be a plain numeric id. Anything else (a
-   * spoofed value, an undefined fallback, path/host injection) would let a
-   * caller redirect the request. Reject non-numeric / missing ids fail-closed.
+   * Single global number: every tenant's outbound WhatsApp goes through the one
+   * WHATSAPP_PHONE_NUMBER_ID. R1-002 (SSRF defense) — the id is interpolated into
+   * the Graph API URL, so it MUST be a plain numeric id; reject anything else
+   * (missing/misconfigured env) fail-closed.
    */
   private validFrom(from: string | undefined): string | null {
     return from && /^\d+$/.test(from) ? from : null;
   }
 
-  async sendText(to: string, message: string, fromPhoneNumberId?: string): Promise<boolean> {
-    const from = this.validFrom(this.resolveFrom(fromPhoneNumberId));
+  async sendText(to: string, message: string): Promise<boolean> {
+    const from = this.validFrom(this.phoneNumberId);
     if (!from) {
       this.logger.error(
-        `[WhatsApp] Refusing sendText: invalid phone_number_id=${this.resolveFrom(fromPhoneNumberId)}`,
+        `[WhatsApp] Refusing sendText: invalid phone_number_id=${this.phoneNumberId}`,
       );
       return false;
     }
@@ -80,12 +69,11 @@ export class WhatsAppService {
     to: string,
     templateName: string,
     params: string[],
-    fromPhoneNumberId?: string,
   ): Promise<boolean> {
-    const from = this.validFrom(this.resolveFrom(fromPhoneNumberId));
+    const from = this.validFrom(this.phoneNumberId);
     if (!from) {
       this.logger.error(
-        `[WhatsApp] Refusing sendTemplate: invalid phone_number_id=${this.resolveFrom(fromPhoneNumberId)}`,
+        `[WhatsApp] Refusing sendTemplate: invalid phone_number_id=${this.phoneNumberId}`,
       );
       return false;
     }

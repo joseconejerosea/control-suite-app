@@ -18,7 +18,6 @@ import { normalizePhone } from '../../common/utils/normalize-phone';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant } from '../../common/tenant/tenant-context';
-import { runWithWaFrom, getWaFrom } from './whatsapp-send-context';
 import { SenderTenantResolverService } from './sender-tenant-resolver.service';
 import { WhatsAppTenantSelectionService } from './tenant-selection.service';
 import { AffiliationCodeService } from '../clients/affiliation-code.service';
@@ -92,16 +91,9 @@ export class WhatsAppWebhookController {
       const value   = changes?.value;
       if (!value) return 'ok';
 
-      // Single global number — replies still go out from the number the message
-      // arrived on (one number today; Tajada B collapses this to the global env).
-      // The ALS (whatsapp-send-context) propagates it to every sub-handler sendText.
-      const waFrom = value?.metadata?.phone_number_id as string | undefined;
-      if (!waFrom) {
-        this.logger.warn(
-          '[WhatsApp] Missing metadata.phone_number_id — replies will fall back to the global env number',
-        );
-      }
-
+      // Single global number: every reply goes out from the one global
+      // WHATSAPP_PHONE_NUMBER_ID (WhatsAppService), so there is no per-message
+      // outbound context to set up here.
       const messages = value?.messages;
       if (!messages?.length) return 'ok';
 
@@ -122,7 +114,7 @@ export class WhatsAppWebhookController {
         }
 
         try {
-          await runWithWaFrom(waFrom, async () => {
+          await (async () => {
             // Single-global-number: resolve WHICH agency (tenant) this message
             // belongs to from the SENDER, not the recipient number. May ask the
             // sender to pick an agency or type an affiliation code, buffering the
@@ -173,7 +165,7 @@ export class WhatsAppWebhookController {
               }
               throw dispatchErr;
             }
-          });
+          })();
         } catch (err) {
           // Release the NX claim so Meta's retry can reprocess. Rethrow to log.
           await this.sessions.releaseMessage(messageId).catch(() => {});
@@ -449,10 +441,7 @@ export class WhatsAppWebhookController {
         opts.canalId,
         opts.messageId,
         opts.flow,
-        // wa_phone_number_id: el número por el que ENTRÓ el mensaje. Se guarda para
-        // que los workers (OCR/classify/persist) respondan desde ese mismo número y
-        // no desde el global (getWaFrom está activo acá vía runWithWaFrom del webhook).
-        JSON.stringify({ ...opts.payload, from: opts.from, type: opts.type, wa_phone_number_id: getWaFrom() ?? null }),
+        JSON.stringify({ ...opts.payload, from: opts.from, type: opts.type }),
       ],
     );
 
