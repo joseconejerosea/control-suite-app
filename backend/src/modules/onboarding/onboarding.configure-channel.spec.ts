@@ -1,10 +1,12 @@
 /// <reference types="jest" />
+import { BadRequestException } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { OnboardingService } from './onboarding.service';
 import { Client } from '../clients/client.entity';
 import { CanalEntrada } from '../canal-entrada/canal-entrada.entity';
 import { User } from '../users/user.entity';
 import { ConfigureChannelDto } from './dto/configure-channel.dto';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 /**
  * configureChannel — single global WhatsApp number model.
@@ -18,7 +20,7 @@ describe('OnboardingService — configureChannel', () => {
   const CANAL_ID = 'canal-1';
 
   let service: OnboardingService;
-  let clientRepo: { findOneBy: jest.Mock; update: jest.Mock };
+  let clientRepo: { findOneBy: jest.Mock; findOne: jest.Mock; update: jest.Mock };
   let canalRepoCtx: { create: jest.Mock; save: jest.Mock };
   let userRepo: Partial<jest.Mocked<Repository<User>>>;
   let dataSource: DataSource;
@@ -26,6 +28,7 @@ describe('OnboardingService — configureChannel', () => {
   beforeEach(() => {
     clientRepo = {
       findOneBy: jest.fn(),
+      findOne: jest.fn(),
       update: jest.fn().mockResolvedValue(undefined),
     };
     canalRepoCtx = {
@@ -86,5 +89,24 @@ describe('OnboardingService — configureChannel', () => {
     expect(clientRepo.update).toHaveBeenCalledWith(CLIENT_ID, {
       onboarding_step: 'channel_configured',
     });
+  });
+
+  it('completeOnboarding rejects when a configured channel is still inactive', async () => {
+    clientRepo.findOne.mockResolvedValue({
+      id: CLIENT_ID,
+      status: 'onboarding',
+      onboarding_step: 'admin_created',
+      canales: [
+        { is_active: true, nombre: 'WA' },
+        { is_active: false, nombre: 'Mail' }, // unverified email — must block completion
+      ],
+      users: [{ role: UserRole.MANAGER }],
+    } as unknown as Client);
+
+    const err = await service.completeOnboarding(CLIENT_ID).catch((e) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    // The inactive channel is named in the error so the operator knows what to verify.
+    expect(JSON.stringify((err as BadRequestException).getResponse())).toContain('Mail');
   });
 });

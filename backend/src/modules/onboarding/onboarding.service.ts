@@ -176,6 +176,16 @@ export class OnboardingService {
 
     const errors: string[] = [];
     if (!(client.canales ?? []).some(c => c.is_active))             errors.push('At least one active channel required.');
+    // Don't let a half-configured channel ship inactive: every configured channel must
+    // be active (WhatsApp auto-activates on configure; email/generic activate via
+    // verify-channel). Otherwise a completed tenant would carry a dead channel.
+    const inactiveChannels = (client.canales ?? []).filter(c => !c.is_active);
+    if (inactiveChannels.length > 0) {
+      errors.push(
+        `These channels are still unverified: ${inactiveChannels.map(c => c.nombre).join(', ')}. ` +
+        `Verify (or remove) them before completing onboarding.`,
+      );
+    }
     if (!(client.users ?? []).some(u => u.role === UserRole.MANAGER)) errors.push('At least one admin_cliente user required.');
     if (client.onboarding_step !== 'admin_created')                  errors.push(`Step must be 'admin_created' (current: '${client.onboarding_step}').`);
 
