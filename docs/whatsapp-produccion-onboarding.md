@@ -78,9 +78,9 @@ Por cada cliente nuevo:
 
 1. **Crear el cliente** (SuperAdmin) → se genera automáticamente su
    **código de afiliación** único (`clients.affiliation_code`, rotable).
-2. **Onboarding** → configurar el canal WhatsApp: queda **activo al instante** (no
-   hay registro de número ni OTP; el número global ya está vivo) → crear el admin
-   (Manager) → completar.
+2. **Onboarding** (3 pasos, sin configurar canales): crear cliente → crear admin
+   (Manager) → activar. WhatsApp ya funciona (número global); no hay registro de
+   número, OTP ni paso de canal.
 3. El **Manager** ve y reparte su código de afiliación desde
    `client/config` (Integraciones) — puede rotarlo si se filtra.
 4. El **staff** escribe al número global y, la primera vez, tipea el código →
