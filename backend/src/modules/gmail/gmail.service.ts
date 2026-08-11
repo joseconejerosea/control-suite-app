@@ -546,7 +546,8 @@ export class GmailService {
   /**
    * Gate de facturas por email: ¿el remitente es STAFF de este tenant? Autorizados =
    * users / collaborators / promoters del cliente con este email (activos). Espeja el
-   * gate de WhatsApp (isAuthorizedSender) pero por correo. Corre ANTES de la IA, así
+   * criterio de autorización del bot de WhatsApp (mismas tablas de staff), pero por
+   * correo en vez de por teléfono. Corre ANTES de la IA, así
    * un remitente desconocido no gasta tokens ni puede inyectar facturas falsas.
    * Fail-closed: ante error de DB, NO autoriza.
    */

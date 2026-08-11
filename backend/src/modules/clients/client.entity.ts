@@ -15,8 +15,8 @@ import { CanalEntrada } from '../canal-entrada/canal-entrada.entity';
  * Its `id` becomes the `client_id` referenced by all other tenant-scoped tables.
  *
  * Valid status values:   'onboarding' | 'active' | 'suspended' | 'cancelled'
- * Valid onboarding_step: 'client_created' | 'channel_configured' |
- *                        'channel_verified' | 'admin_created' | 'completed'
+ * Valid onboarding_step: 'client_created' | 'admin_created' | 'completed'
+ *   (single global number model — onboarding no longer configures channels)
  */
 @Entity('clients')
 export class Client {
@@ -37,6 +37,11 @@ export class Client {
 
   @Column({ type: 'varchar', length: 30, default: 'client_created' })
   onboarding_step: string;
+
+  // Single-global-number model: the credential a promoter/host types over WhatsApp
+  // to affiliate to this agency. Unique across all tenants; rotatable.
+  @Column({ type: 'varchar', length: 16, unique: true })
+  affiliation_code: string;
 
   @Column({ type: 'jsonb', nullable: true })
   config: Record<string, unknown> | null;

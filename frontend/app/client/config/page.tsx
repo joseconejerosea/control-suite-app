@@ -5,6 +5,7 @@ import {
   Save, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
 import GmailConnect from "@/components/integrations/gmail-connect";
+import AffiliationCode from "@/components/integrations/affiliation-code";
 import AppShell from "@/components/layout/app-shell";
 
 // NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
@@ -56,7 +57,9 @@ export default function ConfigPage() {
     // Workspace context (nombre, plan, rut)
     fetch(`${API}/workspace/context`, { headers: h })
       .then(r => r.json())
-      .then(d => {
+      // Backend wraps responses as { data, timestamp, path }; unwrap defensively.
+      .then(res => {
+        const d = res?.data ?? res;
         if (d?.client) {
           setCuenta(prev => ({
             ...prev,
@@ -70,13 +73,13 @@ export default function ConfigPage() {
     // Bodegas
     fetch(`${API}/v1/app/bodegas`, { headers: h })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setBodegas(d); })
+      .then(res => { const d = res?.data ?? res; if (Array.isArray(d)) setBodegas(d); })
       .catch(() => {});
 
     // Canales
     fetch(`${API}/canal-entrada`, { headers: h })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setCanales(d); })
+      .then(res => { const d = res?.data ?? res; if (Array.isArray(d)) setCanales(d); })
       .catch(() => {});
   }, []);
 
@@ -216,6 +219,12 @@ export default function ConfigPage() {
   const tabIntegraciones = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <GmailConnect onToast={showToast} />
+
+      {/* Solo Manager (admin_cliente) o super_admin. El backend igual devuelve 403
+          al resto; la card lo maneja mostrando un mensaje suave sin romper. */}
+      {(user.role === "admin_cliente" || user.role === "super_admin") && (
+        <AffiliationCode onToast={showToast} />
+      )}
 
       {card(<>
         {sectionTitle("Google Sheets — destino de exportación")}
