@@ -59,8 +59,8 @@ export class EvidenceIntakeService {
 
     // Resolver la persona por dígitos del teléfono. El `from` de Meta llega 549...
     // y el phone guardado tiene '+', espacios, etc. Todo dentro de runWithTenant (RLS).
-    // Resolvemos al remitente contra las MISMAS tablas que autoriza el gate del bot
-    // (isAuthorizedSender): promotores, colaboradores y usuarios (Manager/Operador/
+    // Resolvemos al remitente contra las MISMAS tablas de staff que reconoce el bot
+    // (match por dígitos del teléfono): promotores, colaboradores y usuarios (Manager/Operador/
     // Supervisor). Así cualquier staff autorizado que mande su foto de la activación
     // queda asociado. checkins.persona_id NO tiene FK, así que el id de cualquiera de
     // las tres tablas sirve como persona del check-in. Todo dentro de runWithTenant (RLS).

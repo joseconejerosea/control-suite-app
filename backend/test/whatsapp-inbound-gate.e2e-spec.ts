@@ -2,85 +2,58 @@ import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { WhatsAppWebhookController } from '../src/modules/whatsapp/whatsapp.webhook.controller';
+import { WhatsAppTenantSelectionService } from '../src/modules/whatsapp/tenant-selection.service';
 import { normalizePhone } from '../src/common/utils/normalize-phone';
 
 /**
- * Gate de sender entrante de WhatsApp.
+ * WhatsApp inbound tenant resolution — SINGLE GLOBAL NUMBER model.
  *
- * Patrón: instanciación directa del controller con dependencias mockeadas,
- * igual que prompt-shield.e2e-spec.ts y webhook-signature.e2e-spec.ts.
- * NO se levanta HTTP ni se toca la DB real.
+ * The tenant is resolved from the SENDER (not the recipient phone_number_id):
+ *   0 agencies  → ask for an affiliation code
+ *   1+ agencies → ask which agency (numbered) + an "otra agencia" (code) option
+ *   reply       → resume the BUFFERED intake under the chosen/affiliated agency
+ * An ongoing multi-step flow (material/evidence/clarification/project) bypasses
+ * resolution and keeps its own tenant.
  *
- * IMPORTANTE — diseño anti-tautología:
- *   El mock del gate (query UNION promoters/collaborators) autoriza SOLO si
- *   recibe los `params` esperados: [clientId, digitosNormalizados]. Así, si se
- *   rompiera `normalizePhone` o se dejara de pasar `clientId`, los tests de
- *   "autorizado" pasarían a FALLAR (el mock devolvería [] → no autorizado).
- *   Sin esto, el mock aprobaría siempre y el test no probaría nada.
- *
- * Caso (e) aislamiento de tenant a nivel SQL/RLS real: documentado al pie.
+ * Pattern: direct controller instantiation with mocked deps (no HTTP, no real DB).
  */
 
-// ─── Fixtures ────────────────────────────────────────────────────────────────
+const PHONE_DIGITS       = '5491112345678';
+const PHONE_MIXED_FORMAT = '+54 9 11 1234-5678';
 
-const CLIENT_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const CLIENT_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-
-/** Número tal como lo manda Meta: solo dígitos, sin '+' */
-const PHONE_DIGITS         = '5491112345678';
-/** Mismo número con formato "humano" (como podría estar en la DB / o llegar) */
-const PHONE_MIXED_FORMAT   = '+54 9 11 1234-5678';
-const UNKNOWN_PHONE        = '5491199999999';
-
-// sanity: ambos formatos normalizan al mismo dígito-string
-expectSameDigits();
-function expectSameDigits() {
-  if (normalizePhone(PHONE_MIXED_FORMAT) !== PHONE_DIGITS) {
-    throw new Error(
-      `Fixture inválido: normalizePhone('${PHONE_MIXED_FORMAT}')='${normalizePhone(PHONE_MIXED_FORMAT)}' != '${PHONE_DIGITS}'`,
-    );
-  }
+function textMsg(from: string, body: string, id = `msg-${from}-${body}`) {
+  return { id, from, type: 'text', text: { body } };
 }
 
-/** Construye un payload Meta mínimo con un mensaje de texto */
-function metaBody(from: string, phoneNumberId = 'pnid-a') {
+function metaBody(...messages: any[]) {
   return {
-    entry: [{
-      changes: [{
-        value: {
-          metadata: { phone_number_id: phoneNumberId },
-          messages: [{
-            id: `msg-${from}-${Math.random()}`,
-            from,
-            type: 'text',
-            text: { body: 'hola' },
-          }],
-        },
-      }],
-    }],
+    entry: [{ changes: [{ value: { metadata: { phone_number_id: 'global-pnid' }, messages } }] }],
   };
 }
 
-type QueryMock = (sql: string, params: any[]) => any[];
+function insertHappened(ds: DataSource): boolean {
+  return (ds.query as jest.Mock).mock.calls.some(
+    (call: any[]) => typeof call[0] === 'string' && call[0].includes('INSERT INTO eventos_crudos'),
+  );
+}
 
-// ─── Builder de controller con mocks ─────────────────────────────────────────
+function replySent(sendText: jest.Mock, needle: string): boolean {
+  return sendText.mock.calls.some(
+    (call: any[]) => typeof call[1] === 'string' && call[1].includes(needle),
+  );
+}
 
 function buildController(opts: {
-  queryMocks: QueryMock;
-  sendTextMock?: jest.Mock;
-  sessionsMock?: any;
-  materialIntakeMock?: any;
+  queryMocks?: (sql: string, params: any[]) => any[];
+  sessionGet?: jest.Mock;
+  candidatesFor?: jest.Mock;
+  resolveClientByCode?: jest.Mock;
+  affiliate?: jest.Mock;
+  materialIntake?: any;
+  claimMessage?: jest.Mock;
 }) {
-  // Tipado explícito de args → permite destructurar [, msg] sin error TS.
-  const sendText = opts.sendTextMock ?? jest.fn(async (_to: string, _msg: string) => undefined);
+  const sendText = jest.fn(async (_to: string, _msg: string) => undefined);
 
-  // async → el mock devuelve una Promesa (el ds.query real lo es), así
-  // `.catch(...)` que usa el controller en isDuplicate/resolveChannel existe.
-  //
-  // `handleText` del path autorizado usa runWithTenant (tieneConvocatoriaAbierta,
-  // notificarAltaUrgente), que abre un QueryRunner para setear app.current_tenant.
-  // El fn interno igual usa this.ds.query (el mock de query de abajo); el runner solo
-  // necesita el ciclo de vida de la tx → stub mínimo.
   const makeQueryRunner = () => ({
     connect: jest.fn(async () => undefined),
     startTransaction: jest.fn(async () => undefined),
@@ -90,355 +63,333 @@ function buildController(opts: {
     isTransactionActive: true,
     query: jest.fn(async () => []),
   });
+  const queryMocks = opts.queryMocks ?? (() => []);
   const ds = {
-    query: jest.fn(async (sql: string, params: any[]) => opts.queryMocks(sql, params)),
+    query: jest.fn(async (sql: string, params: any[]) => queryMocks(sql, params)),
     createQueryRunner: jest.fn(() => makeQueryRunner()),
   } as unknown as DataSource;
-
-  const wa = { sendText } as any;
 
   jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
   jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
+  const sessions = {
+    get: opts.sessionGet ?? jest.fn(async () => null),
+    set: jest.fn(),
+    delete: jest.fn(),
+    updateLastProject: jest.fn(),
+    setTenantSelection: jest.fn(),
+    clearTenantSelection: jest.fn(),
+    claimMessage: opts.claimMessage ?? jest.fn().mockResolvedValue(true),
+    releaseMessage: jest.fn().mockResolvedValue(undefined),
+  } as any;
+
+  const senderResolver = { candidatesFor: opts.candidatesFor ?? jest.fn(async () => []) } as any;
+  const affiliationCode = { resolveClientByCode: opts.resolveClientByCode ?? jest.fn(async () => null) } as any;
+  const affiliation = {
+    affiliate: opts.affiliate ?? jest.fn(async () => ({ promoterId: 'p1', created: true })),
+  } as any;
+
   const ctrl = new WhatsAppWebhookController(
-    wa,
-    opts.sessionsMock ?? {
-      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
-      // Dedup atómico: por defecto el mensaje es fresco (se procesa).
-      claimMessage: jest.fn().mockResolvedValue(true),
-      releaseMessage: jest.fn().mockResolvedValue(undefined),
-    } as any,                                                                                     // sessions
-    { downloadAndStore: jest.fn() } as any,                                                       // media
-    opts.materialIntakeMock ?? { handleResponse: jest.fn(async () => false) } as any,             // materialIntake
-    { handleResponse: jest.fn(async () => false) } as any,                                        // evidenceIntake
-    { handleClarificationResponse: jest.fn(async () => false) } as any,                          // clarification
-    { resolve: jest.fn(async () => null) } as any,                                                // projectResolver
+    { sendText } as any,                                                                          // wa
+    sessions,                                                                                      // sessions
+    { downloadAndStore: jest.fn() } as any,                                                        // media
+    opts.materialIntake ?? { handleResponse: jest.fn(async () => false) } as any,                  // materialIntake
+    { handleResponse: jest.fn(async () => false) } as any,                                         // evidenceIntake
+    { handleClarificationResponse: jest.fn(async () => false) } as any,                            // clarification
+    { resolve: jest.fn(async () => null) } as any,                                                 // projectResolver
     ds,
-    { add: jest.fn() } as any,                                                                    // ocrQueue
-    { add: jest.fn() } as any,                                                                    // convocatoriaQueue
-    { add: jest.fn() } as any,                                                                    // returnPhotoQueue
-    { checkLocal: jest.fn(() => ({ safe: true, sanitized: 'hola', category: 'safe' })) } as any, // shield
+    { add: jest.fn() } as any,                                                                     // ocrQueue
+    { add: jest.fn() } as any,                                                                     // convocatoriaQueue
+    { add: jest.fn() } as any,                                                                     // returnPhotoQueue
+    { checkLocal: jest.fn(() => ({ safe: true, sanitized: 'hola', category: 'safe' })) } as any,   // shield
+    senderResolver,                                                                                // senderResolver
+    new WhatsAppTenantSelectionService(),                                                          // selection (real)
+    affiliationCode,                                                                               // affiliationCode
+    affiliation,                                                                                   // affiliation
   );
 
-  return { ctrl, ds, sendText };
+  return { ctrl, ds, sendText, sessions, senderResolver, affiliationCode, affiliation };
 }
 
-/** ¿Se envió el aviso de "no registrado"? cuántas veces */
-function notifyCount(sendText: jest.Mock): number {
-  return sendText.mock.calls.filter(
-    (call: any[]) => typeof call[1] === 'string' && call[1].includes('No estás registrado'),
-  ).length;
-}
-
-/** ¿Se ejecutó un INSERT a eventos_crudos? (= el mensaje se procesó/persistió) */
-function insertHappened(ds: DataSource): boolean {
-  return (ds.query as jest.Mock).mock.calls.some(
-    (call: any[]) => typeof call[0] === 'string' && call[0].includes('INSERT INTO eventos_crudos'),
-  );
-}
-
-// ─── queryMock que AUTORIZA solo con los params correctos (anti-tautología) ───
-
-/**
- * Autoriza únicamente si la query del gate recibe params === [clientId, digits].
- * Si normalizePhone se rompe o no se pasa clientId, devuelve [] → no autoriza.
- * `insertSpy` registra si se intentó persistir el evento (procesamiento real).
- */
-function authorizeWhen(opts: {
-  channelClientId: string;
-  expectClientId: string;
-  expectDigits: string;
-  insertSpy?: jest.Mock;
-}): QueryMock {
-  return (sql, params) => {
-    if (sql.includes('canal_entrada')) {
-      return [{ client_id: opts.channelClientId, id: 'canal-1' }];
-    }
-    if (sql.includes('eventos_crudos') && sql.includes('WHERE idempotency_key')) {
-      return []; // no duplicado
-    }
-    if (sql.includes('promoters') && sql.includes('collaborators')) {
-      const [cid, digits] = params;
-      const ok = cid === opts.expectClientId && digits === opts.expectDigits;
-      return ok ? [{ ok: 1 }] : [];
-    }
-    if (sql.includes('INSERT INTO eventos_crudos')) {
-      opts.insertSpy?.();
-      return [{ id: 'evt-1' }];
-    }
-    return [];
-  };
-}
-
-// ─── Suite ───────────────────────────────────────────────────────────────────
+/** queryMock that never duplicates and records the eventos_crudos insert. */
+const persistQuery = (sql: string) => {
+  if (sql.includes('WHERE idempotency_key')) return [];
+  if (sql.includes('convocatorias')) return [];
+  if (sql.includes('stock_return_requests')) return [];
+  if (sql.includes('INSERT INTO eventos_crudos')) return [{ id: 'evt-1' }];
+  return [];
+};
 
 describe('normalizePhone', () => {
-  it('extrae solo dígitos de formatos variados', () => {
-    expect(normalizePhone('+54 9 11 1234-5678')).toBe('5491112345678');
-    expect(normalizePhone('5491112345678')).toBe('5491112345678');
+  it('extracts digits from varied formats', () => {
+    expect(normalizePhone(PHONE_MIXED_FORMAT)).toBe(PHONE_DIGITS);
     expect(normalizePhone('(549) 11-1234')).toBe('549111234');
     expect(normalizePhone(null)).toBe('');
     expect(normalizePhone(undefined)).toBe('');
-    expect(normalizePhone('')).toBe('');
   });
 });
 
-describe('WhatsApp inbound sender gate', () => {
-  const origGate = process.env.WHATSAPP_SENDER_GATE;
+describe('WhatsApp inbound tenant resolution (single global number)', () => {
+  beforeEach(() => jest.clearAllMocks());
 
-  beforeEach(() => {
-    delete process.env.WHATSAPP_SENDER_GATE; // gate activo por default
-    jest.clearAllMocks();
-  });
-
-  afterAll(() => {
-    if (origGate !== undefined) process.env.WHATSAPP_SENDER_GATE = origGate;
-    else delete process.env.WHATSAPP_SENDER_GATE;
-  });
-
-  // (a) Autorizado → procesa (NO aviso) Y persiste el evento (procesamiento real)
-  it('(a) sender autorizado → procesa el mensaje (sin aviso, con persistencia)', async () => {
-    const { ctrl, sendText, ds } = buildController({
-      queryMocks: authorizeWhen({
-        channelClientId: CLIENT_A, expectClientId: CLIENT_A, expectDigits: PHONE_DIGITS,
-      }),
+  it('unknown sender (0 agencies) → asks for the affiliation code, does not persist', async () => {
+    const { ctrl, sendText, ds, sessions } = buildController({
+      queryMocks: persistQuery,
+      candidatesFor: jest.fn(async () => []),
     });
 
-    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'hola')));
 
-    expect(notifyCount(sendText)).toBe(0);
-    expect(insertHappened(ds)).toBe(true); // el mensaje SÍ se procesó (INSERT eventos_crudos)
-  });
-
-  // (c) No registrado → aviso exactamente una vez, NO persiste, NO encola
-  it('(c) sender no registrado → aviso (1) y NO persiste', async () => {
-    const { ctrl, sendText, ds } = buildController({
-      queryMocks: authorizeWhen({
-        channelClientId: CLIENT_A, expectClientId: CLIENT_A, expectDigits: PHONE_DIGITS,
-      }),
-    });
-
-    await ctrl.handleIncoming(metaBody(UNKNOWN_PHONE)); // distinto a PHONE_DIGITS → no matchea
-
-    expect(notifyCount(sendText)).toBe(1);
-    expect(insertHappened(ds)).toBe(false); // no se procesó nada
-  });
-
-  // (d) Formato mixto → normaliza ANTES de la query y autoriza.
-  //     ESTE test FALLA si normalizePhone deja de aplicarse: el mock exige
-  //     digits === PHONE_DIGITS, pero `from` llega como PHONE_MIXED_FORMAT.
-  it('(d) formato mixto → normaliza y autoriza (no-tautológico)', async () => {
-    const { ctrl, sendText, ds } = buildController({
-      queryMocks: authorizeWhen({
-        channelClientId: CLIENT_A, expectClientId: CLIENT_A, expectDigits: PHONE_DIGITS,
-      }),
-    });
-
-    await ctrl.handleIncoming(metaBody(PHONE_MIXED_FORMAT));
-
-    expect(notifyCount(sendText)).toBe(0);
-
-    // Aserción dura: la query del gate recibió los dígitos normalizados, no el crudo.
-    const gateCall = (ds.query as jest.Mock).mock.calls.find(
-      ([sql]: any[]) => typeof sql === 'string' && sql.includes('promoters') && sql.includes('collaborators'),
+    expect(replySent(sendText, 'código de afiliación')).toBe(true);
+    expect(insertHappened(ds)).toBe(false);
+    expect(sessions.setTenantSelection).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ candidates: [] }),
+      'awaiting_affiliation_code',
     );
-    expect(gateCall).toBeDefined();
-    // Los primeros dos params SON clientId + dígitos normalizados (lo que prueba el
-    // anti-tautología). La query del gate añade luego los roles de `users`
-    // (MANAGER/OPERATOR/SUPERVISOR) como params 3-5 — irrelevantes para este chequeo.
-    expect(gateCall![1].slice(0, 2)).toEqual([CLIENT_A, PHONE_DIGITS]);
   });
 
-  // (e-unit) Aislamiento de tenant a nivel de parámetro: el clientId del canal
-  //          se pasa al gate. Un número que solo autorizaría en CLIENT_B no
-  //          pasa cuando el canal resuelve CLIENT_A.
-  it('(e-unit) número de otro tenant → no autoriza (clientId se pasa al gate)', async () => {
-    const { ctrl, sendText } = buildController({
-      // El canal resuelve CLIENT_A, pero el gate solo autorizaría a CLIENT_B.
-      queryMocks: authorizeWhen({
-        channelClientId: CLIENT_A, expectClientId: CLIENT_B, expectDigits: PHONE_DIGITS,
-      }),
+  it('sender with agencies (1+) → always asks which agency and buffers, does not persist', async () => {
+    const { ctrl, sendText, ds, sessions } = buildController({
+      queryMocks: persistQuery,
+      candidatesFor: jest.fn(async () => [{ clientId: 'c1', clientName: 'Agencia Uno' }]),
     });
 
-    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'hola')));
 
-    expect(notifyCount(sendText)).toBe(1); // bloqueado por scoping de tenant
+    expect(replySent(sendText, '¿Para qué agencia')).toBe(true);
+    expect(replySent(sendText, 'Otra agencia')).toBe(true);
+    expect(insertHappened(ds)).toBe(false);
+    expect(sessions.setTenantSelection).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ candidates: [{ clientId: 'c1', clientName: 'Agencia Uno' }] }),
+      'awaiting_tenant',
+    );
   });
 
-  // (f) Inactivo → la query UNION (status='active'/is_active=true) devuelve []
-  it('(f) promoter inactivo / collaborator inactivo → bloquea y avisa', async () => {
-    const { ctrl, sendText } = buildController({
-      // Aunque el número y el tenant coincidan, simulamos que la UNION no matchea
-      // (porque status != 'active'): devolvemos [] siempre para el gate.
-      queryMocks: (sql, params) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        if (sql.includes('WHERE idempotency_key')) return [];
-        if (sql.includes('promoters') && sql.includes('collaborators')) return []; // inactivo
-        return [];
+  it('agency selection reply → resumes the buffered intake and persists under the chosen agency', async () => {
+    const pendingMsg = textMsg(PHONE_DIGITS, 'una novedad', 'buffered-1');
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_tenant',
+      tenantSelection: {
+        candidates: [{ clientId: 'c1', clientName: 'Agencia Uno' }],
+        pendingMsg,
+        canalId: null,
+        attempts: 0,
       },
-    });
+    }));
+    const { ctrl, ds, sessions } = buildController({ queryMocks: persistQuery, sessionGet });
 
-    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, '1')));
 
-    expect(notifyCount(sendText)).toBe(1);
+    expect(sessions.clearTenantSelection).toHaveBeenCalled();
+    expect(insertHappened(ds)).toBe(true); // buffered intake processed
   });
 
-  // Toggle off → no se consulta el gate, cualquier sender pasa
-  it('WHATSAPP_SENDER_GATE=off → bypassa el gate sin consultar la UNION', async () => {
-    process.env.WHATSAPP_SENDER_GATE = 'off';
-    const gateSpy = jest.fn();
-    const { ctrl, sendText } = buildController({
-      queryMocks: (sql, params) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        if (sql.includes('WHERE idempotency_key')) return [];
-        if (sql.includes('promoters') && sql.includes('collaborators')) { gateSpy(); return []; }
-        if (sql.includes('INSERT INTO eventos_crudos')) return [{ id: 'evt-1' }];
-        return [];
+  it('choosing "otra agencia" → switches to affiliation-code entry', async () => {
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_tenant',
+      tenantSelection: {
+        candidates: [{ clientId: 'c1', clientName: 'Agencia Uno' }],
+        pendingMsg: textMsg(PHONE_DIGITS, 'hola', 'buf'),
+        canalId: null,
+        attempts: 0,
       },
+    }));
+    const { ctrl, sendText, sessions } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, '2'))); // index past the 1 candidate = "otra"
+
+    expect(sessions.setTenantSelection).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      'awaiting_affiliation_code',
+    );
+    expect(replySent(sendText, 'código de afiliación')).toBe(true);
+  });
+
+  it('valid affiliation code → affiliates as active promoter and resumes the buffered intake', async () => {
+    const pendingMsg = textMsg(PHONE_DIGITS, 'una novedad', 'buffered-2');
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_affiliation_code',
+      tenantSelection: { candidates: [], pendingMsg, canalId: null, attempts: 0 },
+    }));
+    const affiliate = jest.fn(async () => ({ promoterId: 'p1', created: true }));
+    const { ctrl, ds, sessions } = buildController({
+      queryMocks: persistQuery,
+      sessionGet,
+      resolveClientByCode: jest.fn(async () => 'c9'),
+      affiliate,
     });
 
-    await ctrl.handleIncoming(metaBody(UNKNOWN_PHONE));
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'ABCD1234')));
 
-    expect(gateSpy).not.toHaveBeenCalled();
-    expect(notifyCount(sendText)).toBe(0);
+    expect(affiliate).toHaveBeenCalledWith('c9', expect.any(String));
+    expect(sessions.clearTenantSelection).toHaveBeenCalled();
+    expect(insertHappened(ds)).toBe(true);
   });
 
-  // Batch: 2 mensajes del mismo sender no-registrado → UN solo aviso (cache)
-  it('batch del mismo sender no-registrado → aviso una sola vez', async () => {
-    const { ctrl, sendText } = buildController({
-      queryMocks: (sql, params) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        if (sql.includes('WHERE idempotency_key')) return [];
-        if (sql.includes('promoters') && sql.includes('collaborators')) return [];
-        return [];
-      },
+  it('invalid affiliation code → rejects, does not affiliate, does not persist', async () => {
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_affiliation_code',
+      tenantSelection: { candidates: [], pendingMsg: textMsg(PHONE_DIGITS, 'x', 'buf'), canalId: null, attempts: 0 },
+    }));
+    const affiliate = jest.fn();
+    const { ctrl, sendText, ds } = buildController({
+      queryMocks: persistQuery,
+      sessionGet,
+      resolveClientByCode: jest.fn(async () => null),
+      affiliate,
     });
 
-    const batch = {
-      entry: [{ changes: [{ value: {
-        metadata: { phone_number_id: 'pnid-a' },
-        messages: [
-          { id: 'msg-1', from: UNKNOWN_PHONE, type: 'text', text: { body: 'hola' } },
-          { id: 'msg-2', from: UNKNOWN_PHONE, type: 'text', text: { body: 'mundo' } },
-        ],
-      } }] }],
-    };
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'NOPE')));
 
-    await ctrl.handleIncoming(batch);
-
-    expect(notifyCount(sendText)).toBe(1);
-  });
-
-  // Fail-closed: error de DB en el gate → bloquea, no propaga la excepción
-  it('error de DB en el gate → fail-closed (bloquea, no propaga)', async () => {
-    const { ctrl, sendText } = buildController({
-      queryMocks: (sql, params) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        if (sql.includes('WHERE idempotency_key')) return [];
-        if (sql.includes('promoters') && sql.includes('collaborators')) {
-          throw new Error('DB connection lost');
-        }
-        return [];
-      },
-    });
-
-    await expect(ctrl.handleIncoming(metaBody(PHONE_DIGITS))).resolves.toBe('ok');
-    expect(notifyCount(sendText)).toBe(1);
-  });
-});
-
-// ─── Dedup atómico (SET NX) ───────────────────────────────────────────────────
-
-describe('WhatsApp inbound atomic dedup gate', () => {
-  const origGate = process.env.WHATSAPP_SENDER_GATE;
-
-  beforeEach(() => {
-    process.env.WHATSAPP_SENDER_GATE = 'off'; // sacar el gate del medio, probar solo dedup
-    jest.clearAllMocks();
-  });
-
-  afterAll(() => {
-    if (origGate !== undefined) process.env.WHATSAPP_SENDER_GATE = origGate;
-    else delete process.env.WHATSAPP_SENDER_GATE;
-  });
-
-  it('claimMessage=false (duplicado) → NO procesa el mensaje ni persiste', async () => {
-    const sessions = {
-      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
-      claimMessage: jest.fn().mockResolvedValue(false), // duplicado
-      releaseMessage: jest.fn().mockResolvedValue(undefined),
-    };
-    const { ctrl, ds } = buildController({
-      queryMocks: (sql) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        if (sql.includes('WHERE idempotency_key')) return [];
-        if (sql.includes('INSERT INTO eventos_crudos')) return [{ id: 'evt-1' }];
-        return [];
-      },
-      sessionsMock: sessions,
-    });
-
-    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
-
-    expect(sessions.claimMessage).toHaveBeenCalledTimes(1);
-    // Descartado por el gate atómico: ni siquiera se consulta isDuplicate ni se persiste.
+    expect(affiliate).not.toHaveBeenCalled();
+    expect(replySent(sendText, 'inválido')).toBe(true);
     expect(insertHappened(ds)).toBe(false);
   });
 
-  it('claimMessage=false → el handler de texto NO se invoca (materialIntake no consultado)', async () => {
-    const sessions = {
-      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
-      claimMessage: jest.fn().mockResolvedValue(false),
-      releaseMessage: jest.fn().mockResolvedValue(undefined),
-    };
-    const materialIntake = { handleResponse: jest.fn(async () => false) };
-    const { ctrl } = buildController({
-      queryMocks: (sql) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        return [];
+  it('repeated invalid codes reach the attempt cap → aborts and clears the selection', async () => {
+    // Session already at attempts=4; the 5th invalid code hits MAX_TENANT_SELECTION_ATTEMPTS.
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_affiliation_code',
+      tenantSelection: {
+        candidates: [],
+        pendingMsg: textMsg(PHONE_DIGITS, 'x', 'buf'),
+        canalId: null,
+        attempts: 4,
       },
-      sessionsMock: sessions,
-      materialIntakeMock: materialIntake,
+    }));
+    const { ctrl, sendText, sessions } = buildController({
+      queryMocks: persistQuery,
+      sessionGet,
+      resolveClientByCode: jest.fn(async () => null),
     });
 
-    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'NOPE')));
 
-    // El mensaje duplicado se salta ANTES de cualquier handler.
-    expect(materialIntake.handleResponse).not.toHaveBeenCalled();
+    expect(replySent(sendText, 'Demasiados intentos')).toBe(true);
+    expect(sessions.clearTenantSelection).toHaveBeenCalled();
   });
 
-  it('claimMessage=true (fresco) → procesa y persiste', async () => {
-    const sessions = {
-      get: jest.fn(), set: jest.fn(), delete: jest.fn(), updateLastProject: jest.fn(),
-      claimMessage: jest.fn().mockResolvedValue(true),
-      releaseMessage: jest.fn().mockResolvedValue(undefined),
-    };
-    const { ctrl, ds } = buildController({
-      queryMocks: (sql) => {
-        if (sql.includes('canal_entrada')) return [{ client_id: CLIENT_A, id: 'canal-1' }];
-        if (sql.includes('WHERE idempotency_key')) return [];
-        if (sql.includes('INSERT INTO eventos_crudos')) return [{ id: 'evt-1' }];
-        return [];
-      },
-      sessionsMock: sessions,
+  it('invalid code below the cap → increments attempts and re-prompts, keeps the intake', async () => {
+    const pendingMsg = textMsg(PHONE_DIGITS, 'una novedad', 'buf');
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_affiliation_code',
+      tenantSelection: { candidates: [], pendingMsg, canalId: null, attempts: 1 },
+    }));
+    const { ctrl, sendText, sessions } = buildController({
+      queryMocks: persistQuery,
+      sessionGet,
+      resolveClientByCode: jest.fn(async () => null),
     });
 
-    await ctrl.handleIncoming(metaBody(PHONE_DIGITS));
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'NOPE')));
 
-    expect(sessions.claimMessage).toHaveBeenCalledTimes(1);
-    expect(insertHappened(ds)).toBe(true);
+    expect(replySent(sendText, 'inválido')).toBe(true);
+    expect(sessions.clearTenantSelection).not.toHaveBeenCalled();
+    expect(sessions.setTenantSelection).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ attempts: 2, pendingMsg }),
+      'awaiting_affiliation_code',
+    );
+  });
+
+  it('repeated invalid agency selections reach the cap → aborts and clears the selection', async () => {
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_tenant',
+      tenantSelection: {
+        candidates: [{ clientId: 'c1', clientName: 'Agencia Uno' }],
+        pendingMsg: textMsg(PHONE_DIGITS, 'x', 'buf'),
+        canalId: null,
+        attempts: 4,
+      },
+    }));
+    const { ctrl, sendText, sessions } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, '99'))); // out of range = invalid
+
+    expect(replySent(sendText, 'Demasiados intentos')).toBe(true);
+    expect(sessions.clearTenantSelection).toHaveBeenCalled();
+  });
+
+  it('non-text reply mid-selection → re-prompts with a hint, keeps the buffered intake', async () => {
+    const pendingMsg = textMsg(PHONE_DIGITS, 'una novedad', 'buf');
+    const sessionGet = jest.fn(async () => ({
+      state: 'awaiting_tenant',
+      tenantSelection: {
+        candidates: [{ clientId: 'c1', clientName: 'Agencia Uno' }],
+        pendingMsg,
+        canalId: null,
+        attempts: 0,
+      },
+    }));
+    const { ctrl, sendText, sessions, ds } = buildController({ queryMocks: persistQuery, sessionGet });
+
+    // An image arrives while we asked "which agency?" — not a usable reply.
+    await ctrl.handleIncoming(
+      metaBody({ id: 'img-mid', from: PHONE_DIGITS, type: 'image', image: { id: 'meta-media-1' } }),
+    );
+
+    expect(replySent(sendText, 'número de la agencia')).toBe(true);
+    expect(insertHappened(ds)).toBe(false);
+    expect(sessions.setTenantSelection).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ attempts: 1, pendingMsg }),
+      'awaiting_tenant',
+    );
+  });
+
+  it('candidatesFor DB error → tells the sender to retry, does NOT prompt for a code', async () => {
+    const candidatesFor = jest.fn(async () => {
+      throw new Error('connection reset');
+    });
+    const { ctrl, sendText, sessions } = buildController({
+      queryMocks: persistQuery,
+      candidatesFor,
+    });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'hola')));
+
+    expect(replySent(sendText, 'probá de nuevo')).toBe(true);
+    expect(replySent(sendText, 'código de afiliación')).toBe(false);
+    expect(sessions.setTenantSelection).not.toHaveBeenCalled();
+  });
+
+  it('ongoing multi-step flow (awaiting_material) → bypasses resolution, keeps its tenant', async () => {
+    const materialIntake = { handleResponse: jest.fn(async () => true) };
+    const sessionGet = jest.fn(async () => ({ state: 'awaiting_material', clientId: 'c1' }));
+    const { ctrl, senderResolver } = buildController({
+      queryMocks: persistQuery,
+      sessionGet,
+      candidatesFor: jest.fn(async () => [{ clientId: 'zzz', clientName: 'Otra' }]),
+      materialIntake,
+    });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, '3 cajas')));
+
+    // The ongoing flow handled it; the tenant was NOT re-resolved.
+    expect(materialIntake.handleResponse).toHaveBeenCalled();
+    expect(senderResolver.candidatesFor).not.toHaveBeenCalled();
   });
 });
 
-/*
- * ── Caso pendiente y razón ────────────────────────────────────────────────────
- *
- * (e) Aislamiento de tenant a nivel SQL/RLS REAL (no solo de parámetro).
- *     (e-unit) ya prueba que `clientId` se pasa al gate. Para verificar el
- *     aislamiento end-to-end (RLS de Postgres + filas reales en promoters/
- *     collaborators de tenants distintos) hace falta el cluster PG de test, como
- *     en rls-e2e-integral.e2e-spec.ts (requiere DB_HOST al PG de test y bootstrap
- *     del módulo con BullMQ). Recomendado agregar esa suite cuando el cluster
- *     esté disponible en CI.
- */
+describe('WhatsApp inbound atomic dedup', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('claimMessage=false (duplicate) → not processed, tenant not resolved', async () => {
+    const candidatesFor = jest.fn(async () => []);
+    const { ctrl, ds, sessions, senderResolver } = buildController({
+      queryMocks: persistQuery,
+      candidatesFor,
+      claimMessage: jest.fn().mockResolvedValue(false),
+    });
+
+    await ctrl.handleIncoming(metaBody(textMsg(PHONE_DIGITS, 'hola')));
+
+    expect(sessions.claimMessage).toHaveBeenCalledTimes(1);
+    expect(senderResolver.candidatesFor).not.toHaveBeenCalled();
+    expect(insertHappened(ds)).toBe(false);
+  });
+});

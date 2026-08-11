@@ -42,11 +42,13 @@ export class WhatsAppMediaService {
       ?? '';
   }
 
-  async downloadAndStore(
-    mediaId: string,
-    tenantId: string,
-    folder: StorageFolder,
-  ): Promise<MediaDownloadResult> {
+  /**
+   * Downloads the media bytes from Meta WITHOUT persisting to storage. Used to
+   * pre-capture media at tenant-selection buffer time (the tenant/clientId is not
+   * yet known) so the resume path never re-fetches from Meta — Meta media ids
+   * expire and would 404 by the time the sender answers "which agency?".
+   */
+  async download(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }> {
     const mediaRes = await fetch(`${META_API}/${mediaId}`, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
@@ -63,8 +65,29 @@ export class WhatsAppMediaService {
       headers: { Authorization: `Bearer ${this.token}` },
     });
     const arrayBuffer = await fileRes.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    return { buffer: Buffer.from(arrayBuffer), mimeType };
+  }
 
+  async downloadAndStore(
+    mediaId: string,
+    tenantId: string,
+    folder: StorageFolder,
+  ): Promise<MediaDownloadResult> {
+    const { buffer, mimeType } = await this.download(mediaId);
+    return this.storeBuffer(buffer, mimeType, tenantId, folder);
+  }
+
+  /**
+   * Persists an already-downloaded buffer to a tenant's storage. Used on the
+   * tenant-selection resume path: media was pre-captured (via `download`) at buffer
+   * time before the tenant was known, and is now stored under the chosen tenant.
+   */
+  async storeBuffer(
+    buffer: Buffer,
+    mimeType: string,
+    tenantId: string,
+    folder: StorageFolder,
+  ): Promise<MediaDownloadResult> {
     const ext = MIME_TO_EXT[mimeType] ?? '';
     const fileName = `${randomUUID()}${ext}`;
 

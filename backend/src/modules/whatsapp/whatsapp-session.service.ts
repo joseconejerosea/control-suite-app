@@ -51,6 +51,25 @@ export interface WhatsAppSession {
     projects?: { id: string; name: string }[];  // opciones cacheadas para parsear el número
     bodegas?: { id: string; name: string }[];
   } | null;
+  // Single-global-number · selección de agencia (tenant) para el remitente.
+  // Estado asociado: 'awaiting_tenant' (elegir de la lista) o 'awaiting_affiliation_code'
+  // (código de una agencia nueva). Se pregunta SIEMPRE (incluso con 1 solo candidato,
+  // porque el remitente puede querer operar para una agencia nueva): el mensaje entrante
+  // se BUFFEREA acá y al responder se reanuda `pendingMsg` bajo el client_id elegido.
+  tenantSelection?: {
+    candidates: { clientId: string; clientName: string }[];  // opciones numeradas cacheadas
+    pendingMsg: any;                                          // mensaje WA crudo a reanudar
+    canalId: string | null;
+    attempts: number;
+    // Media pre-capturada al BUFFEREAR (image/audio/video/document). Los media ids de
+    // Meta EXPIRAN, así que descargamos los bytes en el momento de bufferear (cuando el
+    // tenant aún no se conoce) y los llevamos acá como base64. Al reanudar, los handlers
+    // usan estos bytes en vez de volver a pedirle el media a Meta (que ya devolvería 404).
+    pendingMedia?: {
+      base64: string;
+      mimeType: string;
+    } | null;
+  } | null;
   // F5 · Intake de evidencia de actividad por foto (personas/anfitrionas en el evento).
   // Estado de sesión asociado: state === 'awaiting_evidence'. La evidencia se registra
   // como un checkin (prueba de presencia) de la activación activa del remitente.
@@ -119,6 +138,48 @@ export class WhatsAppSessionService implements OnModuleInit {
       session.lastProjectId = projectId;
       await this.set(phoneNumber, session);
     }
+  }
+
+  // ── Selección de agencia (single-global-number) ─────────────────────────────
+
+  /**
+   * Buffe­rea el mensaje entrante y deja la sesión esperando la elección del remitente.
+   * `state='awaiting_tenant'` (elegir de su lista) o `'awaiting_affiliation_code'`
+   * (tipear el código de una agencia nueva). INVARIANTE: estado y `tenantSelection` se
+   * escriben en el mismo set(), para que el gate de reanudación del webhook enrute la
+   * respuesta.
+   */
+  async setTenantSelection(
+    phoneNumber: string,
+    selection: NonNullable<WhatsAppSession['tenantSelection']>,
+    state: 'awaiting_tenant' | 'awaiting_affiliation_code' = 'awaiting_tenant',
+  ): Promise<void> {
+    const existing = await this.get(phoneNumber);
+    const session: WhatsAppSession = {
+      projects: existing?.projects ?? [],
+      base64: existing?.base64 ?? '',
+      mimeType: existing?.mimeType ?? '',
+      caption: existing?.caption ?? '',
+      clientId: existing?.clientId ?? null,
+      canalId: existing?.canalId ?? selection.canalId,
+      lastProjectId: existing?.lastProjectId,
+      updatedAt: '',
+      ...existing,
+      state,
+      tenantSelection: selection,
+    };
+    await this.set(phoneNumber, session);
+  }
+
+  /** Limpia la selección pendiente tras reanudar el intake (o al abandonarla). */
+  async clearTenantSelection(phoneNumber: string): Promise<void> {
+    const session = await this.get(phoneNumber);
+    if (!session) return;
+    session.tenantSelection = null;
+    if (session.state === 'awaiting_tenant' || session.state === 'awaiting_affiliation_code') {
+      session.state = '';
+    }
+    await this.set(phoneNumber, session);
   }
 
   // ── Dedup atómico de mensajes entrantes ─────────────────────────────────────

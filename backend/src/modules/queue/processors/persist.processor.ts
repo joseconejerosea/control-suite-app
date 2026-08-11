@@ -448,7 +448,7 @@ export class PersistProcessor extends WorkerHost {
   ): Promise<string | null> {
     const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone) : null;
     const email = typeof payload === 'object' ? payload?.email_from : null;
-    // Mismo criterio que el gate (isAuthorizedSender): comparar por DÍGITOS, no exacto.
+    // Mismo criterio que el bot: comparar por DÍGITOS del teléfono, no exacto.
     // El `from` de Meta llega como dígitos (549...) pero el phone guardado tiene '+',
     // espacios, etc. Con match exacto no encontraba al promotor → la factura quedaba
     // sin persona (no entraba a rendición).

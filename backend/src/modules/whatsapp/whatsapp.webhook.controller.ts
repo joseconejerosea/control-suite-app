@@ -19,15 +19,14 @@ import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant } from '../../common/tenant/tenant-context';
 import { runWithWaFrom, getWaFrom } from './whatsapp-send-context';
+import { SenderTenantResolverService } from './sender-tenant-resolver.service';
+import { WhatsAppTenantSelectionService } from './tenant-selection.service';
+import { AffiliationCodeService } from '../clients/affiliation-code.service';
+import { AffiliationService } from '../clients/affiliation.service';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
 const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
-
-// F4 Fase 3 (alta urgente): dedup de la notificación al operador por número
-// desconocido. Module-level (vida del proceso) para no re-avisar en cada mensaje
-// del mismo número; clave `${clientId}:${from}`.
-const altaUrgenteNotified = new Set<string>();
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppWebhookController {
@@ -46,6 +45,10 @@ export class WhatsAppWebhookController {
     @InjectQueue(QUEUE_CONVOCATORIA_CLASSIFY) private readonly convocatoriaQueue: Queue,
     @InjectQueue(QUEUE_STOCK_RETURN_PHOTO) private readonly returnPhotoQueue: Queue,
     private readonly shield: PromptShieldService,
+    private readonly senderResolver: SenderTenantResolverService,
+    private readonly selection: WhatsAppTenantSelectionService,
+    private readonly affiliationCode: AffiliationCodeService,
+    private readonly affiliation: AffiliationService,
   ) {}
 
   // ── Webhook verification (Meta challenge) ─────────────────────────────────
@@ -89,115 +92,90 @@ export class WhatsAppWebhookController {
       const value   = changes?.value;
       if (!value) return 'ok';
 
-      const { clientId, canalId } = await this.resolveChannel(value);
-      if (!clientId) return 'ok';
-
-      // WhatsApp gap 2 (multi-tenant) — el número DESDE el cual hay que responder
-      // es el mismo por el que entró el mensaje. Se propaga por un AsyncLocalStorage
-      // dedicado (whatsapp-send-context), NO por el tenant store: así todo sendText
-      // de este procesamiento (respuesta al emisor no registrado y sub-handlers)
-      // sale desde el número del cliente sin abrir ninguna transacción de DB. El
-      // ALS se propaga solo a través de los runWithTenant anidados de los sub-services.
+      // Single global number — replies still go out from the number the message
+      // arrived on (one number today; Tajada B collapses this to the global env).
+      // The ALS (whatsapp-send-context) propagates it to every sub-handler sendText.
       const waFrom = value?.metadata?.phone_number_id as string | undefined;
       if (!waFrom) {
-        // Sin número entrante no podemos responder desde el número del cliente;
-        // getWaFrom() caerá al global de env dentro de sendText.
         this.logger.warn(
-          `[WhatsApp] Missing metadata.phone_number_id — replies will fall back to the global env number (clientId=${clientId})`,
+          '[WhatsApp] Missing metadata.phone_number_id — replies will fall back to the global env number',
         );
       }
 
       const messages = value?.messages;
       if (!messages?.length) return 'ok';
 
-      // Per-invocation cache: avoid querying the same sender twice and sending
-      // multiple "not registered" replies for batch payloads from the same from.
-      const senderAuthCache = new Map<string, boolean>();
-      const notifiedSenders = new Set<string>();
+      for (const rawMsg of messages) {
+        const messageId = rawMsg.id as string;
+        const from      = rawMsg.from as string;
 
-      for (const msg of messages) {
-        const messageId = msg.id as string;
-        const from      = msg.from as string;
-        const msgType   = msg.type as string;
-
-        // Gate de dedup ATÓMICO (SET NX en Redis) al tope del loop, ANTES de
-        // cualquier trabajo. Reemplaza el chequeo racy contra la DB: como el
-        // idempotency_key recién se escribe en persistEvent (después del download
-        // lento del media), un reintento de Meta pasaba isDuplicate y procesaba la
-        // imagen dos veces. claimMessage reclama el messageId de forma atómica:
-        // sólo el primero en reclamarlo procesa, los reintentos se descartan acá.
+        // Atomic dedup (Redis SET NX) at the very top, before any work, plus a DB
+        // guard for the Redis-restart case. See WhatsAppSessionService.claimMessage.
         const fresh = await this.sessions.claimMessage(messageId);
         if (!fresh) {
           this.logger.log(`[WhatsApp] Duplicate message ${messageId} — skipping`);
           continue;
         }
-
-        // Guarda secundaria contra la DB para el caso de reinicio de Redis (se
-        // pierde la clave NX): si el evento ya se persistió, no reprocesar.
         if (await this.isDuplicate(messageId)) {
           this.logger.log(`[WhatsApp] Duplicate (db) ${messageId} — skipping`);
           continue;
         }
 
-        // Cada mensaje se procesa dentro del contexto de número saliente (waFrom),
-        // un ALS liviano SIN transacción de DB: los sub-handlers siguen abriendo
-        // sus propios runWithTenant como antes, y el ALS se propaga a través de
-        // ellos para que cada sendText salga desde el número del cliente.
         try {
           await runWithWaFrom(waFrom, async () => {
-          // ── Sender gate (Req 7 — togglable via env) ──────────────────────────
-          if (process.env.WHATSAPP_SENDER_GATE !== 'off') {
-            let authorized: boolean;
-            if (senderAuthCache.has(from)) {
-              authorized = senderAuthCache.get(from)!;
-            } else {
-              authorized = await this.isAuthorizedSender(from, clientId);
-              senderAuthCache.set(from, authorized);
-            }
+            // Single-global-number: resolve WHICH agency (tenant) this message
+            // belongs to from the SENDER, not the recipient number. May ask the
+            // sender to pick an agency or type an affiliation code, buffering the
+            // intake until they answer; an ongoing multi-step flow bypasses this.
+            const resolution = await this.resolveInboundTenant(from, rawMsg);
+            if (resolution.status !== 'proceed') return;
 
-            if (!authorized) {
-              this.logger.warn(`[WhatsApp] Unauthorized sender from=${from} clientId=${clientId}`);
-              if (!notifiedSenders.has(from)) {
-                notifiedSenders.add(from);
-                await this.wa.sendText(from, 'No estás registrado, contactá a tu coordinador.');
+            const { clientId, canalId, msg, pendingMedia } = resolution;
+            const dispatchMsgId = (msg?.id as string) ?? messageId;
+            const msgType = msg?.type as string;
+            // A resumed intake dispatches a msg id different from the one that arrived
+            // in this batch (the current reply). Used to harden the resume path.
+            const isResumed = dispatchMsgId !== messageId;
+
+            this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${dispatchMsgId} clientId=${clientId}`);
+
+            try {
+              switch (msgType) {
+                case 'image':
+                  await this.handleImage(from, msg, clientId, canalId, dispatchMsgId, pendingMedia);
+                  break;
+                case 'audio':
+                  await this.handleAudio(from, msg, clientId, canalId, dispatchMsgId, pendingMedia);
+                  break;
+                case 'video':
+                  await this.handleVideo(from, msg, clientId, canalId, dispatchMsgId, pendingMedia);
+                  break;
+                case 'document':
+                  await this.handleDocument(from, msg, clientId, canalId, dispatchMsgId, pendingMedia);
+                  break;
+                case 'location':
+                  await this.handleLocation(from, msg, clientId, canalId, dispatchMsgId);
+                  break;
+                case 'text':
+                  await this.handleText(from, msg, clientId, canalId, dispatchMsgId);
+                  break;
+                default:
+                  this.logger.warn(`[WhatsApp] Unsupported message type: ${msgType}`);
               }
-              // F4 Fase 3 (alta urgente): en vez de sólo descartar, avisar al operador
-              // que un número desconocido intenta contactar, para darlo de alta.
-              await this.notificarAltaUrgente(from, clientId);
-              return;
+            } catch (dispatchErr: any) {
+              // A resumed buffered intake must not vanish silently if dispatch throws.
+              // Emit a greppable recovery marker with from + clientId, then rethrow so
+              // the outer handler releases the NX claim and Meta can retry.
+              if (isResumed) {
+                this.logger.error(
+                  `[WhatsApp] WA_RESUME_DISPATCH_FAILED from=${from} clientId=${clientId} type=${msgType}: ${dispatchErr?.message}`,
+                );
+              }
+              throw dispatchErr;
             }
-          }
-          // ───────────────────────────────────────────────────────────────────
-
-          this.logger.log(`[WhatsApp] From=${from} type=${msgType} msgId=${messageId}`);
-
-          switch (msgType) {
-            case 'image':
-              await this.handleImage(from, msg, clientId, canalId, messageId);
-              break;
-            case 'audio':
-              await this.handleAudio(from, msg, clientId, canalId, messageId);
-              break;
-            case 'video':
-              await this.handleVideo(from, msg, clientId, canalId, messageId);
-              break;
-            case 'document':
-              await this.handleDocument(from, msg, clientId, canalId, messageId);
-              break;
-            case 'location':
-              await this.handleLocation(from, msg, clientId, canalId, messageId);
-              break;
-            case 'text':
-              await this.handleText(from, msg, clientId, canalId, messageId);
-              break;
-            default:
-              this.logger.warn(`[WhatsApp] Unsupported message type: ${msgType}`);
-          }
           });
         } catch (err) {
-          // Si el procesamiento falló, liberamos la reclamación NX para que el
-          // reintento de Meta pueda volver a procesar el mensaje. Se relanza para
-          // que el try/catch externo del loop lo loguee.
+          // Release the NX claim so Meta's retry can reprocess. Rethrow to log.
           await this.sessions.releaseMessage(messageId).catch(() => {});
           throw err;
         }
@@ -208,27 +186,231 @@ export class WhatsAppWebhookController {
     return 'ok';
   }
 
-  // ── Channel resolution ────────────────────────────────────────────────────
+  // ── Inbound tenant resolution (single global number) ──────────────────────
 
-  private async resolveChannel(value: any): Promise<{ clientId: string | null; canalId: string | null }> {
-    const phoneNumberId = value?.metadata?.phone_number_id;
-    if (!phoneNumberId) return { clientId: null, canalId: null };
+  // Session states owned by ongoing multi-step flows; while one is active the
+  // sender's tenant is already known (session.clientId) and must NOT be re-asked.
+  private static readonly CONTINUATION_STATES = [
+    'awaiting_material',
+    'awaiting_evidence',
+    'awaiting_clarification',
+    'awaiting_project',
+  ];
 
-    const rows = await this.ds.query(
-      `SELECT client_id, id FROM canal_entrada
-       WHERE config->>'phone_number_id' = $1 AND is_active = true
-       LIMIT 1`,
-      [phoneNumberId],
-    ).catch(() => []);
+  // Cap on invalid agency-selection / affiliation-code attempts before aborting the
+  // flow. Prevents an endless ask-loop for a sender who keeps replying with garbage.
+  private static readonly MAX_TENANT_SELECTION_ATTEMPTS = 5;
 
-    const clientId = rows?.[0]?.client_id ?? null;
-    const canalId  = rows?.[0]?.id ?? null;
+  // Cap for buffering media bytes into the Redis session while asking which agency.
+  // Images fit comfortably; a large video/document (WhatsApp allows ~16MB) would
+  // bloat one session key (base64 ≈ +33%, re-serialized on every set()), so above
+  // the cap we skip pre-capture and fall back to id-based resume.
+  private static readonly MAX_PRECAPTURE_BYTES = 5 * 1024 * 1024;
 
-    if (!clientId) {
-      this.logger.warn(`[WhatsApp] No active canal for phone_number_id=${phoneNumberId}`);
+  // Message types that are NOT usable as a text reply to the "which agency?" /
+  // "type the code" question. When one arrives mid-selection we re-prompt instead
+  // of silently discarding the intake, and keep the buffered pendingMsg intact.
+  private static readonly SELECTION_REPLY_TYPES = ['text'];
+
+  /**
+   * Resolves WHICH agency an inbound message belongs to from the SENDER (single
+   * global number). Returns 'proceed' with the tenant + the message to dispatch
+   * (the buffered intake when resuming), or 'stop' when it asked the sender a
+   * question (agency choice / affiliation code) and is waiting for the reply.
+   */
+  private async resolveInboundTenant(
+    from: string,
+    incomingMsg: any,
+  ): Promise<
+    | {
+        status: 'proceed';
+        clientId: string;
+        canalId: string | null;
+        msg: any;
+        pendingMedia?: { base64: string; mimeType: string } | null;
+      }
+    | { status: 'stop' }
+  > {
+    const session = await this.sessions.get(from);
+    const text = (incomingMsg?.text?.body as string | undefined)?.trim() ?? '';
+    const incomingType = incomingMsg?.type as string | undefined;
+    const isUsableReply =
+      WhatsAppWebhookController.SELECTION_REPLY_TYPES.includes(incomingType ?? '') && text.length > 0;
+
+    // (0) Ongoing multi-step flow → keep its tenant; let handleText's interceptors run.
+    if (
+      session?.clientId &&
+      WhatsAppWebhookController.CONTINUATION_STATES.includes(session.state)
+    ) {
+      return {
+        status: 'proceed',
+        clientId: session.clientId,
+        canalId: session.canalId ?? null,
+        msg: incomingMsg,
+      };
     }
 
-    return { clientId, canalId };
+    // (1) Awaiting an affiliation code → treat the text as the code.
+    if (session?.state === 'awaiting_affiliation_code' && session.tenantSelection) {
+      // Non-text (media) or empty reply mid-selection: DON'T discard the intake — the
+      // buffered pendingMsg stays intact. Re-prompt with a hint and count the attempt.
+      if (!isUsableReply) {
+        return this.rejectSelectionReply(
+          from,
+          session.tenantSelection,
+          'awaiting_affiliation_code',
+          'Escribí el código de afiliación para continuar.',
+        );
+      }
+
+      const clientId = await this.affiliationCode.resolveClientByCode(text);
+      if (!clientId) {
+        return this.rejectSelectionReply(
+          from,
+          session.tenantSelection,
+          'awaiting_affiliation_code',
+          'Código inválido. Probá de nuevo o pedíselo a tu coordinador.',
+        );
+      }
+      await this.affiliation.affiliate(clientId, from);
+      const { pendingMsg, canalId, pendingMedia } = session.tenantSelection;
+      await this.sessions.clearTenantSelection(from);
+      return { status: 'proceed', clientId, canalId, msg: pendingMsg, pendingMedia };
+    }
+
+    // (2) Awaiting an agency choice → parse the numbered reply.
+    if (session?.state === 'awaiting_tenant' && session.tenantSelection) {
+      // Non-text (media) or empty reply mid-selection: re-prompt, keep the intake.
+      if (!isUsableReply) {
+        return this.rejectSelectionReply(
+          from,
+          session.tenantSelection,
+          'awaiting_tenant',
+          'Respondé con el número de la agencia.',
+        );
+      }
+
+      const sel = this.selection.parseSelection(text, session.tenantSelection.candidates);
+      if (sel.kind === 'invalid') {
+        return this.rejectSelectionReply(
+          from,
+          session.tenantSelection,
+          'awaiting_tenant',
+          this.selection.buildPrompt(session.tenantSelection.candidates),
+        );
+      }
+      if (sel.kind === 'other') {
+        // Keep the buffered intake; switch to affiliation-code entry. Reset attempts:
+        // switching to the code path is progress, not a failed attempt.
+        await this.sessions.setTenantSelection(
+          from,
+          { ...session.tenantSelection, attempts: 0 },
+          'awaiting_affiliation_code',
+        );
+        await this.wa.sendText(from, this.selection.buildCodePrompt());
+        return { status: 'stop' };
+      }
+      const { pendingMsg, canalId, pendingMedia } = session.tenantSelection;
+      await this.sessions.clearTenantSelection(from);
+      return { status: 'proceed', clientId: sel.clientId, canalId, msg: pendingMsg, pendingMedia };
+    }
+
+    // (3) Fresh message → resolve the agencies this sender is registered in.
+    let candidates: { clientId: string; clientName: string }[];
+    try {
+      candidates = await this.senderResolver.candidatesFor(from);
+    } catch (err: any) {
+      // A DB error is NOT a genuine 0-candidates result: don't route the sender to the
+      // affiliation-code path (which would wrongly imply "you're unregistered"). Tell
+      // them to retry and stop — the message id will be released so Meta can retry.
+      this.logger.error(`[WhatsApp] candidatesFor failed from=${from}: ${err.message}`);
+      await this.wa.sendText(from, 'Hubo un problema, probá de nuevo en un momento.');
+      return { status: 'stop' };
+    }
+
+    // Pre-capture media BEFORE prompting: Meta media ids expire, so if we ask "which
+    // agency?" and only download on resume, the id would 404 by the time they answer.
+    const pendingMedia = await this.preCaptureMedia(incomingMsg);
+
+    if (candidates.length === 0) {
+      // Unknown sender: the affiliation code routes them to exactly one agency
+      // (no roster is ever disclosed).
+      await this.sessions.setTenantSelection(
+        from,
+        { candidates: [], pendingMsg: incomingMsg, canalId: null, attempts: 0, pendingMedia },
+        'awaiting_affiliation_code',
+      );
+      await this.wa.sendText(from, this.selection.buildCodePrompt());
+      return { status: 'stop' };
+    }
+
+    // 1+ candidates: always ask — a sender may also operate for a new agency.
+    await this.sessions.setTenantSelection(
+      from,
+      { candidates, pendingMsg: incomingMsg, canalId: null, attempts: 0, pendingMedia },
+      'awaiting_tenant',
+    );
+    await this.wa.sendText(from, this.selection.buildPrompt(candidates));
+    return { status: 'stop' };
+  }
+
+  /**
+   * A reply to the "which agency?" / "type the code" question was unusable (invalid
+   * selection, invalid code, or a non-text/empty message). Increments the attempt
+   * counter; at the cap it clears the pending selection and aborts, otherwise it
+   * persists the incremented attempts (keeping the buffered intake) and re-prompts.
+   */
+  private async rejectSelectionReply(
+    from: string,
+    selection: NonNullable<WhatsAppSession['tenantSelection']>,
+    state: 'awaiting_tenant' | 'awaiting_affiliation_code',
+    reprompt: string,
+  ): Promise<{ status: 'stop' }> {
+    const attempts = (selection.attempts ?? 0) + 1;
+    if (attempts >= WhatsAppWebhookController.MAX_TENANT_SELECTION_ATTEMPTS) {
+      await this.sessions.clearTenantSelection(from);
+      await this.wa.sendText(from, 'Demasiados intentos. Contactá a tu coordinador.');
+      return { status: 'stop' };
+    }
+    await this.sessions.setTenantSelection(from, { ...selection, attempts }, state);
+    await this.wa.sendText(from, reprompt);
+    return { status: 'stop' };
+  }
+
+  /**
+   * Downloads media bytes at BUFFER time so the resume path never re-fetches from Meta
+   * (media ids expire). Returns null for non-media messages or on download failure
+   * (the resume path then falls back to the media id, which is the pre-existing risk,
+   * not a regression). The tenant is unknown here, so we only capture bytes — storage
+   * happens on resume under the chosen tenant.
+   */
+  private async preCaptureMedia(
+    incomingMsg: any,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    const type = incomingMsg?.type as string | undefined;
+    const mediaId =
+      type === 'image' ? incomingMsg?.image?.id
+      : type === 'audio' ? incomingMsg?.audio?.id
+      : type === 'video' ? incomingMsg?.video?.id
+      : type === 'document' ? incomingMsg?.document?.id
+      : undefined;
+    if (!mediaId) return null;
+
+    try {
+      const { buffer, mimeType } = await this.media.download(mediaId);
+      if (buffer.length > WhatsAppWebhookController.MAX_PRECAPTURE_BYTES) {
+        // Too big to hold in the session; resume will re-fetch by id (which may have
+        // expired for a very slow reply — acceptable vs. bloating Redis).
+        this.logger.warn(
+          `[WhatsApp] media too large to pre-capture (${buffer.length} bytes) id=${mediaId} — falling back to id-based resume`,
+        );
+        return null;
+      }
+      return { base64: buffer.toString('base64'), mimeType };
+    } catch (err: any) {
+      this.logger.error(`[WhatsApp] pre-capture media failed id=${mediaId}: ${err.message}`);
+      return null;
+    }
   }
 
   // ── Idempotency ───────────────────────────────────────────────────────────
@@ -239,46 +421,6 @@ export class WhatsAppWebhookController {
       [messageId],
     ).catch(() => []);
     return existing.length > 0;
-  }
-
-  // ── Sender authorization gate ─────────────────────────────────────────────
-
-  private async isAuthorizedSender(from: string, clientId: string): Promise<boolean> {
-    const digits = normalizePhone(from);
-    try {
-      // Actores autorizados a usar el bot por WhatsApp:
-      //  - Staff (tabla promoters) y colaboradores → personas de terreno.
-      //  - Usuarios con rol Manager/Operador/Supervisor (spec de roles): también
-      //    registran documentos/boletas/material/novedades por WhatsApp. Super Admin
-      //    y Service Lead son plataforma → NO usan el bot.
-      const rows = await this.ds.query(
-        `SELECT 1
-         FROM promoters
-         WHERE client_id = $1
-           AND status = 'active'
-           AND regexp_replace(phone, '\\D', '', 'g') = $2
-         UNION
-         SELECT 1
-         FROM collaborators
-         WHERE client_id = $1
-           AND is_active = true
-           AND regexp_replace(phone, '\\D', '', 'g') = $2
-         UNION
-         SELECT 1
-         FROM users
-         WHERE client_id = $1
-           AND is_active = true
-           AND role IN ($3, $4, $5)
-           AND phone IS NOT NULL
-           AND regexp_replace(phone, '\\D', '', 'g') = $2
-         LIMIT 1`,
-        [clientId, digits, UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERVISOR],
-      );
-      return rows.length > 0;
-    } catch (err: any) {
-      this.logger.error(`[WhatsApp] isAuthorizedSender error from=${from} clientId=${clientId}: ${err.message}`);
-      return false; // fail-closed
-    }
   }
 
   // ── Persist to eventos_crudos ─────────────────────────────────────────────
@@ -317,17 +459,44 @@ export class WhatsAppWebhookController {
     return result[0]?.id;
   }
 
+  // ── Media resolution (resume-safe) ────────────────────────────────────────
+
+  /**
+   * Returns the stored media for a handler. On the tenant-selection resume path the
+   * media was pre-captured at buffer time (`pendingMedia`) because Meta media ids
+   * expire; we store those bytes under the now-known tenant instead of re-fetching
+   * from Meta. On the fresh path (no pendingMedia) it downloads-and-stores by id.
+   */
+  private async resolveMedia(
+    pendingMedia: { base64: string; mimeType: string } | null | undefined,
+    mediaId: string | undefined,
+    clientId: string,
+    folder: 'documents' | 'photos' | 'reports' | 'evidence',
+  ): Promise<{ storagePath: string; mimeType: string; buffer: Buffer }> {
+    if (pendingMedia) {
+      const buffer = Buffer.from(pendingMedia.base64, 'base64');
+      return this.media.storeBuffer(buffer, pendingMedia.mimeType, clientId, folder);
+    }
+    if (!mediaId) {
+      throw new Error('resolveMedia called without pendingMedia or a media id');
+    }
+    return this.media.downloadAndStore(mediaId, clientId, folder);
+  }
+
   // ── Image handler ─────────────────────────────────────────────────────────
 
   private async handleImage(
     from: string, msg: any,
     clientId: string, canalId: string | null,
     messageId: string,
+    pendingMedia?: { base64: string; mimeType: string } | null,
   ) {
     const imageId = msg.image?.id;
     const caption = msg.image?.caption ?? '';
 
-    if (!imageId) {
+    // On resume, media was pre-captured at buffer time; the Meta id has likely expired,
+    // so use the pre-captured bytes and never re-download.
+    if (!imageId && !pendingMedia) {
       this.logger.warn('[WhatsApp] Image without media ID');
       return;
     }
@@ -339,7 +508,7 @@ export class WhatsAppWebhookController {
       // vía cola (la clasificación con IA no debe bloquear la respuesta a Meta).
       const returnRequestId = await this.devolucionPendienteFor(from, clientId);
       if (returnRequestId) {
-        const ret = await this.media.downloadAndStore(imageId, clientId, 'evidence');
+        const ret = await this.resolveMedia(pendingMedia, imageId, clientId, 'evidence');
         await this.persistEvent({
           clientId, canalId, messageId, from, type: 'image', flow: 'F3_RETURN',
           payload: {
@@ -356,7 +525,7 @@ export class WhatsAppWebhookController {
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      const result = await this.media.downloadAndStore(imageId, clientId, 'documents');
+      const result = await this.resolveMedia(pendingMedia, imageId, clientId, 'documents');
 
       // Proyecto como PISTA, no interactivo. El triage documento-vs-material corre
       // async en el OcrProcessor; recién ahí, sabiendo el tipo, se pregunta lo que
@@ -398,12 +567,13 @@ export class WhatsAppWebhookController {
     from: string, msg: any,
     clientId: string, canalId: string | null,
     messageId: string,
+    pendingMedia?: { base64: string; mimeType: string } | null,
   ) {
     const audioId = msg.audio?.id;
-    if (!audioId) return;
+    if (!audioId && !pendingMedia) return;
 
     try {
-      const result = await this.media.downloadAndStore(audioId, clientId, 'evidence');
+      const result = await this.resolveMedia(pendingMedia, audioId, clientId, 'evidence');
 
       await this.persistEvent({
         clientId, canalId, messageId, from, type: 'audio', flow: null,
@@ -423,12 +593,13 @@ export class WhatsAppWebhookController {
     from: string, msg: any,
     clientId: string, canalId: string | null,
     messageId: string,
+    pendingMedia?: { base64: string; mimeType: string } | null,
   ) {
     const videoId = msg.video?.id;
-    if (!videoId) return;
+    if (!videoId && !pendingMedia) return;
 
     try {
-      const result = await this.media.downloadAndStore(videoId, clientId, 'evidence');
+      const result = await this.resolveMedia(pendingMedia, videoId, clientId, 'evidence');
 
       await this.persistEvent({
         clientId, canalId, messageId, from, type: 'video', flow: null,
@@ -448,13 +619,14 @@ export class WhatsAppWebhookController {
     from: string, msg: any,
     clientId: string, canalId: string | null,
     messageId: string,
+    pendingMedia?: { base64: string; mimeType: string } | null,
   ) {
     const docId   = msg.document?.id;
     const docName = msg.document?.filename ?? 'document';
-    if (!docId) return;
+    if (!docId && !pendingMedia) return;
 
     try {
-      const result = await this.media.downloadAndStore(docId, clientId, 'documents');
+      const result = await this.resolveMedia(pendingMedia, docId, clientId, 'documents');
       const caption = msg.document?.caption ?? '';
 
       // Use ProjectResolverService for smart project assignment
@@ -703,7 +875,7 @@ export class WhatsAppWebhookController {
   /**
    * ¿El emisor tiene una devolución pendiente esperando foto? Devuelve el id del
    * stock_return_request más reciente sin foto, o null. Se compara por DÍGITOS
-   * del teléfono (igual que el gate isAuthorizedSender): el `from` de Meta llega
+   * del teléfono (regexp_replace(phone,'\D','','g')): el `from` de Meta llega
    * 549... y el phone guardado tiene '+', espacios, etc.
    */
   private async devolucionPendienteFor(from: string, clientId: string): Promise<string | null> {
@@ -725,29 +897,5 @@ export class WhatsAppWebhookController {
       [clientId, digits],
     )).catch(() => []);
     return rows?.[0]?.id ?? null;
-  }
-
-  /**
-   * F4 Fase 3 (alta urgente): notifica UNA vez a los operadores del tenant que un
-   * número no registrado intentó escribir, para que decidan darlo de alta. El
-   * evento entrante NO se persiste (el gate lo descarta) — es sólo un aviso.
-   */
-  private async notificarAltaUrgente(from: string, clientId: string): Promise<void> {
-    const key = `${clientId}:${from}`;
-    if (altaUrgenteNotified.has(key)) return;
-    altaUrgenteNotified.add(key);
-
-    const admins = await this.ds.query(
-      `SELECT phone FROM users
-        WHERE client_id=$1 AND role='${UserRole.MANAGER}' AND phone IS NOT NULL`,
-      [clientId],
-    ).catch(() => []);
-
-    const msg = `📲 Alta urgente: el número ${from} (no registrado) intentó escribir. `
-      + `Si es un promotor, dalo de alta para que pueda operar.`;
-    for (const admin of admins) {
-      await this.wa.sendText(admin.phone, msg).catch(() => {});
-    }
-    this.logger.log(`[F4] Alta urgente notificada: ${from} → ${admins.length} operadores`);
   }
 }
