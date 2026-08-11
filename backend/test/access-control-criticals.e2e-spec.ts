@@ -32,8 +32,7 @@ const CLIENT = randomUUID();
 
 const noop = async () => ({});
 const onboardingMock = {
-  configureChannel: noop,
-  verifyChannel: noop, createAdminUser: noop, completeOnboarding: noop,
+  createAdminUser: noop, completeOnboarding: noop,
 };
 const authMock = {
   register: async () => ({ accessToken: 'a', refreshToken: 'b' }),
@@ -99,7 +98,7 @@ describe('Access-control criticals (C3/C4/C5/C6)', () => {
 
   // ── C5 — onboarding ahora con RolesGuard efectivo ──────────────────────────
   describe('C5 — onboarding RolesGuard', () => {
-    const url = `/onboarding/${CLIENT}/configure-channel`;
+    const url = `/onboarding/${CLIENT}/complete`;
 
     it('sin token → 401', () =>
       request(app.getHttpServer()).post(url).send({}).expect(401));

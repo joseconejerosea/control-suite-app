@@ -112,23 +112,16 @@ export class ClientsService {
   async getOnboardingStatus(id: string): Promise<Record<string, unknown>> {
     const client = await this.clientRepo.findOne({
       where: { id },
-      relations: ['users', 'canales'],
+      relations: ['users'],
     });
     if (!client) {
       throw new NotFoundException(`Client ${id} not found`);
     }
 
-    const STEPS = [
-      'client_created',
-      'channel_configured',
-      'channel_verified',
-      'admin_created',
-      'completed',
-    ];
-
+    // Single global number: onboarding is create client -> create admin -> activate.
+    const STEPS = ['client_created', 'admin_created', 'completed'];
     const currentIdx = STEPS.indexOf(client.onboarding_step);
 
-    const activeChannels = (client.canales ?? []).filter((c) => c.is_active);
     const adminUsers = (client.users ?? []).filter(
       (u) => u.role === UserRole.MANAGER,
     );
@@ -143,16 +136,8 @@ export class ClientsService {
           completed: currentIdx >= 0,
           completed_at: client.created_at,
         },
-        channel_configured: {
-          completed: currentIdx >= 1,
-          channel_count: (client.canales ?? []).length,
-        },
-        channel_verified: {
-          completed: currentIdx >= 2,
-          active_channel_count: activeChannels.length,
-        },
         admin_created: {
-          completed: currentIdx >= 3,
+          completed: currentIdx >= 1,
           admin_count: adminUsers.length,
         },
         completed: {
