@@ -30,9 +30,13 @@ export class ActivationsController {
   findAll(
     @CurrentUser() user: JwtPayload,
     @Query('campaign_id') campaignId?: string,
+    @Query('project_id') projectId?: string,
   ) {
     if (campaignId) {
       return this.activationsService.findByCampaign(user.client_id, campaignId);
+    }
+    if (projectId) {
+      return this.activationsService.findByProject(user.client_id, projectId);
     }
     return this.activationsService.findAll(user.client_id);
   }

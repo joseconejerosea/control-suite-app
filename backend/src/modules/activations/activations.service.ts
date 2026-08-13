@@ -13,19 +13,56 @@ export class ActivationsService {
     this.repo = new TenantRepository(dataSource, Activation);
   }
 
-  findAll(clientId: string): Promise<Activation[]> {
-    return this.repo.findAll(clientId, {
-      order: { activation_date: 'DESC' },
-    });
+  /**
+   * List activations enriched with the display names of their related entities
+   * (campaign / location / promoter). GET /activations returns raw *_id UUIDs
+   * otherwise, which are useless in a table. Client-scoped; RLS is defense-in-depth.
+   */
+  private listEnriched(
+    where: string,
+    params: unknown[],
+  ): Promise<Record<string, unknown>[]> {
+    return this.dataSource.query(
+      `SELECT a.*,
+              c.name AS campaign_name,
+              l.name AS location_name,
+              NULLIF(TRIM(COALESCE(p.first_name, '') || ' ' || COALESCE(p.last_name, '')), '') AS promoter_name
+         FROM activations a
+         LEFT JOIN campaigns  c ON c.id = a.campaign_id
+         LEFT JOIN locations  l ON l.id = a.location_id
+         LEFT JOIN promoters  p ON p.id = a.promoter_id
+        ${where}
+        ORDER BY a.activation_date DESC NULLS LAST`,
+      params,
+    );
   }
 
-  findByCampaign(clientId: string, campaignId: string): Promise<Activation[]> {
-    return this.repo.raw
-      .createQueryBuilder('a')
-      .where('a.client_id = :clientId', { clientId })
-      .andWhere('a.campaign_id = :campaignId', { campaignId })
-      .orderBy('a.activation_date', 'DESC')
-      .getMany();
+  findAll(clientId: string): Promise<Record<string, unknown>[]> {
+    return this.listEnriched('WHERE a.client_id = $1', [clientId]);
+  }
+
+  findByCampaign(
+    clientId: string,
+    campaignId: string,
+  ): Promise<Record<string, unknown>[]> {
+    return this.listEnriched(
+      'WHERE a.client_id = $1 AND a.campaign_id = $2',
+      [clientId, campaignId],
+    );
+  }
+
+  findByProject(
+    clientId: string,
+    projectId: string,
+  ): Promise<Record<string, unknown>[]> {
+    // Activations created via the new UI set campaign_id but not project_id, so
+    // the campaign traversal is the reliable link. Match on either association.
+    return this.listEnriched(
+      `WHERE a.client_id = $1
+         AND (a.project_id = $2
+              OR a.campaign_id IN (SELECT id FROM campaigns WHERE project_id = $2 AND client_id = $1))`,
+      [clientId, projectId],
+    );
   }
 
   findOne(clientId: string, id: string): Promise<Activation> {

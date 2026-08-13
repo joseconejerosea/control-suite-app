@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
@@ -26,8 +27,11 @@ export class CampaignsController {
   constructor(private readonly campaignsService: CampaignsService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload) {
-    return this.campaignsService.findAll(user.client_id);
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query('project_id') projectId?: string,
+  ) {
+    return this.campaignsService.findAll(user.client_id, projectId);
   }
 
   @Get(':id')

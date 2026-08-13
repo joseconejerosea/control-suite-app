@@ -25,6 +25,12 @@ export type FieldDef = {
   placeholder?: string;
   required?: boolean;
   options?: { value: string; label: string }[];
+  // Dynamic select: fetch options from an endpoint on mount.
+  optionsEndpoint?: string; // GET this; response is an array (or { data: [...] })
+  optionsValueKey?: string; // default "id"
+  optionsLabelKey?: string; // simple label field, e.g. "name"
+  optionsLabel?: (row: Record<string, unknown>) => string; // composed label (takes precedence)
+  optionsDataKey?: string; // if response wraps the array under a key
 };
 
 interface CrudTableProps {
@@ -40,6 +46,8 @@ interface CrudTableProps {
   autoOpenCreate?: boolean;
   // Called after a record is successfully CREATED (not on edit).
   onCreated?: () => void;
+  // When provided, clicking a data row calls this (e.g. navigate to a detail page).
+  onRowClick?: (row: Record<string, unknown>) => void;
 }
 
 function Badge({
@@ -93,6 +101,17 @@ export const StatusBadge = (v: unknown) => {
       bg: "color-mix(in srgb, var(--success) 12%, transparent)",
       color: "var(--success)",
     },
+    scheduled: { bg: "rgba(79,70,229,0.12)", color: "var(--primary)" },
+    in_progress: { bg: "rgba(245,158,11,0.15)", color: "#f59e0b" },
+    completed: {
+      bg: "color-mix(in srgb, var(--success) 12%, transparent)",
+      color: "var(--success)",
+    },
+    cancelled: {
+      bg: "color-mix(in srgb, var(--danger) 12%, transparent)",
+      color: "var(--danger)",
+    },
+    pending: { bg: "var(--secondary)", color: "var(--muted-foreground)" },
   };
   return <Badge value={val} map={map} />;
 };
@@ -272,8 +291,12 @@ export default function CrudTable({
   dataKey,
   autoOpenCreate,
   onCreated,
+  onRowClick,
 }: CrudTableProps) {
   const [items, setItems] = useState<Record<string, unknown>[]>([]);
+  const [dynOpts, setDynOpts] = useState<
+    Record<string, { value: string; label: string }[]>
+  >({});
   const [loading, setLoad] = useState(true);
   const [saving, setSave] = useState(false);
   const [search, setSearch] = useState("");
@@ -311,6 +334,48 @@ export default function CrudTable({
     load();
   }, [load]);
 
+  // Fetch dynamic select options once on mount for fields with optionsEndpoint.
+  useEffect(() => {
+    let cancelled = false;
+    fields.forEach((field) => {
+      if (!field.optionsEndpoint) return;
+      api
+        .get<unknown>(field.optionsEndpoint)
+        .then((res) => {
+          const raw = res as Record<string, unknown>;
+          const arr = field.optionsDataKey
+            ? raw[field.optionsDataKey]
+            : (raw.data ?? res);
+          const rows = Array.isArray(arr)
+            ? (arr as Record<string, unknown>[])
+            : [];
+          const opts = rows.map((row) => ({
+            value: String(row[field.optionsValueKey ?? "id"]),
+            label: field.optionsLabel
+              ? field.optionsLabel(row)
+              : String(row[field.optionsLabelKey ?? "name"] ?? ""),
+          }));
+          if (!cancelled)
+            setDynOpts((prev) => ({ ...prev, [field.key]: opts }));
+        })
+        .catch(() => {
+          if (!cancelled) setDynOpts((prev) => ({ ...prev, [field.key]: [] }));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // fields is a stable prop for a given page; run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Resolve fields: dynamic-options fields become selects with fetched options.
+  const resolvedFields: FieldDef[] = fields.map((f) =>
+    f.optionsEndpoint
+      ? { ...f, type: "select", options: dynOpts[f.key] ?? [] }
+      : f,
+  );
+
   const openCreate = () => {
     const f: Record<string, string> = {};
     Object.entries(defaultForm).forEach(([k, v]) => {
@@ -336,7 +401,16 @@ export default function CrudTable({
     const wasCreate = modal === "create";
     try {
       const payload: Record<string, unknown> = { ...form };
+      const TEXT_LIKE = ["text", "email", "tel", "password", "textarea"];
       fields.forEach((f) => {
+        const isEmpty = payload[f.key] === "" || payload[f.key] == null;
+        // Omit empty non-required NON-text fields (selects, numbers, dates, endpoint-backed
+        // selects). Backend @IsUUID/@IsDateString/@IsNumber reject "" even under @IsOptional.
+        // Free-text keeps "" so clearing a text field on edit still works (JD B-001/A-003).
+        if (isEmpty && !f.required && (f.optionsEndpoint || !TEXT_LIKE.includes(f.type ?? "text"))) {
+          delete payload[f.key];
+          return;
+        }
         if (f.type === "number" && payload[f.key] !== "") {
           payload[f.key] = parseFloat(String(payload[f.key])) || 0;
         }
@@ -514,7 +588,13 @@ export default function CrudTable({
                   <tr
                     key={String(item.id)}
                     className="transition-colors"
-                    style={{ borderBottom: "1px solid var(--border)" }}
+                    onClick={
+                      onRowClick ? () => onRowClick(item) : undefined
+                    }
+                    style={{
+                      borderBottom: "1px solid var(--border)",
+                      cursor: onRowClick ? "pointer" : undefined,
+                    }}
                     onMouseEnter={(e) =>
                       (e.currentTarget.style.background = "var(--secondary)")
                     }
@@ -542,7 +622,10 @@ export default function CrudTable({
                     ))}
                     <td className="px-4 py-3.5">
                       <button
-                        onClick={() => openEdit(item)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEdit(item);
+                        }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors"
                         style={{
                           background: "var(--secondary)",
@@ -572,7 +655,7 @@ export default function CrudTable({
           onClose={() => setModal(null)}
           onSave={handleSave}
           loading={saving}
-          fields={fields}
+          fields={resolvedFields}
           form={form}
           setForm={setForm}
         />

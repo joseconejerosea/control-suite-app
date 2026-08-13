@@ -94,6 +94,8 @@ export default function ProjectsPage() {
                   <td className="px-4 py-3 text-sm font-semibold">{fmtMoney(p.budget)}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
+                      <button onClick={() => router.push(`/client/projects/detail?id=${p.id}`)} className="text-xs px-2 py-1 rounded"
+                        style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Ver</button>
                       <button onClick={() => router.push(`/client/projects/editar?id=${p.id}`)} className="text-xs px-2 py-1 rounded"
                         style={{ background: "var(--secondary)", color: "var(--foreground)", border: "none", cursor: "pointer" }}>Editar</button>
                       {(() => {

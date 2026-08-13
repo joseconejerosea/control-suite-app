@@ -8,24 +8,34 @@ import {
   FileText, UserCircle, Building2,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
-  Settings, CalendarDays,
+  Settings, CalendarDays, Zap, Layers, Boxes, ChevronDown,
 } from "lucide-react";
 
+// Un item puede ser un link plano ({ href }) o un grupo colapsable ({ children }).
 const CLIENT_SECTIONS = [
   { label: "General", items: [{ label: "Dashboard", icon: LayoutDashboard, href: "/client/dashboard" }] },
   { label: "Operación", items: [
-    { label: "Reportes Internos", icon: FileText, href: "/client/reportes" },
-    { label: "Documentos por revisar", icon: AlertTriangle, href: "/client/documentos-revisar" },
-    { label: "Inventario POP", icon: Package, href: "/client/inventario" },
-    { label: "Rendiciones", icon: Receipt, href: "/client/rendiciones" },
-    { label: "Terreno", icon: Radio, href: "/client/terreno" },
-    { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
-    { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
-    { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
-    { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
-    { label: "Staff", icon: Users, href: "/client/promoters" },
-    { label: "Documentos", icon: FileText, href: "/client/documents" },
-    { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
+    { label: "Planificación", icon: Layers, children: [
+      { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
+      { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
+      { label: "Activaciones", icon: Zap, href: "/client/activaciones" },
+    ]},
+    { label: "Recursos", icon: Boxes, children: [
+      { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
+      { label: "Staff", icon: Users, href: "/client/promoters" },
+      { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
+    ]},
+    { label: "Terreno", icon: Radio, children: [
+      { label: "Terreno", icon: Radio, href: "/client/terreno" },
+      { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
+      { label: "Inventario POP", icon: Package, href: "/client/inventario" },
+    ]},
+    { label: "Documentos", icon: FileText, children: [
+      { label: "Documentos", icon: FileText, href: "/client/documents" },
+      { label: "Documentos por revisar", icon: AlertTriangle, href: "/client/documentos-revisar" },
+      { label: "Reportes Internos", icon: FileText, href: "/client/reportes" },
+      { label: "Rendiciones", icon: Receipt, href: "/client/rendiciones" },
+    ]},
   ]},
   { label: "Configuración", items: [
     { label: "Usuarios",          icon: UserCircle,  href: "/client/usuarios" },
@@ -60,10 +70,51 @@ const SUPER_ADMIN_ITEMS = [
   { label: "Usuarios", icon: UserCircle, href: "/admin/usuarios" },
 ];
 
+const ACTIVE_STYLE = {
+  background: "linear-gradient(90deg, rgba(79,70,229,0.10), rgba(79,70,229,0))",
+  color: "var(--primary)",
+  boxShadow: "inset 2px 0 0 var(--primary)",
+} as const;
+
+const isActive = (pathname: string, href: string) =>
+  pathname === href || pathname.startsWith(href + "/");
+
+function NavLink({ item, pathname, indented }: { item: any; pathname: string; indented?: boolean }) {
+  const Icon = item.icon;
+  const active = isActive(pathname, item.href);
+  return (
+    <Link href={item.href}
+      className={`w-full flex items-center gap-2.5 ${indented ? "pl-9 pr-4" : "px-4"} py-2 text-sm text-left transition-colors ${active ? "font-medium" : "text-slate-700 hover:bg-slate-50"}`}
+      style={active ? ACTIVE_STYLE : undefined}>
+      <Icon size={16} strokeWidth={active ? 2 : 1.75} className={active ? "" : "text-slate-500"} style={active ? { color: "var(--primary)" } : undefined} />
+      <span className="flex-1">{item.label}</span>
+      {item.badge && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{item.badge}</span>}
+    </Link>
+  );
+}
+
+function NavGroup({ item, pathname, open, onToggle }: { item: any; pathname: string; open: boolean; onToggle: () => void }) {
+  const Icon = item.icon;
+  const hasActive = item.children.some((c: any) => isActive(pathname, c.href));
+  return (
+    <div>
+      <button onClick={onToggle}
+        className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm text-left transition-colors bg-transparent border-0 cursor-pointer ${hasActive ? "font-medium" : "text-slate-700 hover:bg-slate-50"}`}
+        style={hasActive ? { color: "var(--primary)" } : undefined}>
+        <Icon size={16} strokeWidth={hasActive ? 2 : 1.75} className={hasActive ? "" : "text-slate-500"} style={hasActive ? { color: "var(--primary)" } : undefined} />
+        <span className="flex-1">{item.label}</span>
+        <ChevronDown size={14} className="text-slate-400 transition-transform" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} />
+      </button>
+      {open && item.children.map((c: any) => <NavLink key={c.href} item={c} pathname={pathname} indented />)}
+    </div>
+  );
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const [user, setUser] = useState<Record<string, string> | null>(null);
   const [role, setRole] = useState<"admin" | "client">("client");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     try {
@@ -71,6 +122,27 @@ export default function Sidebar() {
       if (stored) setUser(JSON.parse(stored));
     } catch {}
   }, []);
+
+  // Estado de grupos abiertos: hidrata de localStorage y fuerza abierto el grupo
+  // que contiene la ruta activa (para que al navegar el item quede visible).
+  useEffect(() => {
+    let next: Record<string, boolean> = {};
+    try { next = JSON.parse(localStorage.getItem("cs_sidebar_groups") || "{}"); } catch {}
+    for (const section of CLIENT_SECTIONS) {
+      for (const it of section.items as any[]) {
+        if (it.children?.some((c: any) => isActive(pathname, c.href))) next[it.label] = true;
+      }
+    }
+    setOpenGroups(next);
+  }, [pathname]);
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [label]: !prev[label] };
+      try { localStorage.setItem("cs_sidebar_groups", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const isSuperAdmin = user?.role === "super_admin";
   // El toggle "Administrador" expone ADMIN_SECTIONS = secciones de PLATAFORMA (Clientes/tenants,
@@ -108,19 +180,11 @@ export default function Sidebar() {
                 {section.label}
               </div>
             )}
-            {section.items.map((item: any) => {
-              const Icon = item.icon;
-              const active = pathname === item.href || pathname.startsWith(item.href + "/");
-              return (
-                <Link key={item.href} href={item.href}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm text-left transition-colors ${active ? "font-medium" : "text-slate-700 hover:bg-slate-50"}`}
-                  style={active ? { background: "linear-gradient(90deg, rgba(79,70,229,0.10), rgba(79,70,229,0))", color: "var(--primary)", boxShadow: "inset 2px 0 0 var(--primary)" } : undefined}>
-                  <Icon size={16} strokeWidth={active ? 2 : 1.75} className={active ? "" : "text-slate-500"} style={active ? { color: "var(--primary)" } : undefined} />
-                  <span className="flex-1">{item.label}</span>
-                  {item.badge && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{item.badge}</span>}
-                </Link>
-              );
-            })}
+            {section.items.map((item: any) =>
+              item.children
+                ? <NavGroup key={item.label} item={item} pathname={pathname} open={!!openGroups[item.label]} onToggle={() => toggleGroup(item.label)} />
+                : <NavLink key={item.href} item={item} pathname={pathname} />
+            )}
           </div>
         ))}
       </nav>

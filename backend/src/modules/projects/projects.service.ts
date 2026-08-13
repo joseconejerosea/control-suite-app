@@ -148,13 +148,23 @@ export class ProjectsService {
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
     const project  = await this.findOne(clientId, id);
+    // Activation counting mirrors ActivationsService.findByProject: an activation
+    // belongs to the project when its project_id matches OR its campaign_id belongs
+    // to one of the project's campaigns (UI activations set campaign_id, not project_id).
     const [counts] = await this.dataSource.query(
       `SELECT
          (SELECT COUNT(*)::int FROM campaigns   WHERE client_id=$1 AND project_id=$2) AS total_campaigns,
-         (SELECT COUNT(*)::int FROM activations WHERE client_id=$1 AND project_id=$2) AS total_activations,
+         (SELECT COUNT(*)::int FROM activations a
+           WHERE a.client_id=$1
+             AND (a.project_id=$2
+                  OR a.campaign_id IN (SELECT id FROM campaigns
+                                        WHERE project_id=$2 AND client_id=$1)))       AS total_activations,
          (SELECT COUNT(DISTINCT p.id)::int
             FROM promoters p JOIN activations a ON a.promoter_id=p.id
-           WHERE p.client_id=$1 AND a.project_id=$2)                                  AS active_promoters,
+           WHERE p.client_id=$1
+             AND (a.project_id=$2
+                  OR a.campaign_id IN (SELECT id FROM campaigns
+                                        WHERE project_id=$2 AND client_id=$1)))       AS active_promoters,
          COALESCE((SELECT SUM(budget)::numeric FROM campaigns
                     WHERE client_id=$1 AND project_id=$2),0)::text                    AS budget_used`,
       [clientId, id],
