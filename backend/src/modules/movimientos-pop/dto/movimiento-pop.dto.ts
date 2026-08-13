@@ -9,6 +9,7 @@ export class CreateMovimientoDto {
   @ValidateIf(o => ['salida', 'consumo'].includes(o.tipo))
   @IsUUID() proyecto_destino_id?: string;
   @IsOptional() @IsUUID() bodega_destino_id?: string;
+  @IsOptional() @IsUUID() activacion_id?: string;
   @IsIn(['salida','entrada','devolucion','consumo','merma','transfer','adjustment']) tipo: string;
   @IsInt() @Min(1) cantidad: number;
   @IsOptional() @IsString() foto_key?: string;

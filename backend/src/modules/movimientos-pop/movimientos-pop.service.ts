@@ -68,13 +68,14 @@ export class MovimientosPopService {
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
          (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo, activacion_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [
         clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id ?? null,
         dto.proyecto_destino_id ?? null, dto.tipo, dto.cantidad,
         dto.foto_key ?? null, dto.tiempo_uso_dias ?? null,
         dto.fecha_retorno_esperada ?? null, estado, dto.observacion ?? null, correlativo,
+        dto.activacion_id ?? null,
       ],
     );
 

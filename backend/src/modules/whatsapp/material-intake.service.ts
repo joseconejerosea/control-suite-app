@@ -52,6 +52,12 @@ export class MaterialIntakeService {
     storagePath: string;
     suggestedLabel?: string | null;
   }): Promise<void> {
+    if (!(await this.hasActiveActivation(opts.clientId))) {
+      await this.escalateNoActivation(opts.eventoCrudoId, opts.phoneNumber, opts.clientId);
+      this.logger.log(`[Material] Sin activación activa, escalado evento ${opts.eventoCrudoId}`);
+      return;
+    }
+
     const session = (await this.sessions.get(opts.phoneNumber)) ?? this.emptySession(opts.clientId);
     session.clientId = opts.clientId;
     session.state = STATE;
@@ -115,6 +121,8 @@ export class MaterialIntakeService {
       case 'kind':     return this.handleKind(phoneNumber, text, session);
       case 'nombre':   return this.handleNombre(phoneNumber, text, session);
       case 'proyecto': return this.handleProyecto(phoneNumber, text, session);
+      case 'destino':    return this.handleDestino(phoneNumber, text, session);
+      case 'activacion': return this.handleActivacion(phoneNumber, text, session);
       case 'bodega':   return this.handleBodega(phoneNumber, text, session);
       case 'cantidad': return this.handleCantidad(phoneNumber, text, session);
       default:         return false;
@@ -140,6 +148,10 @@ export class MaterialIntakeService {
     }
 
     if (num === 2) {
+      if (!(await this.hasActiveActivation(session.clientId!))) {
+        await this.escalateNoActivation(mi.eventoCrudoId, phone, session.clientId!);
+        return true;
+      }
       mi.step = 'nombre';
       mi.attempts = 0;
       await this.sessions.set(phone, session);
@@ -197,7 +209,7 @@ export class MaterialIntakeService {
     // Un solo proyecto → auto-seleccionar y saltar la pregunta.
     if (projects.length === 1) {
       mi.proyectoId = projects[0].id;
-      return this.askBodega(phone, session);
+      return this.askDestino(phone, session);
     }
 
     mi.projects = projects;
@@ -217,7 +229,94 @@ export class MaterialIntakeService {
     }
     mi.proyectoId = opts[num - 1].id;
     mi.attempts = 0;
-    return this.askBodega(phone, session);
+    return this.askDestino(phone, session);
+  }
+
+  /** Pregunta si el material va a bodega (depósito) o se usa hoy en la activación. */
+  private async askDestino(phone: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
+    mi.step = 'destino';
+    mi.attempts = 0;
+    await this.sessions.set(phone, session);
+    await this.wa.sendText(
+      phone,
+      '¿Este material va a una bodega o se usa hoy en la activación?\n\n1. Va a bodega (queda en depósito)\n2. Se usa hoy en la activación\n\nRespondé con el número.',
+    );
+    return true;
+  }
+
+  private async handleDestino(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
+    const num = parseInt(text.trim(), 10);
+    if (num === 1) {
+      mi.destino = 'bodega';
+      mi.attempts = 0;
+      return this.askBodega(phone, session);
+    }
+    if (num === 2) {
+      mi.destino = 'consumo';
+      mi.attempts = 0;
+      return this.askActivacion(phone, session);
+    }
+    return this.retryOrEscalate(phone, session, 'Respondé 1 (va a bodega) o 2 (se usa hoy en la activación).');
+  }
+
+  /**
+   * Rama "se usa hoy": resuelve la activación destino (mismo criterio que F5 a nivel
+   * cliente). 1 activa → auto; ≥2 → lista numerada para que el remitente elija.
+   */
+  private async askActivacion(phone: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
+    const activaciones = await runWithTenant(this.ds, session.clientId!, () =>
+      this.ds.query(
+        `SELECT a.id, a.activation_date, l.name AS location_name
+           FROM activations a
+           LEFT JOIN locations l ON l.id = a.location_id
+          WHERE a.client_id=$1
+            AND a.status IN ('scheduled','in_progress')
+            AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+          ORDER BY a.activation_date DESC LIMIT 10`,
+        [session.clientId],
+      ),
+    ).catch(() => []);
+
+    if (!activaciones.length) {
+      // El guard de start() garantiza ≥1; ante una carrera (se cerró en el medio) derivamos.
+      await this.escalateNoActivation(mi.eventoCrudoId, phone, session.clientId!);
+      return true;
+    }
+
+    // Label "ubicación · fecha" (como resolveProbableActivation de F5): sin el lugar,
+    // dos activaciones del mismo día se ven idénticas y el remitente no puede elegir.
+    const opciones = activaciones.map((a: any) => {
+      const date = a.activation_date ? new Date(a.activation_date).toLocaleDateString('es-CL') : '';
+      const label = [a.location_name, date].filter(Boolean).join(' · ') || 'Activación';
+      return { id: a.id, label };
+    });
+
+    if (opciones.length === 1) {
+      mi.activacionId = opciones[0].id;
+      return this.proceedToCantidad(phone, session);
+    }
+
+    mi.activaciones = opciones;
+    mi.step = 'activacion';
+    await this.sessions.set(phone, session);
+    const list = opciones.map((o: { label: string }, i: number) => `${i + 1}. ${o.label}`).join('\n');
+    await this.wa.sendText(phone, `¿A qué activación corresponde? (se usa hoy)\n\n${list}\n\nRespondé con el número.`);
+    return true;
+  }
+
+  private async handleActivacion(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
+    const opts = mi.activaciones ?? [];
+    const num = parseInt(text.trim(), 10);
+    if (isNaN(num) || num < 1 || num > opts.length) {
+      return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
+    }
+    mi.activacionId = opts[num - 1].id;
+    mi.attempts = 0;
+    return this.proceedToCantidad(phone, session);
   }
 
   private async askBodega(phone: string, session: WhatsAppSession): Promise<boolean> {
@@ -239,7 +338,7 @@ export class MaterialIntakeService {
     // Una sola bodega → auto-seleccionar.
     if (bodegas.length === 1) {
       mi.bodegaId = bodegas[0].id;
-      return this.proceedAfterBodega(phone, session);
+      return this.proceedToCantidad(phone, session);
     }
 
     mi.bodegas = bodegas;
@@ -259,15 +358,14 @@ export class MaterialIntakeService {
     }
     mi.bodegaId = opts[num - 1].id;
     mi.attempts = 0;
-    return this.proceedAfterBodega(phone, session);
+    return this.proceedToCantidad(phone, session);
   }
 
   /**
-   * Tras elegir la bodega: si es un único ítem SIN cantidad inline, pregunta la
-   * cantidad (flujo clásico). En multi-ítem (o single con cantidad) ya la tenemos
-   * → registra directo, sin preguntar de nuevo.
+   * Tras fijar el destino (bodega o activación): si es un único ítem SIN cantidad
+   * inline, pregunta la cantidad; si no, registra.
    */
-  private async proceedAfterBodega(phone: string, session: WhatsAppSession): Promise<boolean> {
+  private async proceedToCantidad(phone: string, session: WhatsAppSession): Promise<boolean> {
     const mi = session.materialIntake!;
     const items = mi.items ?? [];
     const necesitaCantidad = items.length === 1 && items[0].cantidad == null;
@@ -297,6 +395,7 @@ export class MaterialIntakeService {
   private async register(phone: string, session: WhatsAppSession): Promise<boolean> {
     const mi = session.materialIntake!;
     const clientId = session.clientId!;
+    const esConsumo = mi.destino === 'consumo';
 
     // Normalizar a lista de ítems. Compat: el flujo single guarda mi.nombre + mi.cantidad;
     // si no hay mi.items lo envolvemos en un ítem. Cualquier cantidad null → 1.
@@ -311,18 +410,24 @@ export class MaterialIntakeService {
           const sku = await this.crearSkuUnico(clientId, it.nombre);
           const movimiento = await this.movimientos.create(clientId, {
             sku_id: sku.id,
-            bodega_origen_id: mi.bodegaId!,
             proyecto_destino_id: mi.proyectoId!,
-            tipo: 'entrada',
+            tipo: esConsumo ? 'consumo' : 'entrada',
             cantidad: it.cantidad,
             foto_key: mi.storagePath,
-            observacion: 'Alta de material POP vía WhatsApp',
+            observacion: esConsumo
+              ? 'Consumo de material POP en activación vía WhatsApp'
+              : 'Alta de material POP vía WhatsApp',
+            ...(esConsumo
+              ? { activacion_id: mi.activacionId }
+              : { bodega_origen_id: mi.bodegaId }),
           } as any);
           registrados.push({ skuId: sku.id, movId: movimiento.id, nombre: sku.nombre, codigo: sku.codigo, cantidad: it.cantidad });
         }
 
         const proyRows = await this.ds.query(`SELECT name FROM projects WHERE id=$1 LIMIT 1`, [mi.proyectoId]).catch(() => []);
-        const bodRows = await this.ds.query(`SELECT nombre FROM bodegas WHERE id=$1 LIMIT 1`, [mi.bodegaId]).catch(() => []);
+        const bodRows = esConsumo
+          ? []
+          : await this.ds.query(`SELECT nombre FROM bodegas WHERE id=$1 LIMIT 1`, [mi.bodegaId]).catch(() => []);
 
         return {
           registrados,
@@ -358,7 +463,13 @@ export class MaterialIntakeService {
 
       await this.sessions.delete(phone);
 
-      if (registrados.length === 1) {
+      if (esConsumo) {
+        const lista = registrados.map((r) => `• ${r.nombre} — ID ${r.codigo} × ${r.cantidad}`).join('\n');
+        const titulo = registrados.length === 1
+          ? '✅ Material registrado como *usado hoy en la activación*'
+          : `✅ *${registrados.length} materiales registrados* (usados hoy en la activación)`;
+        await this.wa.sendText(phone, `${titulo}\n\n${lista}\n\nProyecto: ${proyectoNombre}\n\nControl Suite BTL ⚡`);
+      } else if (registrados.length === 1) {
         const r = registrados[0];
         await this.wa.confirmarMaterial({
           telefono: phone, nombre: r.nombre, codigo: r.codigo,
@@ -437,6 +548,45 @@ export class MaterialIntakeService {
   }
 
   // ── Reintento / escalado ────────────────────────────────────────────────
+
+  /**
+   * Guard de activación activa (espeja F5): el material POP debe asociarse a una
+   * activación en curso. Sin ninguna activa, darlo de alta genera inventario
+   * huérfano, así que se deriva a un operador. Criterio idéntico al fallback por
+   * cliente de F5 (status scheduled/in_progress y estado_f5 ≠ 'cerrada').
+   */
+  private async hasActiveActivation(clientId: string): Promise<boolean> {
+    const rows = await runWithTenant(this.ds, clientId, () =>
+      this.ds.query(
+        `SELECT id FROM activations
+          WHERE client_id=$1
+            AND status IN ('scheduled','in_progress')
+            AND estado_f5 IS DISTINCT FROM 'cerrada'
+          LIMIT 1`,
+        [clientId],
+      ),
+    ).catch(() => []);
+    return rows.length > 0;
+  }
+
+  /**
+   * Deriva a un operador cuando no hay activación activa: marca el evento como
+   * escalated (mismo mecanismo que retryOrEscalate) y avisa al remitente. No deja
+   * sesión: no hay conversación que continuar.
+   */
+  private async escalateNoActivation(eventoCrudoId: string, phone: string, clientId: string): Promise<void> {
+    // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
+    // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
+    await runWithTenant(this.ds, clientId, () =>
+      this.ds.query(
+        `UPDATE eventos_crudos SET status='escalated',
+           parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
+        [eventoCrudoId, JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: 'material_no_active_activation' })],
+      ),
+    ).catch(() => {});
+    await this.sessions.delete(phone);
+    await this.wa.sendText(phone, 'No encontré una activación activa para asociar este material. Lo derivo a un operador. Gracias.');
+  }
 
   private async retryOrEscalate(phone: string, session: WhatsAppSession, retryMsg: string): Promise<boolean> {
     const mi = session.materialIntake!;

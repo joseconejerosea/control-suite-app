@@ -37,7 +37,7 @@ export interface WhatsAppSession {
   materialIntake?: {
     eventoCrudoId: string;
     storagePath: string;                 // foto del material → foto_key del SKU y del movimiento
-    step: 'kind' | 'nombre' | 'proyecto' | 'bodega' | 'cantidad';
+    step: 'kind' | 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad';
     attempts: number;
     suggestedLabel?: string | null;      // nombre sugerido por la visión (ambigüedad/ayuda)
     nombre?: string;
@@ -47,6 +47,9 @@ export interface WhatsAppSession {
     items?: { nombre: string; cantidad: number | null }[];
     proyectoId?: string;
     bodegaId?: string;
+    destino?: 'bodega' | 'consumo';           // rama elegida en el paso 'destino'
+    activacionId?: string;                     // activación destino cuando destino='consumo'
+    activaciones?: { id: string; label: string }[];  // opciones numeradas cacheadas
     cantidad?: number;
     projects?: { id: string; name: string }[];  // opciones cacheadas para parsear el número
     bodegas?: { id: string; name: string }[];
