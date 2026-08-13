@@ -19,8 +19,12 @@ export default function ActivacionesPage() {
           notes: "",
         }}
         columns={[
+          { key: "campaign_name", label: "Campaña" },
+          { key: "location_name", label: "Ubicación" },
+          { key: "promoter_name", label: "Promotor" },
           { key: "activation_date", label: "Fecha", render: DateFmt },
           { key: "status", label: "Estado", render: StatusBadge },
+          { key: "notes", label: "Notas" },
         ]}
         fields={[
           {

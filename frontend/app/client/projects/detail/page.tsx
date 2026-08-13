@@ -45,6 +45,9 @@ interface Activation {
   id: string;
   activation_date?: string;
   status?: string;
+  campaign_name?: string;
+  location_name?: string;
+  promoter_name?: string;
 }
 
 interface DocumentUpload {
@@ -350,6 +353,9 @@ function ProjectDetailContent() {
                     <thead>
                       <tr style={{ background: "var(--secondary)" }}>
                         <th style={thStyle}>Fecha</th>
+                        <th style={thStyle}>Campaña</th>
+                        <th style={thStyle}>Ubicación</th>
+                        <th style={thStyle}>Promotor</th>
                         <th style={thStyle}>Estado</th>
                       </tr>
                     </thead>
@@ -357,6 +363,9 @@ function ProjectDetailContent() {
                       {activations.map((a) => (
                         <tr key={a.id} style={{ borderBottom: "1px solid var(--border)" }}>
                           <td style={tdStyle}>{DateFmt(a.activation_date)}</td>
+                          <td style={tdStyle}>{a.campaign_name ?? "—"}</td>
+                          <td style={tdStyle}>{a.location_name ?? "—"}</td>
+                          <td style={tdStyle}>{a.promoter_name ?? "—"}</td>
                           <td style={tdStyle}>{StatusBadge(a.status)}</td>
                         </tr>
                       ))}

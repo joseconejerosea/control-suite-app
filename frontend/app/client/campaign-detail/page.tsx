@@ -20,7 +20,8 @@ interface Activation {
   id: string;
   activation_date?: string;
   status?: string;
-  location_id?: string;
+  location_name?: string;
+  promoter_name?: string;
   notes?: string;
 }
 
@@ -189,6 +190,8 @@ function CampaignDetailContent() {
                   <thead>
                     <tr style={{ background: "var(--secondary)" }}>
                       <th style={thStyle}>Fecha</th>
+                      <th style={thStyle}>Ubicación</th>
+                      <th style={thStyle}>Promotor</th>
                       <th style={thStyle}>Estado</th>
                       <th style={thStyle}>Notas</th>
                     </tr>
@@ -197,6 +200,8 @@ function CampaignDetailContent() {
                     {activations.map((a) => (
                       <tr key={a.id} style={{ borderBottom: "1px solid var(--border)" }}>
                         <td style={tdStyle}>{DateFmt(a.activation_date)}</td>
+                        <td style={tdStyle}>{a.location_name ?? "—"}</td>
+                        <td style={tdStyle}>{a.promoter_name ?? "—"}</td>
                         <td style={tdStyle}>{StatusBadge(a.status)}</td>
                         <td style={{ ...tdStyle, color: "var(--muted-foreground)" }}>
                           {a.notes ?? "—"}
