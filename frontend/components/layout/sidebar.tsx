@@ -8,7 +8,7 @@ import {
   FileText, UserCircle, Building2,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
-  Settings, CalendarDays,
+  Settings, CalendarDays, Zap,
 } from "lucide-react";
 
 const CLIENT_SECTIONS = [
@@ -22,6 +22,7 @@ const CLIENT_SECTIONS = [
     { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
     { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
     { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
+    { label: "Activaciones", icon: Zap, href: "/client/activaciones" },
     { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
     { label: "Staff", icon: Users, href: "/client/promoters" },
     { label: "Documentos", icon: FileText, href: "/client/documents" },

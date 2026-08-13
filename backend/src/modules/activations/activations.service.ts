@@ -28,6 +28,20 @@ export class ActivationsService {
       .getMany();
   }
 
+  findByProject(clientId: string, projectId: string): Promise<Activation[]> {
+    // Activations created via the new UI set campaign_id but not project_id, so
+    // the campaign traversal is the reliable link. Match on either association.
+    return this.repo.raw
+      .createQueryBuilder('a')
+      .where('a.client_id = :clientId', { clientId })
+      .andWhere(
+        '(a.project_id = :projectId OR a.campaign_id IN (SELECT id FROM campaigns WHERE project_id = :projectId AND client_id = :clientId))',
+        { projectId, clientId },
+      )
+      .orderBy('a.activation_date', 'DESC')
+      .getMany();
+  }
+
   findOne(clientId: string, id: string): Promise<Activation> {
     return this.repo.findOne(clientId, id);
   }

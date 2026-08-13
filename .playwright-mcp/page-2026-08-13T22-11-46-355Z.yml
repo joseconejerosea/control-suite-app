@@ -1,0 +1,39 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - generic [ref=f3e3]:
+      - generic [ref=f3e5]:
+        - generic [ref=f3e6]: Control Suite BTL
+        - heading [level=1] [ref=f3e11]:
+          - text: La operación BTL,
+          - emphasis [ref=f3e12]: sin fricción
+          - text: .
+        - paragraph [ref=f3e13]: Plataforma multi-tenant para agencias BTL. Documentos, rendiciones, inventario POP, activaciones y monitoreo en terreno — orquestado por IA agéntica desde WhatsApp y correo.
+      - generic [ref=f3e14]:
+        - generic [ref=f3e15]:
+          - generic [ref=f3e16]: "5"
+          - generic [ref=f3e17]: flujos integradosF1·F2·F3·F4·F5
+        - generic [ref=f3e18]:
+          - generic [ref=f3e19]: "3"
+          - generic [ref=f3e20]: canales de entradaWhatsApp · Mail · Manual
+        - generic [ref=f3e21]:
+          - generic [ref=f3e22]: 100%
+          - generic [ref=f3e23]: trazabilidadmulti-tenant
+    - generic [ref=f3e25]:
+      - heading "Bienvenido" [level=2] [ref=f3e26]
+      - paragraph [ref=f3e27]: Inicia sesión para continuar
+      - generic [ref=f3e28]:
+        - generic [ref=f3e29]:
+          - generic [ref=f3e30]: Correo
+          - textbox "tu@empresa.cl" [ref=f3e31]
+        - generic [ref=f3e32]:
+          - generic [ref=f3e33]: Contraseña
+          - generic [ref=f3e34]:
+            - textbox "••••••••••" [ref=f3e35]
+            - button [ref=f3e36]
+        - generic [ref=f3e40]:
+          - generic [ref=f3e41] [cursor=pointer]:
+            - checkbox "Recordarme" [checked] [ref=f3e42]
+            - text: Recordarme
+          - generic [ref=f3e43] [cursor=pointer]: ¿Olvidaste tu contraseña?
+        - button "Entrar a la plataforma →" [ref=f3e44]
+  - button "Open Next.js Dev Tools" [ref=f3e50] [cursor=pointer]

@@ -1,0 +1,104 @@
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - banner [ref=f6e3]:
+      - generic [ref=f6e4]: Control Suite BTL
+      - generic [ref=f6e9]:
+        - button "Notificaciones" [ref=f6e11] [cursor=pointer]
+        - button "AD admin@controlsuite.com" [ref=f6e15] [cursor=pointer]:
+          - generic [ref=f6e16]: AD
+          - generic [ref=f6e17]: admin@controlsuite.com
+    - generic [ref=f6e21]:
+      - complementary [ref=f6e22]:
+        - navigation [ref=f6e23]:
+          - generic [ref=f6e24]:
+            - generic [ref=f6e25]: General
+            - link "Dashboard" [ref=f6e26] [cursor=pointer]:
+              - /url: /client/dashboard
+          - generic [ref=f6e33]:
+            - generic [ref=f6e34]: Operación
+            - link "Reportes Internos" [ref=f6e35] [cursor=pointer]:
+              - /url: /client/reportes
+            - link "Documentos por revisar" [ref=f6e40] [cursor=pointer]:
+              - /url: /client/documentos-revisar
+            - link "Inventario POP" [ref=f6e44] [cursor=pointer]:
+              - /url: /client/inventario
+            - link "Rendiciones" [ref=f6e50] [cursor=pointer]:
+              - /url: /client/rendiciones
+            - link "Terreno" [ref=f6e55] [cursor=pointer]:
+              - /url: /client/terreno
+            - link "Calendario" [ref=f6e63] [cursor=pointer]:
+              - /url: /client/calendario
+            - link "Proyectos" [ref=f6e67] [cursor=pointer]:
+              - /url: /client/projects
+            - link "Campañas" [ref=f6e71] [cursor=pointer]:
+              - /url: /client/campaigns
+            - link "Activaciones" [ref=f6e76] [cursor=pointer]:
+              - /url: /client/activaciones
+            - link "Ubicaciones" [ref=f6e80] [cursor=pointer]:
+              - /url: /client/locations
+            - link "Staff" [ref=f6e85] [cursor=pointer]:
+              - /url: /client/promoters
+            - link "Documentos" [ref=f6e92] [cursor=pointer]:
+              - /url: /client/documents
+            - link "Colaboradores" [ref=f6e97] [cursor=pointer]:
+              - /url: /client/collaborators
+          - generic [ref=f6e103]:
+            - generic [ref=f6e104]: Configuración
+            - link "Usuarios" [ref=f6e105] [cursor=pointer]:
+              - /url: /client/usuarios
+            - link "Configuración" [ref=f6e111] [cursor=pointer]:
+              - /url: /client/config
+            - link "Equivalencias OCR" [ref=f6e116] [cursor=pointer]:
+              - /url: /client/equivalencias
+          - generic [ref=f6e123]:
+            - generic [ref=f6e124]: IA
+            - link "Control Mind" [ref=f6e125] [cursor=pointer]:
+              - /url: /client/mind
+      - main [ref=f6e135]:
+        - generic [ref=f6e136]:
+          - generic [ref=f6e137]:
+            - generic [ref=f6e138]:
+              - heading "Campañas" [level=1] [ref=f6e139]
+              - paragraph [ref=f6e140]: Campañas de marketing con presupuestos, fechas y seguimiento de estado
+            - button "New Campaña" [ref=f6e141] [cursor=pointer]
+          - textbox "Search campañas…" [ref=f6e147]
+          - table [ref=f6e150]:
+            - rowgroup [ref=f6e151]:
+              - row [ref=f6e152]:
+                - columnheader "Nombre" [ref=f6e153]
+                - columnheader "Estado" [ref=f6e154]
+                - columnheader "Inicio" [ref=f6e155]
+                - columnheader "Fin" [ref=f6e156]
+                - columnheader "Presupuesto" [ref=f6e157]
+                - columnheader "Actions" [ref=f6e158]
+            - rowgroup [ref=f6e159]:
+              - row [ref=f6e160]:
+                - cell [ref=f6e161]
+                - cell [ref=f6e163]
+                - cell [ref=f6e165]
+                - cell [ref=f6e167]
+                - cell [ref=f6e169]
+                - cell [ref=f6e171]
+              - row [ref=f6e173]:
+                - cell [ref=f6e174]
+                - cell [ref=f6e176]
+                - cell [ref=f6e178]
+                - cell [ref=f6e180]
+                - cell [ref=f6e182]
+                - cell [ref=f6e184]
+              - row [ref=f6e186]:
+                - cell [ref=f6e187]
+                - cell [ref=f6e189]
+                - cell [ref=f6e191]
+                - cell [ref=f6e193]
+                - cell [ref=f6e195]
+                - cell [ref=f6e197]
+              - row [ref=f6e199]:
+                - cell [ref=f6e200]
+                - cell [ref=f6e202]
+                - cell [ref=f6e204]
+                - cell [ref=f6e206]
+                - cell [ref=f6e208]
+                - cell [ref=f6e210]
+  - button "Open Next.js Dev Tools" [ref=f6e217] [cursor=pointer]
+  - alert [ref=f6e221]
