@@ -35,6 +35,7 @@ describe('MaterialIntakeService', () => {
       }
       if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
       if (sql.includes('SELECT nombre FROM bodegas')) return Promise.resolve([{ nombre: 'Bodega Central' }]);
+      if (sql.includes('FROM activations')) return Promise.resolve([{ id: 'act-1' }]);
       return Promise.resolve([]);
     });
 
@@ -69,6 +70,9 @@ describe('MaterialIntakeService', () => {
 
     expect(await svc.handleResponse(PHONE, 'Silla ejecutiva ACME')).toBe(true);
     expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);
+    expect(store[PHONE].materialIntake?.step).toBe('destino');
 
     expect(await svc.handleResponse(PHONE, '1')).toBe(true);
     expect(store[PHONE].materialIntake?.step).toBe('bodega');
@@ -132,7 +136,11 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE].materialIntake?.items?.length).toBe(3);
     expect(store[PHONE].materialIntake?.step).toBe('proyecto');
 
-    // proyecto → bodega.
+    // proyecto → destino.
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);
+    expect(store[PHONE].materialIntake?.step).toBe('destino');
+
+    // destino (va a bodega) → bodega.
     expect(await svc.handleResponse(PHONE, '1')).toBe(true);
     expect(store[PHONE].materialIntake?.step).toBe('bodega');
 
@@ -164,7 +172,8 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE].materialIntake?.items?.[0].nombre).toBe('Mesa, con logo Coca-Cola');
     expect(store[PHONE].materialIntake?.step).toBe('proyecto');
 
-    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // proyecto
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // proyecto → destino
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // destino → bodega
     expect(await svc.handleResponse(PHONE, '1')).toBe(true); // bodega
     expect(store[PHONE].materialIntake?.step).toBe('cantidad'); // pregunta cantidad (1 ítem sin qty inline)
   });
@@ -180,7 +189,8 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE].materialIntake?.items?.length).toBe(3);
     expect(store[PHONE].materialIntake?.step).toBe('proyecto');
 
-    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // proyecto → bodega
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // proyecto → destino
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true); // destino → bodega
     expect(await svc.handleResponse(PHONE, '1')).toBe(true); // bodega → registra
     expect(store[PHONE]).toBeUndefined();
 
@@ -198,6 +208,80 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE].materialIntake?.items?.length).toBe(1);
     expect(store[PHONE].materialIntake?.items?.[0].nombre).toBe('Banner blanco/negro');
     expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+  });
+
+  it('offers the destino question (bodega vs se usa hoy) after choosing the project', async () => {
+    await svc.start({ eventoCrudoId: 'evt-d', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    await svc.handleResponse(PHONE, 'Silla ACME');           // nombre → proyecto (2 proyectos)
+    expect(store[PHONE].materialIntake?.step).toBe('proyecto');
+    await svc.handleResponse(PHONE, '1');                    // proyecto → destino
+    expect(store[PHONE].materialIntake?.step).toBe('destino');
+    const prompt = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(prompt).toMatch(/bodega/i);
+    expect(prompt).toMatch(/se usa hoy/i);
+  });
+
+  it('"se usa hoy" with a single active activation records a consumo movement tied to the activation, no bodega', async () => {
+    // default mock: FROM activations → [{ id: 'act-1' }] (single → auto-select)
+    await svc.start({ eventoCrudoId: 'evt-uso', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    expect(await svc.handleResponse(PHONE, 'Silla ACME')).toBe(true);   // → proyecto
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);            // proyecto → destino
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);            // destino: se usa hoy → (auto activación) → cantidad
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+    // No preguntó bodega.
+    const asked = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(asked).not.toMatch(/¿En qué bodega/i);
+    expect(await svc.handleResponse(PHONE, '5')).toBe(true);            // cantidad → register
+
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    const dto = movimientos.create.mock.calls[0][1];
+    expect(dto).toMatchObject({ tipo: 'consumo', proyecto_destino_id: 'proj-1', activacion_id: 'act-1', cantidad: 5, foto_key: 'materials/x.jpg' });
+    expect(dto.bodega_origen_id).toBeUndefined();
+    // Confirmación de consumo (no la de bodega).
+    expect(wa.confirmarMaterial).not.toHaveBeenCalled();
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/activaci[oó]n/i);
+    expect(store[PHONE]).toBeUndefined();
+  });
+
+  it('"se usa hoy" with multiple active activations asks which one, then records consumo for the chosen activation', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes("status='active'")) return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }]);
+      if (sql.includes('FROM activations')) return Promise.resolve([
+        { id: 'act-1', activation_date: '2026-08-12', location_name: 'Jumbo Maipú' },
+        { id: 'act-2', activation_date: '2026-08-11', location_name: 'Líder Centro' },
+      ]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      return Promise.resolve([]);
+    });
+
+    await svc.start({ eventoCrudoId: 'evt-multi-act', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    // 1 proyecto → auto; entonces nombre lleva directo a destino.
+    expect(await svc.handleResponse(PHONE, 'Silla ACME')).toBe(true);   // nombre → (1 proyecto auto) → destino
+    expect(store[PHONE].materialIntake?.step).toBe('destino');
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);            // se usa hoy → activacion (2 activas → pregunta)
+    expect(store[PHONE].materialIntake?.step).toBe('activacion');
+    const ask = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(ask).toMatch(/activaci[oó]n/i);
+    // El picker muestra la ubicación de cada activación para poder distinguirlas.
+    expect(ask).toContain('Jumbo Maipú');
+    expect(ask).toContain('Líder Centro');
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);            // elige act-2 → single item sin qty → cantidad
+    expect(await svc.handleResponse(PHONE, '3')).toBe(true);            // cantidad → register
+
+    const dto = movimientos.create.mock.calls[0][1];
+    expect(dto).toMatchObject({ tipo: 'consumo', activacion_id: 'act-2', cantidad: 3 });
+    expect(dto.bodega_origen_id).toBeUndefined();
+  });
+
+  it('retries on an invalid destino answer instead of proceeding', async () => {
+    await svc.start({ eventoCrudoId: 'evt-badd', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    await svc.handleResponse(PHONE, 'Silla ACME'); // → proyecto
+    await svc.handleResponse(PHONE, '1');          // → destino
+    expect(await svc.handleResponse(PHONE, 'xyz')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.step).toBe('destino');
+    expect(movimientos.create).not.toHaveBeenCalled();
   });
 
   it('a bookkeeping failure after commit does NOT roll back the SKU/movement nor block the confirmation', async () => {
@@ -295,5 +379,59 @@ describe('MaterialIntakeService', () => {
     expect(movimientos.create).not.toHaveBeenCalled();
     // Sigue esperando cantidad (reintento), la sesión no se borró.
     expect(store[PHONE]?.materialIntake?.step).toBe('cantidad');
+  });
+
+  it('escalates instead of asking for the material name when there is no active activation', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('FROM activations')) return Promise.resolve([]); // sin activación activa
+      return Promise.resolve([]);
+    });
+
+    await svc.start({ eventoCrudoId: 'evt-noact', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+
+    // No arranca el intake: no pide el nombre ni crea SKU.
+    expect(store[PHONE]).toBeUndefined();
+    expect(skus.create).not.toHaveBeenCalled();
+
+    // Marca el evento como escalated con el motivo correcto.
+    const esc = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+    );
+    expect(esc).toBeDefined();
+    expect(esc[1][1]).toContain('material_no_active_activation');
+
+    // Avisa al remitente que se deriva.
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/activación activa/i);
+  });
+
+  it('proceeds to the nombre step when an active activation exists', async () => {
+    await svc.start({ eventoCrudoId: 'evt-ok', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    expect(store[PHONE].materialIntake?.step).toBe('nombre');
+    const esc = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='escalated'"),
+    );
+    expect(esc).toBeUndefined();
+  });
+
+  it('on ambiguity, answering "2" (material) with no active activation escalates instead of asking the name', async () => {
+    await svc.askKind({ eventoCrudoId: 'evt-k2', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/k2.jpg' });
+    // A partir de acá NO hay activación activa.
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('FROM activations')) return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);
+
+    expect(skus.create).not.toHaveBeenCalled();
+    expect(store[PHONE]).toBeUndefined();
+    const esc = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='escalated'"),
+    );
+    expect(esc).toBeDefined();
+    expect(esc[1][1]).toContain('material_no_active_activation');
   });
 });
