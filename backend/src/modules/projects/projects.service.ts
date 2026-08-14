@@ -476,11 +476,53 @@ export class ProjectsService {
   // El click de "Aprobar y enviar" ES la aprobación humana (gate F4). Reusa
   // aprobarProyecto (setea el gate) → asignarTurno (crea las convocatorias) →
   // enviarConvocatoria (manda WhatsApp). Nada nuevo en el envío.
+  /**
+   * T6 — Anti-choque de anfitrión. Detecta convocatorias NO terminales del MISMO
+   * cliente en OTROS proyectos que colisionan en (persona, día) con los items que
+   * se van a convocar. Una misma persona no puede estar en dos activaciones de
+   * proyectos distintos el mismo día (físicamente imposible). Devuelve las filas
+   * en conflicto (o [] si no hay ninguna) para que el front confirme.
+   */
+  private async detectarChoquesDia(
+    clientId: string, projectId: string, items: ConvocatoriaItem[],
+  ): Promise<unknown[]> {
+    const personaIds: string[] = [];
+    const dias: string[] = [];
+    for (const it of items) {
+      if (!it.dia) continue;
+      personaIds.push(it.persona_id);
+      dias.push(it.dia);
+    }
+    if (!personaIds.length) return [];
+
+    return this.dataSource.query(
+      `SELECT c.id AS convocatoria_id, c.proyecto_id, pr.name AS proyecto_nombre,
+              c.persona_id, COALESCE(NULLIF(TRIM(COALESCE(prom.first_name,'') || ' ' || COALESCE(prom.last_name,'')), ''), prom.name) AS persona_nombre,
+              c.dia::text AS dia, c.local_nombre, c.estado
+         FROM convocatorias c
+         JOIN projects pr ON pr.id = c.proyecto_id
+         LEFT JOIN promoters prom ON prom.id = c.persona_id
+        WHERE c.client_id = $1
+          AND c.proyecto_id <> $2
+          AND c.estado NOT IN ('rechazada','no_show','cancelada','reemplazada')
+          AND (c.persona_id::text, c.dia::text) IN (SELECT p, d FROM unnest($3::text[], $4::text[]) AS t(p, d))`,
+      [clientId, projectId, personaIds, dias],
+    );
+  }
+
   async convocarAnfitriones(
     clientId: string, projectId: string, userId: string,
-    items: ConvocatoriaItem[], comentario?: string,
-  ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    items: ConvocatoriaItem[], comentario?: string, force = false,
+  ): Promise<{ enviados: number; errores: number; detalle: unknown[]; conflicts?: unknown[] }> {
     if (!items?.length) throw new BadRequestException('No hay anfitriones para convocar');
+
+    if (!force) {
+      const conflicts = await this.detectarChoquesDia(clientId, projectId, items);
+      if (conflicts.length) {
+        // NO aprobar, NO enviar — devuelve el choque para que el front confirme.
+        return { enviados: 0, errores: 0, detalle: [], conflicts };
+      }
+    }
 
     await this.aprobarProyecto(clientId, projectId, userId, comentario);
 

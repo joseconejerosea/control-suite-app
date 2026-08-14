@@ -12,7 +12,7 @@ import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
+import { IsString, IsNotEmpty, IsArray, IsBoolean, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
 import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
@@ -59,6 +59,10 @@ class ConvocarAnfitrionesDto {
   items: ConvocatoriaItemDto[];
 
   @IsOptional() @IsString() comentario?: string;
+
+  // T6 — force=true salta el chequeo de anti-choque de anfitrión (el operador ya
+  // confirmó el pop-up "Convocar a ambas").
+  @IsOptional() @IsBoolean() force?: boolean;
 }
 
 class ReportRecipientsDto {
@@ -215,6 +219,6 @@ export class ProjectsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ConvocarAnfitrionesDto,
   ) {
-    return this.service.convocarAnfitriones(req.user.client_id, id, req.user.sub, dto.items, dto.comentario);
+    return this.service.convocarAnfitriones(req.user.client_id, id, req.user.sub, dto.items, dto.comentario, dto.force ?? false);
   }
 }
