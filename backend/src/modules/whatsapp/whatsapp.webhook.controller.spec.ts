@@ -422,6 +422,18 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(sessions.setTenantSelection).toHaveBeenCalledTimes(1);
       expect(wa.sendText).toHaveBeenCalledWith(FROM, '¿Para qué agencia es esto?');
     });
+
+    it('does NOT auto-resolve when TWO candidates both have an open convocatoria (ambiguous → still asks)', async () => {
+      // Both candidate agencies convoked this sender: the agency is genuinely ambiguous,
+      // so we must NOT guess a tenant (cross-tenant guard) — fall through to "which agency?".
+      senderResolver.clientsWithOpenConvocatoria.mockResolvedValue(['c1', 'c2']);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('sí'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(sessions.setTenantSelection).toHaveBeenCalledTimes(1);
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, '¿Para qué agencia es esto?');
+    });
   });
 
   // ── 8. handleImage re-buffer: a SECOND photo while awaiting_type cleans up the first
