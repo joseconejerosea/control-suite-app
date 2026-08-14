@@ -80,3 +80,64 @@ describe('SenderTenantResolverService — candidatesFor', () => {
     await expect(service.candidatesFor(FROM)).rejects.toThrow('db down');
   });
 });
+
+describe('SenderTenantResolverService — clientsWithOpenConvocatoria', () => {
+  const FROM = '+54 9 11 1234-5678';
+
+  let service: SenderTenantResolverService;
+  let query: jest.Mock;
+
+  beforeEach(() => {
+    query = jest.fn();
+    const ds = { query } as unknown as DataSource;
+    service = new SenderTenantResolverService(ds);
+  });
+
+  it('returns the distinct client ids from the query', async () => {
+    query.mockResolvedValueOnce([{ clientId: 'c1' }, { clientId: 'c2' }]);
+
+    const result = await service.clientsWithOpenConvocatoria(FROM);
+
+    expect(result).toEqual(['c1', 'c2']);
+  });
+
+  it('returns [] when no promoter with a matching phone has an open convocatoria', async () => {
+    query.mockResolvedValueOnce([]);
+
+    const result = await service.clientsWithOpenConvocatoria(FROM);
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns [] for an empty/invalid phone without hitting the DB', async () => {
+    const result = await service.clientsWithOpenConvocatoria('');
+
+    expect(result).toEqual([]);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('matches by phone digits only and scopes to open convocatorias (enviada/pendiente)', async () => {
+    query.mockResolvedValueOnce([]);
+
+    await service.clientsWithOpenConvocatoria(FROM);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toMatch(/convocatorias/);
+    expect(sql).toMatch(/promoters/);
+    expect(sql).toMatch(/regexp_replace/);
+    expect(sql).toMatch(/enviada/);
+    expect(sql).toMatch(/pendiente/);
+    // The phone is matched by its digits only (normalized), never the raw string.
+    expect(params[0]).toBe(normalizePhone(FROM));
+  });
+
+  it('rethrows a DB error (a swallowed error would wrongly skip the convocatoria path)', async () => {
+    // If this call swallowed the error and returned [], the controller would skip the
+    // convocatoria auto-resolve and fall back to "which agency?", pre-empting the F4
+    // reply. Re-throw so the caller can decide (best-effort fall-through).
+    query.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(service.clientsWithOpenConvocatoria(FROM)).rejects.toThrow('db down');
+  });
+});

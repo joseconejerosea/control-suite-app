@@ -76,4 +76,45 @@ export class SenderTenantResolverService {
       throw err;
     }
   }
+
+  /**
+   * Client ids where the sender has an OPEN convocatoria (F4). A convocatoria is open
+   * when its estado is 'enviada' or 'pendiente' and it belongs to a promoter whose
+   * phone digits match `from`. When exactly one candidate client appears here the
+   * agency is unambiguous (the system itself sent that convocatoria), so the caller can
+   * auto-resolve the tenant and route the reply straight to the F4 classifier instead
+   * of asking "which agency?".
+   *
+   * Cross-tenant discovery BEFORE the tenant is known → runs under `runAsSystem`, same
+   * as `candidatesFor`. A DB error is re-thrown (never swallowed to []): swallowing it
+   * would silently skip the convocatoria path and wrongly ask the agency.
+   */
+  async clientsWithOpenConvocatoria(from: string): Promise<string[]> {
+    const digits = normalizePhone(from);
+    if (!digits) return [];
+
+    try {
+      const rows = await runAsSystem(() =>
+        this.ds.query(
+          `SELECT DISTINCT c.client_id AS "clientId"
+             FROM convocatorias c
+             JOIN promoters p ON p.id = c.persona_id AND p.client_id = c.client_id
+            WHERE c.estado IN ('enviada','pendiente')
+              AND p.phone IS NOT NULL
+              AND regexp_replace(p.phone, '\\D', '', 'g') = $1`,
+          [digits],
+        ),
+      );
+
+      return (rows as { clientId: string }[]).map((r) => r.clientId);
+    } catch (err: any) {
+      // A swallowed error would return [] and wrongly skip the convocatoria auto-resolve,
+      // pre-empting the F4 reply with a "which agency?" prompt. Re-throw so the caller can
+      // decide (the controller treats the optimization as best-effort and falls through).
+      this.logger.error(
+        `[WhatsApp] clientsWithOpenConvocatoria error from=${from}: ${err.message}`,
+      );
+      throw err;
+    }
+  }
 }

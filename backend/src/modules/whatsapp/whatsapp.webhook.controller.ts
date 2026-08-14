@@ -333,6 +333,32 @@ export class WhatsAppWebhookController {
       return { status: 'stop' };
     }
 
+    // Convocatoria abierta en una sola agencia → tenant inequívoco: el propio sistema
+    // envió esa convocatoria (F4), así que la respuesta "sí"/"no" va directo al
+    // clasificador F4 sin preguntar "¿para qué agencia?". Sólo aplica cuando EXACTAMENTE
+    // una de las agencias candidatas tiene una convocatoria abierta; con 0 o 2+ la agencia
+    // sigue siendo ambigua y se mantiene el comportamiento general de preguntar.
+    //
+    // Es una optimización best-effort: si la consulta falla no debe romper el inbound, así
+    // que ante un error de DB logueamos y caemos al flujo normal de "elegí agencia".
+    try {
+      const openConvo = await this.senderResolver.clientsWithOpenConvocatoria(from);
+      const convoCandidates = candidates.filter((c) => openConvo.includes(c.clientId));
+      if (convoCandidates.length === 1) {
+        return {
+          status: 'proceed',
+          clientId: convoCandidates[0].clientId,
+          canalId: null,
+          msg: incomingMsg,
+        };
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `[WhatsApp] clientsWithOpenConvocatoria failed from=${from}: ${err.message}`,
+      );
+      // Fall through to the normal ask-agency behavior — the optimization is best-effort.
+    }
+
     // Pre-capture media BEFORE prompting: Meta media ids expire, so if we ask "which
     // agency?" and only download on resume, the id would 404 by the time they answer.
     const pendingMedia = await this.preCaptureMedia(incomingMsg);
