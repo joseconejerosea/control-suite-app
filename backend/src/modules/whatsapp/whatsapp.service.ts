@@ -10,6 +10,10 @@ export class WhatsAppService {
   private readonly token = process.env.WHATSAPP_ACCESS_TOKEN;
   private readonly convocatoriaTemplate =
     process.env.WHATSAPP_CONVOCATORIA_TEMPLATE ?? 'convocatoria_promotor';
+  // Código de idioma de la plantilla en Meta. Debe MATCHEAR el que Meta le asignó
+  // (WhatsApp usa es / es_AR / es_ES / es_MX; NO es_CL). Configurable por si difiere.
+  private readonly templateLang =
+    process.env.WHATSAPP_TEMPLATE_LANG ?? 'es';
 
   /**
    * Argentina (país 54): Meta ENTREGA los mensajes entrantes con el 9 de móvil
@@ -93,7 +97,7 @@ export class WhatsAppService {
           type: 'template',
           template: {
             name: templateName,
-            language: { code: 'es_CL' },
+            language: { code: this.templateLang },
             components: params.length ? [{
               type: 'body',
               parameters: params.map(p => ({ type: 'text', text: p })),
