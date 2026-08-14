@@ -12,6 +12,16 @@ export interface WhatsAppSession {
   canalId: string | null;
   lastProjectId?: string | null;
   updatedAt: string;
+  // T3 · Ruteo por menú de la foto entrante.
+  // `awaiting_type`: llegó una foto sin flujo activo → se buferea en `bufferedMedia`
+  //   y se pregunta el tipo (buildTypeMenu). El texto siguiente elige el tipo y rutea.
+  // `awaiting_media`: el remitente eligió el tipo por texto ANTES de mandar la foto →
+  //   `pendingType` queda fijado y la próxima foto rutea directo sin re-preguntar.
+  pendingType?: 'factura' | 'material' | 'evidencia' | null;
+  // A-002 · `eventId` es la fila eventos_crudos persistida AL LLEGAR la foto (flow=null,
+  //   fuera de las colas F1/F3/F5). Al elegir el tipo, el ruteo actualiza ese flow en
+  //   vez de insertar un evento nuevo → sin blobs huérfanos si la sesión se abandona.
+  bufferedMedia?: { storagePath: string; mimeType: string; caption: string; eventId: string } | null;
   // Clarification flow
   //
   // [ADR-11] INVARIANT: Every write assigning `clarification` MUST also set
@@ -37,7 +47,7 @@ export interface WhatsAppSession {
   materialIntake?: {
     eventoCrudoId: string;
     storagePath: string;                 // foto del material → foto_key del SKU y del movimiento
-    step: 'kind' | 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad';
+    step: 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad';
     attempts: number;
     suggestedLabel?: string | null;      // nombre sugerido por la visión (ambigüedad/ayuda)
     nombre?: string;
@@ -205,6 +215,9 @@ export class WhatsAppSessionService implements OnModuleInit {
       ...existing,
       clientId,
       state: 'awaiting_action',
+      // Salir del ruteo por menú de foto: no arrastrar un tipo/foto buffereada stale.
+      pendingType: null,
+      bufferedMedia: null,
     };
     await this.set(phoneNumber, session);
   }
@@ -215,6 +228,80 @@ export class WhatsAppSessionService implements OnModuleInit {
     if (!session) return;
     if (session.state === 'awaiting_action') {
       session.state = '';
+      await this.set(phoneNumber, session);
+    }
+  }
+
+  // ── T3 · Ruteo de la foto por menú (awaiting_type / awaiting_media) ─────────
+
+  /**
+   * Llegó una foto sin flujo activo: la buferea (`bufferedMedia`) y deja la sesión
+   * esperando que el remitente elija el tipo (buildTypeMenu). Persiste client_id/canal
+   * para que la elección + el ruteo no re-pregunten la agencia.
+   */
+  async setAwaitingType(
+    phoneNumber: string,
+    media: { storagePath: string; mimeType: string; caption: string; eventId: string },
+    clientId: string,
+    canalId: string | null,
+  ): Promise<void> {
+    const existing = await this.get(phoneNumber);
+    const session: WhatsAppSession = {
+      projects: existing?.projects ?? [],
+      base64: existing?.base64 ?? '',
+      mimeType: existing?.mimeType ?? '',
+      caption: existing?.caption ?? '',
+      lastProjectId: existing?.lastProjectId,
+      updatedAt: '',
+      ...existing,
+      state: 'awaiting_type',
+      bufferedMedia: media,
+      // Buffereamos una foto nueva para preguntar el tipo: cualquier pendingType previo
+      // (de un awaiting_media abandonado) quedaría stale → limpiarlo.
+      pendingType: null,
+      clientId,
+      canalId,
+    };
+    await this.set(phoneNumber, session);
+  }
+
+  /**
+   * El remitente eligió el tipo por texto ANTES de mandar la foto: fija `pendingType`
+   * y deja la sesión esperando la media. La próxima foto rutea directo por `pendingType`.
+   */
+  async setAwaitingMedia(
+    phoneNumber: string,
+    type: 'factura' | 'material' | 'evidencia',
+    clientId: string,
+  ): Promise<void> {
+    const existing = await this.get(phoneNumber);
+    const session: WhatsAppSession = {
+      projects: existing?.projects ?? [],
+      base64: existing?.base64 ?? '',
+      mimeType: existing?.mimeType ?? '',
+      caption: existing?.caption ?? '',
+      canalId: existing?.canalId ?? null,
+      lastProjectId: existing?.lastProjectId,
+      updatedAt: '',
+      ...existing,
+      state: 'awaiting_media',
+      pendingType: type,
+      // Fijamos el tipo antes de recibir la foto: no arrastrar una foto buffereada previa
+      // (de un awaiting_type abandonado) que rutearía con el tipo equivocado.
+      bufferedMedia: null,
+      clientId,
+    };
+    await this.set(phoneNumber, session);
+  }
+
+  /** Sale del ruteo por menú (tras rutear la foto o abandonar el intento). */
+  async clearMediaFlow(phoneNumber: string): Promise<void> {
+    const session = await this.get(phoneNumber);
+    if (!session) return;
+    if (session.state === 'awaiting_type' || session.state === 'awaiting_media') {
+      session.state = '';
+      session.pendingType = null;
+      session.bufferedMedia = null;
       await this.set(phoneNumber, session);
     }
   }

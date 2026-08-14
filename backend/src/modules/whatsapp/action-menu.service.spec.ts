@@ -48,6 +48,41 @@ describe('WhatsAppActionMenuService', () => {
     });
   });
 
+  describe('buildTypeMenu', () => {
+    it('asks what the photo is with only the 3 photo types (no ubicación)', () => {
+      const m = service.buildTypeMenu();
+      expect(m).toMatch(/¿Qué es esta foto/i);
+      expect(m).toContain('1)');
+      expect(m).toMatch(/factura|boleta/i);
+      expect(m).toContain('2)');
+      expect(m).toMatch(/material/i);
+      expect(m).toContain('3)');
+      expect(m).toMatch(/evidencia/i);
+      // ubicación is a GPS pin, not a photo → never offered here.
+      expect(m).not.toMatch(/ubicación|ubicacion/i);
+      expect(m).not.toContain('4)');
+    });
+  });
+
+  describe('parseType', () => {
+    it('maps 1/2/3 to the photo type', () => {
+      expect(service.parseType('1')).toBe('factura');
+      expect(service.parseType('2')).toBe('material');
+      expect(service.parseType('3')).toBe('evidencia');
+    });
+
+    it('tolerates surrounding whitespace', () => {
+      expect(service.parseType('  2  ')).toBe('material');
+    });
+
+    it('is invalid for out-of-range, non-numeric or empty replies', () => {
+      expect(service.parseType('0')).toBe('invalid');
+      expect(service.parseType('4')).toBe('invalid');
+      expect(service.parseType('factura')).toBe('invalid');
+      expect(service.parseType('')).toBe('invalid');
+    });
+  });
+
   describe('closingLine', () => {
     it('is a non-technical "done, start another" line', () => {
       const c = service.closingLine();

@@ -16,13 +16,12 @@ const STATE = 'awaiting_material';
 /**
  * F3 · Intake de material POP por foto de WhatsApp.
  *
- * Cuando el triage de visión (OcrProcessor) detecta que una imagen es MATERIAL y
- * no un documento, este servicio conduce la conversación multi-paso y, al final,
- * crea el ítem y su movimiento de inventario reusando los servicios de dominio:
+ * Cuando el remitente elige "material" en el menú (T3), el webhook rutea la foto
+ * a este servicio, que conduce la conversación multi-paso y, al final, crea el
+ * ítem y su movimiento de inventario reusando los servicios de dominio:
  *
- *   nombre → proyecto → bodega → cantidad → registrar (SKU 'entrada' + inventario)
+ *   nombre → proyecto → destino → bodega/activación → cantidad → registrar
  *
- * Invariante del cliente: ante ambigüedad el bot PREGUNTA (askKind), nunca asume.
  * El evento crudo ya está persistido en eventos_crudos antes de llegar acá.
  *
  * El webhook es @Public (sin contexto de tenant), así que toda lectura/escritura
@@ -53,8 +52,8 @@ export class MaterialIntakeService {
     suggestedLabel?: string | null;
   }): Promise<void> {
     if (!(await this.hasActiveActivation(opts.clientId))) {
-      await this.escalateNoActivation(opts.eventoCrudoId, opts.phoneNumber, opts.clientId);
-      this.logger.log(`[Material] Sin activación activa, escalado evento ${opts.eventoCrudoId}`);
+      await this.notifyNoActivation(opts.eventoCrudoId, opts.phoneNumber, opts.clientId);
+      this.logger.log(`[Material] Sin activación activa, aviso al remitente (evento ${opts.eventoCrudoId})`);
       return;
     }
 
@@ -73,39 +72,9 @@ export class MaterialIntakeService {
     const hint = opts.suggestedLabel ? ` (parece: ${opts.suggestedLabel})` : '';
     await this.wa.sendText(
       opts.phoneNumber,
-      `📦 Detecté que esto es *material POP*, no un documento.\n\n¿Qué material es?${hint}\nEscribí el nombre.`,
+      `📦 Dale, registremos el *material POP*.\n\n¿Qué material es?${hint}\nEscribí el nombre.`,
     );
     this.logger.log(`[Material] Intake iniciado para evento ${opts.eventoCrudoId}`);
-  }
-
-  /**
-   * Ambigüedad documento/material: el triage no está seguro. Preguntamos en vez
-   * de asumir. El OCR ya guardó el texto, así que si responde "documento" se
-   * reanuda la clasificación F1.
-   */
-  async askKind(opts: {
-    eventoCrudoId: string;
-    phoneNumber: string;
-    clientId: string;
-    storagePath: string;
-    suggestedLabel?: string | null;
-  }): Promise<void> {
-    const session = (await this.sessions.get(opts.phoneNumber)) ?? this.emptySession(opts.clientId);
-    session.clientId = opts.clientId;
-    session.state = STATE;
-    session.materialIntake = {
-      eventoCrudoId: opts.eventoCrudoId,
-      storagePath: opts.storagePath,
-      step: 'kind',
-      attempts: 0,
-      suggestedLabel: opts.suggestedLabel ?? null,
-    };
-    await this.sessions.set(opts.phoneNumber, session);
-
-    await this.wa.sendText(
-      opts.phoneNumber,
-      `No estoy seguro de qué me enviaste. ¿Es un documento, un material POP o evidencia de actividad?\n\n1. Documento (factura, boleta, etc.)\n2. Material POP (para inventario)\n3. Evidencia de actividad (personas en el evento)\n\nRespondé con el número.`,
-    );
   }
 
   /**
@@ -118,7 +87,6 @@ export class MaterialIntakeService {
 
     const mi = session.materialIntake;
     switch (mi.step) {
-      case 'kind':     return this.handleKind(phoneNumber, text, session);
       case 'nombre':   return this.handleNombre(phoneNumber, text, session);
       case 'proyecto': return this.handleProyecto(phoneNumber, text, session);
       case 'destino':    return this.handleDestino(phoneNumber, text, session);
@@ -130,53 +98,6 @@ export class MaterialIntakeService {
   }
 
   // ── Pasos ───────────────────────────────────────────────────────────────
-
-  private async handleKind(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
-    const mi = session.materialIntake!;
-    const num = parseInt(text.trim(), 10);
-
-    if (num === 1) {
-      // Es un documento → reanudar F1 (el OCR ya dejó el texto en el evento).
-      await this.sessions.delete(phone);
-      await this.classifyQueue.add(
-        'classify',
-        { evento_crudo_id: mi.eventoCrudoId, client_id: session.clientId, canal: 'whatsapp' },
-        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-      );
-      await this.wa.sendText(phone, 'Ok, lo trato como documento. Procesando con IA...');
-      return true;
-    }
-
-    if (num === 2) {
-      if (!(await this.hasActiveActivation(session.clientId!))) {
-        await this.escalateNoActivation(mi.eventoCrudoId, phone, session.clientId!);
-        return true;
-      }
-      mi.step = 'nombre';
-      mi.attempts = 0;
-      await this.sessions.set(phone, session);
-      const hint = mi.suggestedLabel ? ` (parece: ${mi.suggestedLabel})` : '';
-      await this.wa.sendText(phone, `📦 Perfecto, material POP.\n\n¿Qué material es?${hint}\nEscribí el nombre.`);
-      return true;
-    }
-
-    if (num === 3) {
-      // Es evidencia de actividad → arrancar el intake de evidencia (checkin por
-      // foto). Se borra la sesión de material primero para no dejar estado colgado;
-      // EvidenceIntakeService.start crea su propia sesión (state='awaiting_evidence').
-      await this.sessions.delete(phone);
-      await this.evidenceIntake.start({
-        eventoCrudoId: mi.eventoCrudoId,
-        phoneNumber: phone,
-        clientId: session.clientId!,
-        storagePath: mi.storagePath,
-        suggestedLabel: mi.suggestedLabel,
-      });
-      return true;
-    }
-
-    return this.retryOrEscalate(phone, session, 'Respondé 1 (documento), 2 (material) o 3 (evidencia).');
-  }
 
   private async handleNombre(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
     const mi = session.materialIntake!;
@@ -282,7 +203,7 @@ export class MaterialIntakeService {
 
     if (!activaciones.length) {
       // El guard de start() garantiza ≥1; ante una carrera (se cerró en el medio) derivamos.
-      await this.escalateNoActivation(mi.eventoCrudoId, phone, session.clientId!);
+      await this.notifyNoActivation(mi.eventoCrudoId, phone, session.clientId!);
       return true;
     }
 
@@ -570,22 +491,26 @@ export class MaterialIntakeService {
   }
 
   /**
-   * Deriva a un operador cuando no hay activación activa: marca el evento como
-   * escalated (mismo mecanismo que retryOrEscalate) y avisa al remitente. No deja
-   * sesión: no hay conversación que continuar.
+   * Sin activación activa (decisión T3): NO deriva a un operador. Envía un mensaje
+   * claro y accionable al remitente y marca el evento con status='no_activation'
+   * (solo auditoría, NO entra en la cola de escalados). No deja sesión: no hay
+   * conversación que continuar.
    */
-  private async escalateNoActivation(eventoCrudoId: string, phone: string, clientId: string): Promise<void> {
+  private async notifyNoActivation(eventoCrudoId: string, phone: string, clientId: string): Promise<void> {
     // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
     // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
     await runWithTenant(this.ds, clientId, () =>
       this.ds.query(
-        `UPDATE eventos_crudos SET status='escalated',
+        `UPDATE eventos_crudos SET status='no_activation',
            parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-        [eventoCrudoId, JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: 'material_no_active_activation' })],
+        [eventoCrudoId, JSON.stringify({ escalation_reason: 'material_no_active_activation', at: new Date().toISOString() })],
       ),
     ).catch(() => {});
     await this.sessions.delete(phone);
-    await this.wa.sendText(phone, 'No encontré una activación activa para asociar este material. Lo derivo a un operador. Gracias.');
+    await this.wa.sendText(
+      phone,
+      'No veo una activación activa hoy para asociar este material. Pedile a tu coordinador que cargue la activación y volvé a enviármelo. 🙌',
+    );
   }
 
   private async retryOrEscalate(phone: string, session: WhatsAppSession, retryMsg: string): Promise<boolean> {

@@ -192,7 +192,7 @@ describe('EvidenceIntakeService', () => {
     expect(store[PHONE]?.evidenceIntake?.personaId).toBe('prom-1');
   });
 
-  it('with 0 activaciones escalates and does NOT set a session', async () => {
+  it('with 0 activaciones notifies the sender (NOT escalate) and does NOT set a session', async () => {
     queryMock.mockImplementation((sql: string) => {
       if (sql.includes('set_config')) return Promise.resolve([]);
       if (sql.includes('FROM promoters')) return Promise.resolve(promoterRow);
@@ -208,15 +208,24 @@ describe('EvidenceIntakeService', () => {
     });
 
     expect(store[PHONE]).toBeUndefined();
+    // T3: NO escala; marca el evento con status='no_activation' (solo auditoría).
     const escalated = queryMock.mock.calls.find(
       ([sql]: [string]) =>
         typeof sql === 'string' &&
         sql.includes('UPDATE eventos_crudos') &&
         sql.includes("status='escalated'"),
     );
-    expect(escalated).toBeDefined();
+    expect(escalated).toBeUndefined();
+    const noact = queryMock.mock.calls.find(
+      ([sql]: [string]) =>
+        typeof sql === 'string' &&
+        sql.includes('UPDATE eventos_crudos') &&
+        sql.includes("status='no_activation'"),
+    );
+    expect(noact).toBeDefined();
     const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
-    expect(msg).toContain('operador');
+    expect(msg).not.toContain('operador');
+    expect(msg).toContain('activación activa hoy');
   });
 
   it('with an unknown promoter escalates and does NOT set a session', async () => {
@@ -635,7 +644,8 @@ describe('EvidenceIntakeService', () => {
     });
   });
 
-  describe('escalate() — reason: evidence_no_active_activation', () => {
+  // ─── T3 — no active activation: notify the sender, NOT the operator ─────────
+  describe('notifyNoActivation() — no active activation', () => {
     beforeEach(() => {
       // Drive the no_active_activation branch: promoter found, no activations.
       queryMock.mockImplementation((sql: string) => {
@@ -648,7 +658,7 @@ describe('EvidenceIntakeService', () => {
       });
     });
 
-    it('calls notifier.notificar with the sender phone in the message', async () => {
+    it('marks the evento status=no_active_activation (NOT escalated) with the correct reason', async () => {
       await svc.start({
         eventoCrudoId: 'esc-10',
         phoneNumber: PHONE,
@@ -656,12 +666,25 @@ describe('EvidenceIntakeService', () => {
         storagePath: 'evidence/e.jpg',
       });
 
-      expect(notifier.notificar).toHaveBeenCalledTimes(1);
-      const [, callMsg] = notifier.notificar.mock.calls[0];
-      expect(callMsg).toContain(PHONE);
+      const escalated = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' &&
+          sql.includes('UPDATE eventos_crudos') &&
+          sql.includes("status='escalated'"),
+      );
+      expect(escalated).toBeUndefined();
+
+      const noact = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' &&
+          sql.includes('UPDATE eventos_crudos') &&
+          sql.includes("status='no_activation'"),
+      );
+      expect(noact).toBeDefined();
+      expect(noact[1][1]).toContain('evidence_no_active_activation');
     });
 
-    it('calls notifications.notifyUsers with type=evidence_no_active_activation', async () => {
+    it('sends the clear, actionable message to the sender (no operador wording)', async () => {
       await svc.start({
         eventoCrudoId: 'esc-11',
         phoneNumber: PHONE,
@@ -669,13 +692,15 @@ describe('EvidenceIntakeService', () => {
         storagePath: 'evidence/e.jpg',
       });
 
-      expect(notifications.notifyUsers).toHaveBeenCalledTimes(1);
-      const [, , callPayload] = notifications.notifyUsers.mock.calls[0];
-      expect(callPayload.type).toBe('evidence_no_active_activation');
-      expect(callPayload.metadata).toMatchObject({ link: '/client/terreno' });
+      expect(wa.sendText).toHaveBeenCalledWith(
+        PHONE,
+        'No veo una activación activa hoy para asociar esta evidencia. Pedile a tu coordinador que cargue la activación y volvé a enviármela. 🙌',
+      );
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).not.toMatch(/operador/i);
     });
 
-    it('does NOT call pendingStaff.upsert', async () => {
+    it('does NOT call any of the 3 operator channels', async () => {
       await svc.start({
         eventoCrudoId: 'esc-12',
         phoneNumber: PHONE,
@@ -684,9 +709,12 @@ describe('EvidenceIntakeService', () => {
       });
 
       expect(pendingStaff.upsert).not.toHaveBeenCalled();
+      expect(notifier.notificar).not.toHaveBeenCalled();
+      expect(notifications.notifyUsers).not.toHaveBeenCalled();
+      expect(notifications.resolveManagerIds).not.toHaveBeenCalled();
     });
 
-    it('still calls wa.sendText to the sender', async () => {
+    it('does NOT set a session', async () => {
       await svc.start({
         eventoCrudoId: 'esc-13',
         phoneNumber: PHONE,
@@ -694,11 +722,20 @@ describe('EvidenceIntakeService', () => {
         storagePath: 'evidence/g.jpg',
       });
 
-      expect(wa.sendText).toHaveBeenCalledWith(PHONE, expect.any(String));
+      expect(store[PHONE]).toBeUndefined();
     });
 
-    it('does NOT throw when operator-alert block throws', async () => {
-      notifier.notificar.mockRejectedValueOnce(new Error('network error'));
+    it('does NOT throw when the audit UPDATE rejects (best-effort)', async () => {
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('FROM promoters'))
+          return Promise.resolve([{ id: 'prom-1' }]);
+        if (sql.includes('FROM collaborators')) return Promise.resolve([]);
+        if (sql.includes('FROM activations')) return Promise.resolve([]);
+        if (sql.includes('UPDATE eventos_crudos'))
+          return Promise.reject(new Error('db down'));
+        return Promise.resolve([]);
+      });
 
       await expect(
         svc.start({
@@ -708,18 +745,8 @@ describe('EvidenceIntakeService', () => {
           storagePath: 'evidence/h.jpg',
         }),
       ).resolves.not.toThrow();
-    });
 
-    it('still calls wa.sendText when operator-alert block throws', async () => {
-      notifications.notifyUsers.mockRejectedValueOnce(new Error('insert fail'));
-
-      await svc.start({
-        eventoCrudoId: 'esc-15',
-        phoneNumber: PHONE,
-        clientId: CLIENT,
-        storagePath: 'evidence/i.jpg',
-      });
-
+      // The sender still gets the message even if the audit write failed.
       expect(wa.sendText).toHaveBeenCalledWith(PHONE, expect.any(String));
     });
   });

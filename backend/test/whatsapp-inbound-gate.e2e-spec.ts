@@ -111,6 +111,7 @@ function buildController(opts: {
     new WhatsAppActionMenuService(),                                                                // actionMenu (real)
     affiliationCode,                                                                               // affiliationCode
     affiliation,                                                                                   // affiliation
+    { f1EventsTotal: { inc: jest.fn() } } as any,                                                  // metrics
   );
 
   return { ctrl, ds, sendText, sessions, senderResolver, affiliationCode, affiliation };
