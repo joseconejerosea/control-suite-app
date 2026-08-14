@@ -115,4 +115,73 @@ describe('WhatsAppService — outbound to the single global number', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
+
+  // T5 — F4 convocatoria. A business-initiated message outside the 24h window is
+  // rejected by Meta as free text, so it MUST go out as an APPROVED template.
+  describe('enviarConvocatoria', () => {
+    const savedTemplate = process.env.WHATSAPP_CONVOCATORIA_TEMPLATE;
+
+    afterEach(() => {
+      if (savedTemplate === undefined) delete process.env.WHATSAPP_CONVOCATORIA_TEMPLATE;
+      else process.env.WHATSAPP_CONVOCATORIA_TEMPLATE = savedTemplate;
+    });
+
+    it('sends a TEMPLATE (not free text) with the default template name and body params in order', async () => {
+      delete process.env.WHATSAPP_CONVOCATORIA_TEMPLATE;
+      const svc = new WhatsAppService();
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const ok = await svc.enviarConvocatoria({
+        telefono: TO,
+        nombrePromotor: 'Ana',
+        proyecto: 'Proyecto X',
+        fecha: '2026-08-20',
+        local: 'Local Centro',
+        direccion: 'Calle 1 #23',
+      });
+
+      expect(ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(initOfCall().body as string);
+      expect(body.type).toBe('template');
+      expect(body.template.name).toBe('convocatoria_promotor');
+      const params = body.template.components[0].parameters.map((p: any) => p.text);
+      expect(params).toEqual(['Ana', 'Proyecto X', '2026-08-20', 'Local Centro', 'Calle 1 #23']);
+    });
+
+    it('uses WHATSAPP_CONVOCATORIA_TEMPLATE when set', async () => {
+      process.env.WHATSAPP_CONVOCATORIA_TEMPLATE = 'convocatoria_custom';
+      const svc = new WhatsAppService();
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      await svc.enviarConvocatoria({
+        telefono: TO,
+        nombrePromotor: 'Ana',
+        proyecto: 'P',
+        fecha: 'F',
+        local: 'L',
+        direccion: 'D',
+      });
+
+      const body = JSON.parse(initOfCall().body as string);
+      expect(body.template.name).toBe('convocatoria_custom');
+    });
+
+    // Meta rejects empty template params — an unnamed promotor must fall back.
+    it('falls back to "promotor/a" when the name is empty', async () => {
+      const ok = await service.enviarConvocatoria({
+        telefono: TO,
+        nombrePromotor: '   ',
+        proyecto: 'P',
+        fecha: 'F',
+        local: 'L',
+        direccion: 'D',
+      });
+
+      expect(ok).toBe(true);
+      const body = JSON.parse(initOfCall().body as string);
+      const params = body.template.components[0].parameters.map((p: any) => p.text);
+      expect(params[0]).toBe('promotor/a');
+    });
+  });
 });
