@@ -28,6 +28,7 @@ function ConvocarContent({ projectId }: { projectId: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ enviados: number; errores: number; detalle: any[] } | null>(null);
+  const [conflicts, setConflicts] = useState<any[] | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +59,14 @@ function ConvocarContent({ projectId }: { projectId: string }) {
     setAddSel("");
   };
 
+  const buildBody = () => ({
+    items: items.map((it) => ({
+      persona_id: it.persona_id, dia: it.dia,
+      local_nombre: it.local_nombre || undefined, local_direccion: it.local_direccion || undefined,
+    })),
+    comentario: "Convocatoria aprobada y enviada desde la sugerencia IA",
+  });
+
   const enviar = async () => {
     setError("");
     setResult(null);
@@ -66,15 +75,49 @@ function ConvocarContent({ projectId }: { projectId: string }) {
     if (items.some((it) => !it.phone)) { setError("Hay anfitriones sin teléfono cargado."); return; }
     setSending(true);
     try {
-      const body = {
-        items: items.map((it) => ({
-          persona_id: it.persona_id, dia: it.dia,
-          local_nombre: it.local_nombre || undefined, local_direccion: it.local_direccion || undefined,
-        })),
-        comentario: "Convocatoria aprobada y enviada desde la sugerencia IA",
-      };
-      const r = await api.post<any>(`/projects/${projectId}/convocar-anfitriones`, body);
+      const r = await api.post<any>(`/projects/${projectId}/convocar-anfitriones`, buildBody());
+      const res = r?.data ?? r;
+      // T6 — el backend detectó un choque de agenda: no envió nada, pide confirmación.
+      if (Array.isArray(res?.conflicts) && res.conflicts.length) {
+        setConflicts(res.conflicts);
+        return;
+      }
+      setResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo enviar la convocatoria.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // T6 — "Convocar a ambas": re-envía con force:true, saltando el chequeo de choque.
+  const convocarAmbas = async () => {
+    setError("");
+    setSending(true);
+    try {
+      const r = await api.post<any>(`/projects/${projectId}/convocar-anfitriones`, { ...buildBody(), force: true });
       setResult(r?.data ?? r);
+      setConflicts(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo enviar la convocatoria.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // T6 — "Eliminar la(s) otra(s)": cancela las convocatorias en conflicto y reintenta
+  // sin force (ya no debería haber choque).
+  const eliminarOtrasYConvocar = async () => {
+    if (!conflicts) return;
+    setError("");
+    setSending(true);
+    try {
+      for (const c of conflicts) {
+        await api.patch<any>(`/projects/${c.proyecto_id}/convocatorias/${c.convocatoria_id}`, { estado: "cancelada" });
+      }
+      const r = await api.post<any>(`/projects/${projectId}/convocar-anfitriones`, buildBody());
+      setResult(r?.data ?? r);
+      setConflicts(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo enviar la convocatoria.");
     } finally {
@@ -183,6 +226,39 @@ function ConvocarContent({ projectId }: { projectId: string }) {
             </button>
           </div>
         </>
+      )}
+
+      {/* T6 — Pop-up de choque de agenda */}
+      {conflicts && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9998 }}
+          onClick={() => setConflicts(null)}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: 480, maxWidth: "90vw" }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px" }}>Choque de agenda</h2>
+            <div style={{ fontSize: 13, color: "var(--muted-foreground)", display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+              {conflicts.map((c: any, i: number) => (
+                <div key={i}>
+                  {c.persona_nombre} ya está convocado a {c.proyecto_nombre}
+                  {c.local_nombre ? ` (${c.local_nombre})` : ""} el {c.dia}.
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={convocarAmbas} disabled={sending}
+                style={{ padding: "10px 16px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", cursor: sending ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: sending ? 0.7 : 1 }}>
+                Convocar a ambas
+              </button>
+              <button onClick={eliminarOtrasYConvocar} disabled={sending}
+                style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)", cursor: sending ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: sending ? 0.7 : 1 }}>
+                Eliminar la(s) otra(s)
+              </button>
+              <button onClick={() => setConflicts(null)} disabled={sending}
+                style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: sending ? "default" : "pointer", fontSize: 13 }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
