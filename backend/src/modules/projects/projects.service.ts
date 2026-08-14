@@ -394,16 +394,27 @@ export class ProjectsService {
           direccion:      item.local_direccion ?? 'Por confirmar',
         });
 
-        // Actualizar convocatoria en DB
-        await this.dataSource.query(
-          `UPDATE convocatorias
-           SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
-           WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
-          [clientId, projectId, item.persona_id, item.dia],
-        ).catch(() => {});
-
-        if (ok) { enviados++; } else { errores++; }
-        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok });
+        // El estado sólo avanza a 'enviada' cuando Meta ACEPTÓ el envío. Si el
+        // send falló (rechazo de Meta o falta de plantilla), la convocatoria queda
+        // 'pendiente' (reintentable) en vez de mentirle a la UI un "enviada".
+        if (ok) {
+          await this.dataSource.query(
+            `UPDATE convocatorias
+             SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
+             WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
+            [clientId, projectId, item.persona_id, item.dia],
+          ).catch(() => {});
+          enviados++;
+          detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: true });
+        } else {
+          errores++;
+          detalle.push({
+            persona_id: item.persona_id,
+            dia: item.dia,
+            ok: false,
+            error: 'El envío por WhatsApp falló (Meta lo rechazó o falta la plantilla).',
+          });
+        }
       } catch (err: any) {
         errores++;
         detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: err?.message ?? 'Error al enviar' });

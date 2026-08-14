@@ -8,6 +8,8 @@ export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
   private readonly phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   private readonly token = process.env.WHATSAPP_ACCESS_TOKEN;
+  private readonly convocatoriaTemplate =
+    process.env.WHATSAPP_CONVOCATORIA_TEMPLATE ?? 'convocatoria_promotor';
 
   /**
    * Argentina (país 54): Meta ENTREGA los mensajes entrantes con el 9 de móvil
@@ -91,7 +93,7 @@ export class WhatsAppService {
           type: 'template',
           template: {
             name: templateName,
-            language: { code: 'es' },
+            language: { code: 'es_CL' },
             components: params.length ? [{
               type: 'body',
               parameters: params.map(p => ({ type: 'text', text: p })),
@@ -120,20 +122,19 @@ export class WhatsAppService {
     local: string;
     direccion: string;
   }): Promise<boolean> {
-    // El promotor puede no tener nombre cargado; evitar "Hola null 👋".
-    const saludo = opts.nombrePromotor?.trim() ? `Hola ${opts.nombrePromotor.trim()} 👋` : 'Hola 👋';
-    const msg = `${saludo}
-
-Te convocamos para la activación *${opts.proyecto}*:
-
-📅 Fecha: ${opts.fecha}
-📍 Local: ${opts.local}
-🗺 Dirección: ${opts.direccion}
-
-Responde *SI* para confirmar o *NO* para rechazar.
-
-Control Suite BTL ⚡`;
-    return this.sendText(opts.telefono, msg);
+    // Una convocatoria es un mensaje business-initiated FUERA de la ventana de 24h:
+    // Meta la rechaza como texto libre y sólo la entrega vía plantilla APROBADA. El
+    // cuerpo del mensaje vive en la plantilla de Meta (body {{1}}..{{5}}); acá sólo
+    // pasamos los parámetros en el orden exacto que espera esa plantilla.
+    // Meta rechaza parámetros vacíos, así que el nombre nunca puede ser ''.
+    const nombre = opts.nombrePromotor?.trim() || 'promotor/a';
+    return this.sendTemplate(opts.telefono, this.convocatoriaTemplate, [
+      nombre,
+      opts.proyecto,
+      opts.fecha,
+      opts.local,
+      opts.direccion,
+    ]);
   }
 
   // F1 — Confirmación de documento procesado y registrado.
