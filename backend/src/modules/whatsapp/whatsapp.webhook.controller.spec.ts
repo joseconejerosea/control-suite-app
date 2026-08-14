@@ -129,7 +129,10 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     returnPhotoQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
     shield = { checkLocal: jest.fn(() => ({ safe: true })) };
-    senderResolver = { candidatesFor: jest.fn().mockResolvedValue([]) };
+    senderResolver = {
+      candidatesFor: jest.fn().mockResolvedValue([]),
+      clientsWithOpenConvocatoria: jest.fn().mockResolvedValue([]),
+    };
     selection = {};
     affiliationCode = {};
     affiliation = {};
@@ -360,6 +363,64 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(ocrQueue.add).not.toHaveBeenCalled();
       // Routing observability: evidence_intake counter.
       expect(metrics.f1EventsTotal.inc).toHaveBeenCalledWith({ client_id: CLIENT, canal: 'whatsapp', status: 'evidence_intake' });
+    });
+  });
+
+  // ── 9. resolveInboundTenant · convocatoria auto-resolve (single unambiguous agency)
+  describe('resolveInboundTenant · convocatoria auto-resolve on a fresh message', () => {
+    beforeEach(() => {
+      // Fresh message: no session in flight.
+      sessionStore[FROM] = null;
+      // The sender is a registered actor in TWO agencies → normally "which agency?".
+      senderResolver.candidatesFor.mockResolvedValue([
+        { clientId: 'c1', clientName: 'Agencia Uno' },
+        { clientId: 'c2', clientName: 'Agencia Dos' },
+      ]);
+      // Tenant-selection prompt + persistence used by the ask-agency path.
+      selection.buildPrompt = jest.fn(() => '¿Para qué agencia es esto?');
+      selection.buildCodePrompt = jest.fn(() => 'Escribí tu código de afiliación.');
+      sessions.setTenantSelection = jest.fn().mockResolvedValue(undefined);
+    });
+
+    it('auto-resolves the tenant (no "which agency?" prompt) when exactly one candidate has an open convocatoria', async () => {
+      // Only ONE of the two candidate agencies has an open convocatoria for this sender
+      // → the agency is unambiguous (the system itself sent that convocatoria).
+      senderResolver.clientsWithOpenConvocatoria.mockResolvedValue(['c2']);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('sí'));
+
+      expect(resolution).toEqual({
+        status: 'proceed',
+        clientId: 'c2',
+        canalId: null,
+        msg: expect.objectContaining({ type: 'text' }),
+      });
+      // Did NOT ask which agency and did NOT stage a tenant selection.
+      expect(sessions.setTenantSelection).not.toHaveBeenCalled();
+      expect(wa.sendText).not.toHaveBeenCalled();
+    });
+
+    it('still asks which agency when NO candidate has an open convocatoria (regression guard)', async () => {
+      senderResolver.clientsWithOpenConvocatoria.mockResolvedValue([]);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      // The general "always ask" behavior is preserved.
+      expect(sessions.setTenantSelection).toHaveBeenCalledTimes(1);
+      expect(sessions.setTenantSelection.mock.calls[0][2]).toBe('awaiting_tenant');
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, '¿Para qué agencia es esto?');
+    });
+
+    it('falls through to the ask-agency path when the convocatoria lookup fails (best-effort)', async () => {
+      senderResolver.clientsWithOpenConvocatoria.mockRejectedValue(new Error('db down'));
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('sí'));
+
+      // A DB error in the optimization must NOT break inbound: general flow still runs.
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(sessions.setTenantSelection).toHaveBeenCalledTimes(1);
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, '¿Para qué agencia es esto?');
     });
   });
 
