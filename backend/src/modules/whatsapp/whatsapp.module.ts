@@ -11,6 +11,7 @@ import { WhatsAppTenantSelectionService } from './tenant-selection.service';
 import { WhatsAppActionMenuService } from './action-menu.service';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { ClientsModule } from '../clients/clients.module';
+import { MetricsModule } from '../metrics/metrics.module';
 
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
@@ -25,6 +26,8 @@ const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
     ),
     // Provides AffiliationCodeService + AffiliationService for single-number routing.
     ClientsModule,
+    // Provides MetricsService for routing observability (f1_events_total).
+    MetricsModule,
   ],
   controllers: [WhatsAppWebhookController],
   providers:   [WhatsAppService, WhatsAppSessionService, WhatsAppMediaService, WhatsappOutputService, OperatorNotifierService, PromptShieldService, SenderTenantResolverService, WhatsAppTenantSelectionService, WhatsAppActionMenuService],

@@ -141,12 +141,10 @@ export class EvidenceIntakeService {
     }
 
     if (!activaciones.length) {
-      await this.escalate(
+      await this.notifyNoActivation(
         opts.eventoCrudoId,
         opts.phoneNumber,
         opts.clientId,
-        'No encontré una activación activa a tu nombre para esta evidencia. Lo derivo a un operador.',
-        'evidence_no_active_activation',
       );
       return;
     }
@@ -334,6 +332,43 @@ export class EvidenceIntakeService {
   }
 
   // ── Escalado / reintento ───────────────────────────────────────────────────
+
+  /**
+   * Sin activación activa (decisión T3): NO deriva a un operador y NO toca ninguno
+   * de los tres canales de alerta (pending_staff, notifier, notifyUsers). Envía un
+   * mensaje claro y accionable al remitente y marca el evento con
+   * status='no_activation' (solo auditoría, NO entra en la cola de escalados).
+   * NO deja sesión (no hay conversación que continuar).
+   */
+  private async notifyNoActivation(
+    eventoCrudoId: string,
+    phone: string,
+    clientId: string,
+  ): Promise<void> {
+    // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
+    // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
+    await runWithTenant(this.ds, clientId, () =>
+      this.ds.query(
+        `UPDATE eventos_crudos SET status='no_activation',
+           parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
+        [
+          eventoCrudoId,
+          JSON.stringify({
+            escalation_reason: 'evidence_no_active_activation',
+            at: new Date().toISOString(),
+          }),
+        ],
+      ),
+    ).catch(() => {});
+
+    await this.wa.sendText(
+      phone,
+      'No veo una activación activa hoy para asociar esta evidencia. Pedile a tu coordinador que cargue la activación y volvé a enviármela. 🙌',
+    );
+    this.logger.log(
+      `[Evidence] Sin activación activa, aviso al remitente (evento ${eventoCrudoId})`,
+    );
+  }
 
   /**
    * Deriva a un operador: avisa al remitente y marca el evento como escalated.

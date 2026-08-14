@@ -173,7 +173,7 @@ export class ClassifyProcessor extends WorkerHost {
     } else {
       // Run ProjectResolverService to improve project assignment
       try {
-        const messageText = ocr_text || payload?.text || '';
+        const messageText = ocr_text || payload?.text || payload?.caption || '';
         const phoneNumber = payload?.from || payload?.phone || null;
         const resolved = await this.projectResolver.resolve(
           messageText, null, client_id, phoneNumber as string,

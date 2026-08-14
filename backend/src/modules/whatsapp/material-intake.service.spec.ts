@@ -320,44 +320,40 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE]).toBeUndefined();
   });
 
-  it('on ambiguity, answering "1" (documento) resumes F1 classification and does not register material', async () => {
-    await svc.askKind({ eventoCrudoId: 'evt-2', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/y.jpg' });
-    expect(store[PHONE].materialIntake?.step).toBe('kind');
+  it('notifies the sender (NOT escalate) when the activation closes mid-flow (picker race) — B-004 reachable path', async () => {
+    // B-004: askKind/handleKind were removed. notifyNoActivation stays reachable via the
+    // start() guard and via this picker-race in handleActivacion — start() passes because
+    // there IS an active activation, but by the time we ask for the destino the activations
+    // query comes back empty (it closed in between), so askActivacion must notifyNoActivation.
+    let activationsCall = 0;
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes("status='active'")) return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }]);
+      if (sql.includes('FROM activations')) {
+        // start() guard sees 1 activation; the later askActivacion query sees 0 (race).
+        activationsCall += 1;
+        return Promise.resolve(activationsCall === 1 ? [{ id: 'act-1' }] : []);
+      }
+      return Promise.resolve([]);
+    });
 
-    expect(await svc.handleResponse(PHONE, '1')).toBe(true);
+    await svc.start({ eventoCrudoId: 'evt-race', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    expect(store[PHONE].materialIntake?.step).toBe('nombre');
 
-    expect(classifyQueue.add).toHaveBeenCalledWith(
-      'classify',
-      expect.objectContaining({ evento_crudo_id: 'evt-2', client_id: CLIENT, canal: 'whatsapp' }),
-      expect.anything(),
+    expect(await svc.handleResponse(PHONE, 'Silla ACME')).toBe(true); // nombre → (1 proyecto auto) → destino
+    expect(store[PHONE].materialIntake?.step).toBe('destino');
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);          // se usa hoy → askActivacion → 0 activas → notifyNoActivation
+
+    // notifyNoActivation ran: event marked no_activation, session cleared, no material created.
+    const noact = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='no_activation'"),
     );
+    expect(noact).toBeDefined();
+    expect(noact[1][1]).toContain('material_no_active_activation');
     expect(skus.create).not.toHaveBeenCalled();
     expect(store[PHONE]).toBeUndefined();
-  });
-
-  it('on ambiguity, answering "3" (evidencia) deletes the session and starts the evidence intake', async () => {
-    await svc.askKind({ eventoCrudoId: 'evt-ev', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/e.jpg', suggestedLabel: 'anfitrionas' });
-    expect(store[PHONE].materialIntake?.step).toBe('kind');
-
-    expect(await svc.handleResponse(PHONE, '3')).toBe(true);
-
-    // La sesión de material se limpió y arrancó el intake de evidencia con los args del intake.
-    expect(sessions.delete).toHaveBeenCalledWith(PHONE);
-    expect(evidenceIntake.start).toHaveBeenCalledWith(expect.objectContaining({
-      eventoCrudoId: 'evt-ev',
-      phoneNumber: PHONE,
-      clientId: CLIENT,
-      storagePath: 'inbound/e.jpg',
-      suggestedLabel: 'anfitrionas',
-    }));
-    // No se registra material.
-    expect(skus.create).not.toHaveBeenCalled();
-  });
-
-  it('the askKind prompt offers the evidencia option (3)', async () => {
-    await svc.askKind({ eventoCrudoId: 'evt-k', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/k.jpg' });
-    const prompt = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
-    expect(prompt).toContain('3. Evidencia de actividad');
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).not.toMatch(/operador/i);
   });
 
   it('returns false when there is no material intake in session', async () => {
@@ -381,7 +377,7 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE]?.materialIntake?.step).toBe('cantidad');
   });
 
-  it('escalates instead of asking for the material name when there is no active activation', async () => {
+  it('notifies the sender (NOT escalate) instead of asking for the material name when there is no active activation', async () => {
     queryMock.mockImplementation((sql: string) => {
       if (sql.includes('set_config')) return Promise.resolve([]);
       if (sql.includes('FROM activations')) return Promise.resolve([]); // sin activación activa
@@ -394,16 +390,23 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE]).toBeUndefined();
     expect(skus.create).not.toHaveBeenCalled();
 
-    // Marca el evento como escalated con el motivo correcto.
+    // T3: NO escala. Marca el evento con status='no_activation' (solo auditoría).
     const esc = queryMock.mock.calls.find(
       ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
     );
-    expect(esc).toBeDefined();
-    expect(esc[1][1]).toContain('material_no_active_activation');
+    expect(esc).toBeUndefined();
+    const noact = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='no_activation'"),
+    );
+    expect(noact).toBeDefined();
+    expect(noact[1][1]).toContain('material_no_active_activation');
 
-    // Avisa al remitente que se deriva.
+    // Mensaje claro y accionable al remitente (sin mención a operador).
     const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
-    expect(msg).toMatch(/activación activa/i);
+    expect(msg).toBe(
+      'No veo una activación activa hoy para asociar este material. Pedile a tu coordinador que cargue la activación y volvé a enviármelo. 🙌',
+    );
+    expect(msg).not.toMatch(/operador/i);
   });
 
   it('proceeds to the nombre step when an active activation exists', async () => {
@@ -413,25 +416,10 @@ describe('MaterialIntakeService', () => {
       ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='escalated'"),
     );
     expect(esc).toBeUndefined();
-  });
-
-  it('on ambiguity, answering "2" (material) with no active activation escalates instead of asking the name', async () => {
-    await svc.askKind({ eventoCrudoId: 'evt-k2', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'inbound/k2.jpg' });
-    // A partir de acá NO hay activación activa.
-    queryMock.mockImplementation((sql: string) => {
-      if (sql.includes('set_config')) return Promise.resolve([]);
-      if (sql.includes('FROM activations')) return Promise.resolve([]);
-      return Promise.resolve([]);
-    });
-
-    expect(await svc.handleResponse(PHONE, '2')).toBe(true);
-
-    expect(skus.create).not.toHaveBeenCalled();
-    expect(store[PHONE]).toBeUndefined();
-    const esc = queryMock.mock.calls.find(
-      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='escalated'"),
+    const noact = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='no_activation'"),
     );
-    expect(esc).toBeDefined();
-    expect(esc[1][1]).toContain('material_no_active_activation');
+    expect(noact).toBeUndefined();
   });
+
 });

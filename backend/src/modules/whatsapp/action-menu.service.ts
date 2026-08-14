@@ -39,6 +39,33 @@ export class WhatsAppActionMenuService {
     return opt ? { kind: opt.kind } : { kind: 'invalid' };
   }
 
+  /**
+   * Menu shown after a photo arrives with no known type yet: "¿Qué es esta foto?".
+   * Only the 3 photo types — ubicación is a GPS pin, not a photo, so it is not offered.
+   */
+  buildTypeMenu(): string {
+    return (
+      '¿Qué es esta foto? Respondé con el número:\n' +
+      '1) Factura o boleta\n' +
+      '2) Material POP\n' +
+      '3) Evidencia de actividad'
+    );
+  }
+
+  /** Parses a numbered reply to buildTypeMenu into a photo type (or 'invalid'). */
+  parseType(text: string): 'factura' | 'material' | 'evidencia' | 'invalid' {
+    switch (parseInt((text ?? '').trim(), 10)) {
+      case 1:
+        return 'factura';
+      case 2:
+        return 'material';
+      case 3:
+        return 'evidencia';
+      default:
+        return 'invalid';
+    }
+  }
+
   /** What to tell the sender to send next, once they picked an action. */
   buildGuide(kind: ActionKind): string {
     switch (kind) {

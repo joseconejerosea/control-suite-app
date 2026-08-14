@@ -8,20 +8,17 @@ import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../metrics/metrics.service';
 import { StorageService } from '../../../common/storage/storage.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
-import { MaterialIntakeService } from '../../whatsapp/material-intake.service';
-import { EvidenceIntakeService } from '../../whatsapp/evidence-intake.service';
 import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 const QUEUE_F1_CLASSIFY = 'classify';
 const F1_OCR_MAX_CHARS  = 50000;
 
-// Resultado del paso de visión: además del texto (para documentos), un triage
-// documento/material/ambiguo (para imágenes de WhatsApp). Ver buildVisionResult.
+// Resultado del paso de visión: sólo el texto OCR (la clasificación
+// documento/material/evidencia se removió en Phase 2 — el tipo lo decide el
+// remitente por menú, no la visión IA). Se conserva el `usage` para el costeo.
 type VisionResult = {
   text: string;
-  kind: 'document' | 'material' | 'evidence' | 'ambiguous';
-  label: string | null;
   usage: { input_tokens: number; output_tokens: number } | null;
 };
 
@@ -36,8 +33,6 @@ export class OcrProcessor extends WorkerHost {
     private readonly metrics: MetricsService,
     private readonly storage: StorageService,
     private readonly wa: WhatsAppService,
-    private readonly materialIntake: MaterialIntakeService,
-    private readonly evidenceIntake: EvidenceIntakeService,
   ) {
     super();
   }
@@ -101,45 +96,6 @@ export class OcrProcessor extends WorkerHost {
 
       // Record OCR duration metric
       this.metrics.f1OcrDuration.observe({ engine: 'claude-vision' }, durationSec);
-
-      // ── Triage documento vs material (F3) ────────────────────────────────
-      // Solo para IMÁGENES de WhatsApp (un PDF nunca es material). El material no
-      // tiene texto útil, así que se decide ANTES del check de "texto vacío".
-      // Invariante: ante ambigüedad se PREGUNTA, no se asume.
-      const isImage = !!mimeType && mimeType !== 'application/pdf';
-      const phone = eventPayload?.from ?? null;
-      if (isImage && canal === 'whatsapp' && phone) {
-        if (ocrResult.kind === 'evidence') {
-          await this.evidenceIntake.start({
-            eventoCrudoId: evento_crudo_id, phoneNumber: phone, clientId: client_id,
-            storagePath: eventPayload?.storage_path, suggestedLabel: ocrResult.label,
-          });
-          this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'evidence_intake' });
-          return;
-        }
-        if (ocrResult.kind === 'material') {
-          await this.materialIntake.start({
-            eventoCrudoId: evento_crudo_id, phoneNumber: phone, clientId: client_id,
-            storagePath: eventPayload?.storage_path, suggestedLabel: ocrResult.label,
-          });
-          this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'material_intake' });
-          return;
-        }
-        if (ocrResult.kind === 'ambiguous') {
-          // Guardar el texto: si el usuario responde "documento", classify lo reanuda.
-          await this.dataSource.query(
-            `UPDATE eventos_crudos SET ocr_text=$1, ocr_engine='claude-vision', ocr_attempted_at=NOW(), status='awaiting_material' WHERE id=$2`,
-            [(ocrText ?? '').slice(0, F1_OCR_MAX_CHARS), evento_crudo_id],
-          );
-          await this.materialIntake.askKind({
-            eventoCrudoId: evento_crudo_id, phoneNumber: phone, clientId: client_id,
-            storagePath: eventPayload?.storage_path, suggestedLabel: ocrResult.label,
-          });
-          this.metrics.f1EventsTotal.inc({ client_id, canal, status: 'ambiguous_kind' });
-          return;
-        }
-      }
-      // ─────────────────────────────────────────────────────────────────────
 
       if (!ocrText || ocrText.length < 20) {
         await this.setStatus(evento_crudo_id, 'failed_ocr', 'OCR returned empty or too short text');
@@ -209,19 +165,11 @@ export class OcrProcessor extends WorkerHost {
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
       : { type: 'image',    source: { type: 'base64', media_type: mimeType,          data: base64 } };
 
-    // PDF → solo extracción de texto (un PDF nunca es material POP): prompt y salida
-    // intactos respecto al comportamiento previo. Imagen → triage + texto en un JSON,
-    // así una sola llamada de visión decide documento/material/ambiguo sin costo extra.
-    const promptText = isPdf
-      ? 'Extract ALL text from this document. Output only the raw text, preserving structure. No explanations.'
-      : `You are triaging a photo sent to a field-operations bot. Classify it as:
-- "document": an invoice, receipt, boleta, contract, form or any paper/text business document.
-- "material": a physical POP / inventory item (furniture, stand, banner, branded object, equipment) — NOT a paper document.
-- "evidence": a photo of PEOPLE / activity at the event — staff, hostesses (anfitrionas), promoters, attendees, or a setup shot dominated by people. NOT a paper document and NOT a standalone POP/inventory object.
-- "ambiguous": genuinely unclear.
-ALWAYS extract any readable text present in the image into "text", regardless of the kind. Only leave "text" empty if there is truly no readable text in the image.
-Respond with ONLY this JSON, no markdown:
-{"kind":"document|material|evidence|ambiguous","label":"<short name of the item if material, else null>","text":"<ALL readable text in the image; empty only if there is truly no text>"}`;
+    // Phase 2 (T3): la visión ya NO clasifica el tipo (documento/material/evidencia).
+    // El tipo lo decide el remitente por menú y sólo las facturas llegan a este OCR.
+    // El prompt pide únicamente una lectura fiel del texto (PDF e imagen por igual).
+    const promptText =
+      'Extract ALL text from this document. Output only the raw text, preserving structure. No explanations.';
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -241,31 +189,16 @@ Respond with ONLY this JSON, no markdown:
     const raw = data?.content?.[0]?.text ?? '';
     const usage = data?.usage ?? null;
 
-    if (isPdf) {
-      return { text: raw, kind: 'document', label: null, usage };
-    }
-    return this.parseVisionTriage(raw, usage);
+    return this.parseVisionResult(raw, usage);
   }
 
   /**
-   * Parsea la respuesta JSON del triage de imágenes. Fail-safe: ante JSON inválido
-   * o kind desconocido, cae a 'document' con el texto crudo — así una imagen jamás
-   * se pierde y, en la duda, sigue el pipeline F1 existente (que a su vez puede pedir aclaración).
+   * Extrae el texto OCR de la respuesta de visión. Phase 2 (T3): la respuesta es
+   * texto plano (ya no un JSON de triage), así que sólo normalizamos el string y
+   * conservamos el `usage` para el costeo de IA.
    */
-  private parseVisionTriage(raw: string, usage: VisionResult['usage']): VisionResult {
-    try {
-      const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      const kind = ['document', 'material', 'evidence', 'ambiguous'].includes(parsed?.kind) ? parsed.kind : 'document';
-      return {
-        text: typeof parsed?.text === 'string' ? parsed.text : '',
-        kind,
-        label: parsed?.label && typeof parsed.label === 'string' ? parsed.label : null,
-        usage,
-      };
-    } catch {
-      return { text: raw, kind: 'document', label: null, usage };
-    }
+  private parseVisionResult(raw: string, usage: VisionResult['usage']): VisionResult {
+    return { text: typeof raw === 'string' ? raw : '', usage };
   }
 
   /**

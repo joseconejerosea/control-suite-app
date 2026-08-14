@@ -105,4 +105,14 @@ export class WhatsAppMediaService {
 
     return { buffer, mimeType, storagePath: uploaded.path };
   }
+
+  /**
+   * Best-effort deletion of a previously stored blob. Used when a buffered photo is
+   * superseded by a newer one (re-buffer): the old blob would otherwise be orphaned.
+   * Delegates to StorageService.remove; callers should catch so cleanup never breaks
+   * the happy path.
+   */
+  async remove(path: string): Promise<void> {
+    await this.storage.remove(path);
+  }
 }
