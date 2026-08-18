@@ -28,6 +28,44 @@ interface ConvocatoriaItem {
   local_direccion?: string;
 }
 
+export interface CalendarioConvocatoria {
+  proyecto_id:      string;
+  proyecto_nombre:  string;
+  persona_id:       string;
+  persona_nombre:   string | null;
+  dia:              string;
+  estado:           string;
+  local_nombre:     string | null;
+  local_direccion:  string | null;
+}
+
+export interface CalendarioGap {
+  proyecto_id:      string;
+  proyecto_nombre:  string;
+  dia:              string;
+  local_nombre:     string;
+  local_direccion:  string | null;
+  tiene_pendientes: boolean;
+  aprobado:         boolean;
+}
+
+/** Días ISO (YYYY-MM-DD) inclusive entre dos fechas; en UTC para no driftear por TZ. */
+function eachISODayInclusive(startISO: string, endISO: string): string[] {
+  const out: string[] = [];
+  const cur = new Date(startISO + 'T00:00:00Z');
+  const end = new Date(endISO + 'T00:00:00Z');
+  if (isNaN(cur.getTime()) || isNaN(end.getTime()) || cur > end) return out;
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+// Comparar fechas ISO (YYYY-MM-DD) es seguro lexicográficamente.
+const maxISODate = (a: string, b: string): string => (a >= b ? a : b);
+const minISODate = (a: string, b: string): string => (a <= b ? a : b);
+
 @Injectable()
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
@@ -425,6 +463,91 @@ export class ProjectsService {
     return { enviados, errores, detalle };
   }
 
+  // ── T9: Calendario global (read-only) ─────────────────────────────────────
+  // Vista de monitoreo cross-proyecto: agrega las convocatorias de TODOS los
+  // proyectos del tenant en [desde,hasta] y deriva los "puntos sin cubrir". Un
+  // local (config.ia_extracted.locales) está cubierto un día si hay >=1 convocatoria
+  // ese día con ese local_nombre en estado 'confirmada'; si no, es un gap.
+  // tiene_pendientes marca si hay filas 'pendiente' (asignadas sin enviar) que el
+  // atajo "Convocar" del calendario puede despachar en el momento.
+  async getCalendarioGlobal(
+    clientId: string,
+    desde: string,
+    hasta: string,
+  ): Promise<{
+    desde: string;
+    hasta: string;
+    convocatorias: CalendarioConvocatoria[];
+    gaps: CalendarioGap[];
+  }> {
+    const desdeISO = String(desde).slice(0, 10);
+    const hastaISO = String(hasta).slice(0, 10);
+
+    const convocatorias: CalendarioConvocatoria[] = await this.dataSource.query(
+      `SELECT c.proyecto_id,
+              pr.name AS proyecto_nombre,
+              c.persona_id,
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre,
+              c.dia::text AS dia, c.estado, c.local_nombre, c.local_direccion
+         FROM convocatorias c
+         JOIN projects pr ON pr.id = c.proyecto_id AND pr.client_id = c.client_id
+         LEFT JOIN promoters p ON p.id = c.persona_id AND p.client_id = c.client_id
+        WHERE c.client_id = $1 AND c.dia >= $2 AND c.dia <= $3
+          AND COALESCE(pr.status,'') <> 'closed'
+        ORDER BY c.dia, pr.name`,
+      [clientId, desdeISO, hastaISO],
+    );
+
+    const proyectos: Array<{
+      id: string; name: string; start_date: string | null; end_date: string | null; config: any; aprobado: boolean;
+    }> = await this.dataSource.query(
+      `SELECT id, name, start_date::text AS start_date, end_date::text AS end_date, config,
+              (aprobado_por_user_id IS NOT NULL AND aprobado_at IS NOT NULL) AS aprobado
+         FROM projects
+        WHERE client_id = $1 AND COALESCE(status,'') <> 'closed'`,
+      [clientId],
+    );
+
+    const normLocal = (s: string | null | undefined): string => (s ?? '').trim().toLowerCase();
+
+    const gaps: CalendarioGap[] = [];
+    for (const pr of proyectos) {
+      if (!pr.start_date || !pr.end_date) continue; // sin rango no se puede derivar cobertura
+      const cfg = typeof pr.config === 'string' ? JSON.parse(pr.config) : (pr.config ?? {});
+      const ia = cfg?.ia_extracted ?? cfg ?? {};
+      const locales: any[] = Array.isArray(ia.locales) ? ia.locales : [];
+      if (!locales.length) continue; // sin puntos cargados no hay gap derivable
+
+      const rangoDesde = maxISODate(String(pr.start_date).slice(0, 10), desdeISO);
+      const rangoHasta = minISODate(String(pr.end_date).slice(0, 10), hastaISO);
+
+      for (const dia of eachISODayInclusive(rangoDesde, rangoHasta)) {
+        for (const local of locales) {
+          const localNombre: string | null = local?.nombre ?? null;
+          if (!localNombre) continue;
+          const celda = convocatorias.filter(
+            (c) =>
+              c.proyecto_id === pr.id &&
+              String(c.dia).slice(0, 10) === dia &&
+              normLocal(c.local_nombre) === normLocal(localNombre),
+          );
+          if (celda.some((c) => c.estado === 'confirmada')) continue; // cubierto
+          gaps.push({
+            proyecto_id:      pr.id,
+            proyecto_nombre:  pr.name,
+            dia,
+            local_nombre:     localNombre,
+            local_direccion:  local?.direccion ?? null,
+            tiene_pendientes: celda.some((c) => c.estado === 'pendiente'),
+            aprobado:         !!pr.aprobado,
+          });
+        }
+      }
+    }
+
+    return { desde: desdeISO, hasta: hastaISO, convocatorias, gaps };
+  }
+
   // ── F4: Sugerencia de anfitriones desde el perfil que extrajo la IA ────────
   // Lee config.ia_extracted.perfil_personas (rol + cantidad) y locales, y propone
   // promotores ACTIVOS con teléfono que matcheen el rol (nullable → match parcial,
@@ -458,7 +581,7 @@ export class ProjectsService {
       const rolPerfil = String(perfil?.rol ?? '').trim().toLowerCase();
       const cantidad  = Number(perfil?.cantidad) > 0 ? Number(perfil.cantidad) : 1;
       const matches = (disponibles as any[]).filter(
-        (p) => !usados.has(p.id) && (!rolPerfil || String(p.rol ?? '').toLowerCase().includes(rolPerfil)),
+        (p) => !usados.has(p.id) && (!rolPerfil || String(p.rol ?? '').trim().toLowerCase().includes(rolPerfil)),
       );
       for (const p of matches.slice(0, cantidad)) {
         usados.add(p.id);

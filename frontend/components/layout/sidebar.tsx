@@ -8,7 +8,7 @@ import {
   FileText, UserCircle, Building2,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
-  Settings, CalendarDays, Zap, Layers, Boxes, ChevronDown,
+  Settings, CalendarDays, Zap, Layers, Boxes, ChevronDown, Send,
 } from "lucide-react";
 
 // Un item puede ser un link plano ({ href }) o un grupo colapsable ({ children }).
@@ -28,6 +28,7 @@ const CLIENT_SECTIONS = [
     { label: "Terreno", icon: Radio, children: [
       { label: "Terreno", icon: Radio, href: "/client/terreno" },
       { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
+      { label: "Convocatorias", icon: Send, href: "/client/convocatorias" },
       { label: "Inventario POP", icon: Package, href: "/client/inventario" },
     ]},
     { label: "Documentos", icon: FileText, children: [
