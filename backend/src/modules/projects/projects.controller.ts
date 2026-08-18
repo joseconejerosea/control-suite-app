@@ -1,6 +1,6 @@
 import {
-  Body, Controller, Get, Param, ParseUUIDPipe,
-  Patch, Post, Put, Req, UseGuards,
+  BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe,
+  Patch, Post, Put, Query, Req, UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -89,6 +89,24 @@ export class ProjectsController {
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   findAll(@Req() req: AuthedRequest) {
     return this.service.findAll(req.user.client_id);
+  }
+
+  // ── T9: Calendario global (read-only) ──────────────────────────────────────
+  //   GET /projects/calendario?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+  //   Agrega convocatorias de TODOS los proyectos del tenant + puntos sin cubrir.
+  //   Declarado ANTES de :id para no chocar con el ParseUUIDPipe de findOne.
+  @Get('calendario')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  getCalendarioGlobal(
+    @Req() req: AuthedRequest,
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+  ) {
+    const isISO = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? '');
+    if (!isISO(desde) || !isISO(hasta)) {
+      throw new BadRequestException('desde y hasta son requeridos (YYYY-MM-DD)');
+    }
+    return this.service.getCalendarioGlobal(req.user.client_id, desde, hasta);
   }
 
   @Get(':id')

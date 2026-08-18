@@ -309,7 +309,7 @@ export default function InventarioPage() {
           ) : (
             <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
               <table className="w-full border-collapse">
-                <thead><tr><TH c="SKU" /><TH c="Bodega" /><TH c="Cliente final" /><TH c="Cantidad" /><TH c="Estado" /></tr></thead>
+                <thead><tr><TH c="Nombre" /><TH c="Bodega" /><TH c="Cliente final" /><TH c="Cantidad" /><TH c="Estado" /></tr></thead>
                 <tbody>
                   {filteredInv.map((item: any, i: number) => {
                     const estado = getEstado(item.cantidad ?? 0);
@@ -375,7 +375,7 @@ export default function InventarioPage() {
           ) : (
             <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
               <table className="w-full border-collapse">
-                <thead><tr><TH c="SKU" /><TH c="Tipo" /><TH c="Cantidad" /><TH c="Origen" /><TH c="Destino" /><TH c="Fecha" /></tr></thead>
+                <thead><tr><TH c="Nombre" /><TH c="Tipo" /><TH c="Cantidad" /><TH c="Origen" /><TH c="Destino" /><TH c="Fecha" /></tr></thead>
                 <tbody>
                   {filteredMov.map((m: any, i: number) => (
                     <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}
