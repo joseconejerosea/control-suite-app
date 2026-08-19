@@ -454,4 +454,18 @@ export class CronService {
       this.logger.error('[Cron] Weekly rendition close error:', err instanceof Error ? err.message : err);
     }
   }
+
+  // ── T11: Weekly pending-payment reminder — Monday 12:00 UTC (~09:00 Chile) ──
+  // Digest al manager de rendiciones APROBADAS que siguen sin pagar. El manejo de
+  // tenant vive dentro de notificarPendientesDePago (cross-tenant, mismo patrón).
+  @Cron('0 12 * * 1')
+  async weeklyPaymentReminder(): Promise<void> {
+    this.logger.log('[Cron] Weekly pending-payment reminder running...');
+    try {
+      await this.rendicionesService.notificarPendientesDePago();
+      this.logger.log('[Cron] Weekly pending-payment reminder done');
+    } catch (err) {
+      this.logger.error('[Cron] Weekly pending-payment reminder error:', err instanceof Error ? err.message : err);
+    }
+  }
 }
