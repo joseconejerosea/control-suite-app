@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 
@@ -19,6 +19,46 @@ export default function RendicionesPage() {
   const [filtroEstado, setFiltroEstado] = useState("");
   const [selected, setSelected]       = useState<any>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [items, setItems]             = useState<any[]>([]);
+  const [boletaUrls, setBoletaUrls]   = useState<Record<string, string>>({});
+
+  // Al abrir el detalle: traer las boletas (items) y cargar sus imágenes con un
+  // fetch autenticado → object URL (el <img> no puede mandar el Bearer).
+  useEffect(() => {
+    if (!selected) { setItems([]); setBoletaUrls({}); return; }
+    const created: string[] = [];
+    const token = localStorage.getItem("cs_token");
+    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+    api.get<any>(`/rendiciones/${selected.id}/items`)
+      .then(async (r) => {
+        const list = Array.isArray(r) ? r : (r?.data ?? []);
+        setItems(list);
+        const urls: Record<string, string> = {};
+        await Promise.all(
+          list.filter((it: any) => it.has_boleta && it.invoice_id).map(async (it: any) => {
+            try {
+              const res = await fetch(`${base}/api/rendiciones/boletas/${it.invoice_id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return;
+              const url = URL.createObjectURL(await res.blob());
+              urls[it.invoice_id] = url;
+              created.push(url);
+            } catch { /* boleta sin imagen */ }
+          }),
+        );
+        setBoletaUrls(urls);
+      })
+      .catch(() => setItems([]));
+    return () => { created.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [selected]);
+
+  // Duplicados: boletas con el mismo monto dentro de la rendición.
+  const dupMontos = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const it of items) counts[String(it.monto)] = (counts[String(it.monto)] ?? 0) + 1;
+    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+  }, [items]);
 
   const fetchData = () => {
     setLoading(true);
@@ -216,6 +256,49 @@ export default function RendicionesPage() {
                   <div className="font-bold mt-1">{selected.num_items ?? 0}</div>
                 </div>
               </div>
+              {/* Boletas: imagen + datos + flag de duplicado */}
+              <div className="mb-4">
+                <div className="text-xs font-semibold mb-2" style={{ color: "var(--muted-foreground)" }}>
+                  Boletas ({items.length})
+                </div>
+                {items.length === 0 ? (
+                  <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>Sin boletas</div>
+                ) : (
+                  <div className="space-y-2" style={{ maxHeight: 288, overflowY: "auto" }}>
+                    {items.map((it: any, i: number) => {
+                      const dup = dupMontos.has(String(it.monto));
+                      const url = boletaUrls[it.invoice_id];
+                      return (
+                        <div key={it.id ?? i} className="flex gap-3 rounded-lg p-2 border"
+                          style={{ borderColor: dup ? "#f59e0b" : "var(--border)", background: "var(--card)" }}>
+                          {url ? (
+                            <a href={url} target="_blank" rel="noreferrer">
+                              <img src={url} alt="Boleta"
+                                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                            </a>
+                          ) : (
+                            <div style={{ width: 56, height: 56, borderRadius: 6, background: "var(--secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--muted-foreground)", textAlign: "center" }}>
+                              Sin imagen
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium truncate">{it.vendor_name ?? "—"}</div>
+                            <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                              {it.invoice_date ? new Date(String(it.invoice_date).slice(0, 10) + "T12:00:00").toLocaleDateString("es-CL") : "—"} · {fmtCLP(it.monto)}
+                            </div>
+                            {dup && (
+                              <span className="text-[10px] font-semibold" style={{ color: "#f59e0b" }}>
+                                ⚠ Posible duplicado (mismo monto)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {selected.requiere_admin && (
                 <div className="rounded-lg p-3 text-sm" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>
                   Aprobacion manual requerida — excede {fmtCLP(selected.excede_por_clp)} el presupuesto

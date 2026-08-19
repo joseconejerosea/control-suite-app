@@ -15,7 +15,8 @@ import {
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
 import { UserRole } from '../../common/enums/user-role.enum';
-import PDFDocument from 'pdfkit';
+import { StorageService } from '../../common/storage/storage.service';
+import PDFDocument = require('pdfkit');
 
 @Injectable()
 export class RendicionesService {
@@ -24,6 +25,7 @@ export class RendicionesService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly wa: WhatsAppService,
+    private readonly storage: StorageService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -66,12 +68,23 @@ export class RendicionesService {
       rendicionId = rendicion[0].id;
     }
 
-    // Agregar item
-    await this.ds.query(
+    // Agregar item — dedup: no meter la MISMA invoice dos veces (reproceso del
+    // persist / doble evento). Guard atómico vía WHERE NOT EXISTS; los duplicados
+    // "misma boleta como dos invoices distintas" se marcan aparte en la UI.
+    const inserted = await this.ds.query(
       `INSERT INTO rendicion_items (client_id, rendicion_id, invoice_id, monto)
-       VALUES ($1,$2,$3,$4)`,
+       SELECT $1,$2,$3,$4
+       WHERE NOT EXISTS (
+         SELECT 1 FROM rendicion_items WHERE client_id = $1 AND invoice_id = $3
+       )
+       RETURNING id`,
       [clientId, rendicionId, invoiceId, monto],
     );
+
+    if (!inserted.length) {
+      this.logger.warn(`[F2] Invoice ${invoiceId} ya estaba asignada — se omite (dedup)`);
+      return;
+    }
 
     // Recalcular total
     await this.recalcTotal(rendicionId, clientId);
@@ -293,10 +306,13 @@ export class RendicionesService {
     if (!rows.length) throw new NotFoundException(`Rendición ${id} no encontrada`);
     const rendicion = rows[0];
     rendicion.items = await this.ds.query(
-      `SELECT ri.*, i.vendor_name, i.invoice_date, i.category
+      `SELECT ri.*, i.vendor_name, i.invoice_date, i.category,
+              (ec.doc_key IS NOT NULL OR (ec.payload->>'file_base64') IS NOT NULL) AS has_boleta
        FROM rendicion_items ri
        LEFT JOIN invoices i ON i.id = ri.invoice_id
-       WHERE ri.rendicion_id = $1 AND ri.client_id = $2`,
+       LEFT JOIN eventos_crudos ec ON ec.id = i.raw_event_id AND ec.client_id = i.client_id
+       WHERE ri.rendicion_id = $1 AND ri.client_id = $2
+       ORDER BY ri.created_at`,
       [id, clientId],
     );
     return rendicion;
@@ -406,6 +422,92 @@ export class RendicionesService {
        WHERE id=$1 AND client_id=$3`,
       [id, dto.comprobante_pago_key ?? null, clientId],
     );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Imagen de la boleta (T10) — híbrido: storage por doc_key, fallback base64
+  // ─────────────────────────────────────────────────────────────────────────
+  async getBoletaImagen(clientId: string, invoiceId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+    const rows = await this.ds.query(
+      `SELECT ec.doc_key, ec.doc_mime_type, ec.payload AS raw_payload
+         FROM invoices i
+         JOIN eventos_crudos ec ON ec.id = i.raw_event_id AND ec.client_id = i.client_id
+        WHERE i.id = $1 AND i.client_id = $2
+        LIMIT 1`,
+      [invoiceId, clientId],
+    );
+    if (!rows.length) throw new NotFoundException('Boleta no encontrada');
+
+    const { doc_key, doc_mime_type } = rows[0];
+    const payload = typeof rows[0].raw_payload === 'string'
+      ? JSON.parse(rows[0].raw_payload)
+      : (rows[0].raw_payload ?? {});
+
+    // 1) Storage primero (mismo patrón que F1-review). Si no hay bytes ahí, fallback.
+    if (doc_key) {
+      try {
+        const buffer = await this.storage.download(doc_key);
+        if (buffer?.length) {
+          return { buffer, mimeType: doc_mime_type || payload.mime_type || 'application/octet-stream' };
+        }
+      } catch (err: any) {
+        this.logger.warn(`[F2] Boleta storage miss (${doc_key}), fallback a base64: ${err.message}`);
+      }
+    }
+
+    // 2) Fallback: base64 embebido en raw_payload (siempre presente si pasó por OCR).
+    const b64 = payload.file_base64;
+    if (b64) {
+      return {
+        buffer: Buffer.from(b64, 'base64'),
+        mimeType: payload.mime_type || doc_mime_type || 'application/octet-stream',
+      };
+    }
+
+    throw new NotFoundException('La boleta no tiene imagen disponible');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T11 — Recordatorio de rendiciones aprobadas PENDIENTES DE PAGO
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Digest por-tenant: avisa al manager cuántas rendiciones aprobadas siguen sin pagar. */
+  async notificarPendientesDePagoCliente(clientId: string): Promise<{ num: number; total: number }> {
+    const rows = await this.ds.query(
+      `SELECT COUNT(*)::int AS num, COALESCE(SUM(monto_total),0) AS total
+         FROM rendiciones WHERE client_id = $1 AND estado = 'aprobada'`,
+      [clientId],
+    );
+    const num = Number(rows[0]?.num ?? 0);
+    const total = parseFloat(rows[0]?.total ?? '0');
+    if (num === 0) return { num: 0, total: 0 };
+
+    const admins = await this.getAdminPhones(clientId);
+    const totalFmt = Math.round(total).toLocaleString('es-CL');
+    const appUrl = process.env.ALLOWED_ORIGIN ?? '';
+    const link = appUrl ? ` ${appUrl}/client/rendiciones` : '';
+    for (const admin of admins) {
+      const msg = admin.language === 'en'
+        ? `You have ${num} approved expense report(s) pending payment, total $${totalFmt} CLP.${link}`
+        : `Tenés ${num} rendición(es) aprobada(s) pendiente(s) de pago, total $${totalFmt} CLP.${link}`;
+      await this.wa.sendText(admin.phone, msg).catch(() => {});
+    }
+    return { num, total };
+  }
+
+  /** Barrida cross-tenant (cron semanal): recorre los clientes con aprobadas sin pagar. */
+  async notificarPendientesDePago(): Promise<void> {
+    const clientes = await runAsSystem(() =>
+      this.ds.query(`SELECT DISTINCT client_id FROM rendiciones WHERE estado = 'aprobada'`),
+    );
+    for (const c of clientes) {
+      await runWithTenant(this.ds, c.client_id, () =>
+        this.notificarPendientesDePagoCliente(c.client_id),
+      ).catch((err: any) =>
+        this.logger.warn(`[F2] Digest pendientes-pago falló tenant=${c.client_id}: ${err.message}`),
+      );
+    }
+    this.logger.log(`[F2] Digest de pendientes de pago procesado: ${clientes.length} cliente(s)`);
   }
 
   async kpis(clientId: string) {
