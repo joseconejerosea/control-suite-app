@@ -9,6 +9,8 @@ export class SkusController {
   @Get('alertas-stock') alertas(@Request() req: any) { return this.svc.alertasStock(req.user.client_id); }
   @Get(':id') findOne(@Request() req: any, @Param('id') id: string) { return this.svc.findOne(req.user.client_id, id); }
   @Post() create(@Request() req: any, @Body() dto: CreateSkuDto) { return this.svc.create(req.user.client_id, dto); }
+  // T13 — carga masiva por Excel (base64 JSON, Fastify-safe, mismo patrón que invoices/upload)
+  @Post('import') importExcel(@Request() req: any, @Body() body: { file_base64: string }) { return this.svc.importExcel(req.user.client_id, body.file_base64); }
   @Patch(':id') update(@Request() req: any, @Param('id') id: string, @Body() dto: UpdateSkuDto) { return this.svc.update(req.user.client_id, id, dto); }
   @Delete(':id') deactivate(@Request() req: any, @Param('id') id: string) { return this.svc.deactivate(req.user.client_id, id); }
 }

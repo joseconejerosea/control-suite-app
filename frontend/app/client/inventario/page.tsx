@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
-import { Plus, X, Package, Warehouse, ArrowLeftRight } from "lucide-react";
+import { Plus, X, Package, Warehouse, ArrowLeftRight, Upload } from "lucide-react";
 
 const TABS = ["Bodega", "SKUs", "Movimientos", "Devoluciones"];
 
@@ -219,6 +219,29 @@ export default function InventarioPage() {
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // T13 — importar SKUs desde Excel: leer el archivo como base64 y postear JSON
+  // (mismo patrón Fastify-safe que el resto de uploads). Muestra el resumen.
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permitir re-subir el mismo archivo
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const file_base64 = String(reader.result).split(",")[1] ?? "";
+        const res = await api.post<any>("/v1/app/skus/import", { file_base64 });
+        const d = res?.data ?? res;
+        alert(`Importación: ${d.creados ?? 0} creados · ${d.omitidos ?? 0} omitidos · ${d.errores?.length ?? 0} con error.`);
+        fetchAll();
+      } catch (err: any) {
+        alert(err?.message ?? "Error al importar el Excel");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const fetchAll = () => {
     setLoading(true);
     Promise.all([
@@ -268,6 +291,11 @@ export default function InventarioPage() {
             <button onClick={() => setShowMovModal(true)}
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
               <ArrowLeftRight size={13} /> Movimiento
+            </button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} style={{ display: "none" }} />
+            <button onClick={() => fileInputRef.current?.click()}
+              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+              <Upload size={13} /> Importar Excel
             </button>
             <button onClick={() => setShowSkuModal(true)}
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
