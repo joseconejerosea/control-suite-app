@@ -1,11 +1,69 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import * as XLSX from 'xlsx';
 import { CreateSkuDto, UpdateSkuDto } from './dto/sku.dto';
 
 @Injectable()
 export class SkusService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
+
+  // ── T13: Carga masiva de SKU por Excel ──────────────────────────────────────
+  // Parsea un .xlsx (base64, mismo patrón de upload que invoices: JSON, Fastify-safe),
+  // mapea headers case-insensitive y crea los SKUs deduplicando por código
+  // (ON CONFLICT). Devuelve un resumen para mostrarle al cliente qué entró.
+  async importExcel(
+    clientId: string,
+    fileBase64: string,
+  ): Promise<{ total: number; creados: number; omitidos: number; errores: { fila: number; motivo: string }[] }> {
+    let rows: Record<string, any>[];
+    try {
+      const wb = XLSX.read(Buffer.from(fileBase64, 'base64'), { type: 'buffer' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      if (!sheet) throw new Error('sin hojas');
+      rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    } catch {
+      throw new BadRequestException('No se pudo leer el archivo Excel. Verificá que sea un .xlsx válido.');
+    }
+
+    const pick = (row: Record<string, any>, keys: string[]): string => {
+      for (const k of Object.keys(row)) {
+        if (keys.includes(k.trim().toLowerCase())) return String(row[k] ?? '').trim();
+      }
+      return '';
+    };
+
+    let creados = 0;
+    let omitidos = 0;
+    const errores: { fila: number; motivo: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const fila = i + 2; // +1 por el header, +1 para base-1 (cómo lo ve el usuario en Excel)
+      const codigo = pick(rows[i], ['codigo', 'código', 'sku']);
+      const nombre = pick(rows[i], ['nombre', 'material']);
+      if (!codigo || !nombre) {
+        errores.push({ fila, motivo: 'Falta código o nombre' });
+        continue;
+      }
+
+      const cliente_final = pick(rows[i], ['cliente_final', 'cliente final', 'cliente']) || null;
+      const tipo = pick(rows[i], ['tipo']).toLowerCase() === 'consumible' ? 'consumible' : 'reusable';
+      const minRaw = pick(rows[i], ['min_stock', 'stock minimo', 'stock mínimo', 'stock']);
+      const min_stock = minRaw && !isNaN(Number(minRaw)) ? parseInt(minRaw, 10) : 5;
+
+      const res = await this.ds.query(
+        `INSERT INTO skus (client_id, codigo, nombre, cliente_final, tipo, min_stock)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (client_id, codigo) DO NOTHING
+         RETURNING id`,
+        [clientId, codigo, nombre, cliente_final, tipo, min_stock],
+      );
+      if (res.length) creados++;
+      else omitidos++;
+    }
+
+    return { total: rows.length, creados, omitidos, errores };
+  }
 
   async findAll(clientId: string) {
     return this.ds.query(
