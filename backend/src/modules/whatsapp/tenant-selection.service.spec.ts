@@ -6,8 +6,10 @@ describe('WhatsAppTenantSelectionService', () => {
   const service = new WhatsAppTenantSelectionService();
 
   const candidates: ClientCandidate[] = [
-    { clientId: 'c1', clientName: 'Agencia Uno' },
-    { clientId: 'c2', clientName: 'Agencia Dos' },
+    // rota es irrelevante para buildPrompt/parseSelection (con 2 candidatos siempre
+    // se pregunta); se usa el default conservador true solo para satisfacer el tipo.
+    { clientId: 'c1', clientName: 'Agencia Uno', rota: true },
+    { clientId: 'c2', clientName: 'Agencia Dos', rota: true },
   ];
 
   describe('buildPrompt', () => {
