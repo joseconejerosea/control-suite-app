@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { isISO8601 } from 'class-validator';
 import { DataSource } from 'typeorm';
 import { TenantRepository } from '../../common/repositories/tenant.repository';
 import { Project } from './project.entity';
@@ -26,6 +27,24 @@ interface ConvocatoriaItem {
   dia:              string;
   local_nombre?:    string;
   local_direccion?: string;
+}
+
+/**
+ * B3 — guard de fechas de convocatoria.
+ *
+ * La validación de `dia` se sacó del ValidationPipe global (emitía un mensaje
+ * crudo con prefijo `items.N.` y lo repetía una vez por anfitrión). En su lugar
+ * validamos a mano ambos flujos (enviarConvocatoria / convocarAnfitriones) con
+ * ESTE helper, que lanza UNA sola vez un mensaje limpio y accionable en cuanto
+ * cualquier item tiene la fecha ausente o no-ISO8601. Un único throw evita la
+ * duplicación por comas del pipe y no lleva prefijo de propiedad.
+ */
+export function assertConvocatoriaDatesValid(
+  items: Array<{ dia?: string }> | undefined | null,
+): void {
+  if (items?.some((it) => !it.dia || !isISO8601(it.dia))) {
+    throw new BadRequestException('Falta la fecha o no es válida. Revísala antes de enviar.');
+  }
 }
 
 export interface CalendarioConvocatoria {
@@ -372,6 +391,9 @@ export class ProjectsService {
     items:     ConvocatoriaItem[],
     modo:      'ai' | 'manual',
   ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    // B3: valida fechas antes de tocar la DB — UN solo mensaje limpio.
+    assertConvocatoriaDatesValid(items);
+
     const [proyecto] = await this.dataSource.query(
       `SELECT name, aprobado_por_user_id, aprobado_at FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
@@ -638,6 +660,10 @@ export class ProjectsService {
     items: ConvocatoriaItem[], comentario?: string, force = false,
   ): Promise<{ enviados: number; errores: number; detalle: unknown[]; conflicts?: unknown[] }> {
     if (!items?.length) throw new BadRequestException('No hay anfitriones para convocar');
+
+    // B3: valida fechas antes de aprobar/crear turnos (evita escrituras parciales
+    // con fecha inválida) — UN solo mensaje limpio para todo el lote.
+    assertConvocatoriaDatesValid(items);
 
     if (!force) {
       const conflicts = await this.detectarChoquesDia(clientId, projectId, items);

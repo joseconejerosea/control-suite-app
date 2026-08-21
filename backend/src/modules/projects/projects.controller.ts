@@ -12,7 +12,7 @@ import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { IsString, IsNotEmpty, IsArray, IsBoolean, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
+import { IsString, IsNotEmpty, IsArray, IsBoolean, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
 import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
@@ -23,14 +23,20 @@ interface AuthedRequest extends Request {
 
 // ── DTOs inline (small, project-specific) ────────────────────────────────────
 
-class ConvocatoriaItemDto {
+export class ConvocatoriaItemDto {
   @IsUUID() persona_id: string;
-  @IsDateString() dia: string;
+  // B3: la validación de FORMATO/ausencia de fecha NO vive en el pipe global
+  // (emitía un error crudo con prefijo "items.N." y lo repetía por cada anfitrión).
+  // Se valida a mano en el servicio (assertConvocatoriaDatesValid) para dar UN solo
+  // mensaje limpio. Acá `dia` queda REQUERIDO (string) para no romper el tipo del
+  // servicio (ConvocatoriaItem.dia: string); el front siempre manda el campo (aunque
+  // vacío), y el guard atrapa vacío/no-ISO con el mensaje amigable.
+  @IsString() dia: string;
   @IsOptional() @IsString() local_nombre?: string;
   @IsOptional() @IsString() local_direccion?: string;
 }
 
-class EnviarConvocatoriaDto {
+export class EnviarConvocatoriaDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ConvocatoriaItemDto)
@@ -52,7 +58,7 @@ class AprobarProyectoDto {
   @IsOptional() @IsString() comentario?: string;
 }
 
-class ConvocarAnfitrionesDto {
+export class ConvocarAnfitrionesDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ConvocatoriaItemDto)
