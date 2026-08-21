@@ -37,7 +37,18 @@ export default function ActivacionesPage() {
           {
             key: "location_id",
             label: "Ubicación",
-            optionsEndpoint: "/locations",
+            // Dependent on the selected campaign: resolve campaign → its project,
+            // then load only that project's active PDVs. Empty when no campaign.
+            optionsEndpointFrom: (form, rows) => {
+              const campaignId = form.campaign_id;
+              if (!campaignId) return null;
+              const campaign = (rows.campaign_id ?? []).find(
+                (r) => String(r.id) === campaignId,
+              );
+              const projectId = campaign?.project_id;
+              if (!projectId) return null;
+              return `/projects/${String(projectId)}/locations`;
+            },
             optionsLabelKey: "name",
           },
           {
