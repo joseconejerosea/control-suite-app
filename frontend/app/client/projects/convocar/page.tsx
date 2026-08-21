@@ -29,6 +29,8 @@ function ConvocarContent({ projectId }: { projectId: string }) {
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ enviados: number; errores: number; detalle: any[] } | null>(null);
   const [conflicts, setConflicts] = useState<any[] | null>(null);
+  // B4: PDVs del proyecto para el desplegable de "Local" (fuente = endpoint de B5).
+  const [locations, setLocations] = useState<{ id: string; name: string; address: string | null }[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -39,6 +41,12 @@ function ConvocarContent({ projectId }: { projectId: string }) {
       setDefaultDia(d?.dia ?? "");
       const l0 = Array.isArray(d?.locales) ? d.locales[0] : null;
       setDefaultLocal(l0 ? { nombre: l0.nombre, direccion: l0.direccion } : {});
+      // B4: PDVs individuales del proyecto para el desplegable de "Local".
+      try {
+        const rl = await api.get<any>(`/projects/${projectId}/locations`);
+        const dl = rl?.data ?? rl;
+        setLocations(Array.isArray(dl) ? dl : []);
+      } catch { /* si el proyecto no tiene PDVs o el fetch falla, el campo cae a texto libre */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cargar la sugerencia.");
     } finally {
@@ -188,7 +196,29 @@ function ConvocarContent({ projectId }: { projectId: string }) {
                       <input type="date" value={it.dia ?? ""} onChange={(e) => upd(i, { dia: e.target.value })} style={inputStyle} />
                     </td>
                     <td style={{ padding: "8px 14px", width: 200 }}>
-                      <input value={it.local_nombre ?? ""} onChange={(e) => upd(i, { local_nombre: e.target.value })} placeholder="Local" style={inputStyle} />
+                      {locations.length > 0 ? (
+                        <select
+                          value={(() => {
+                            // Match normalizado (trim + minúsculas): el nombre sugerido por IA
+                            // puede venir con espacios/casing distintos al PDV guardado (trimmeado).
+                            const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+                            const m = locations.find((l) => norm(l.name) === norm(it.local_nombre));
+                            return m ? m.name : "";
+                          })()}
+                          onChange={(e) => {
+                            const loc = locations.find((l) => l.name === e.target.value);
+                            upd(i, { local_nombre: loc ? loc.name : null, local_direccion: loc?.address ?? null });
+                          }}
+                          style={inputStyle}
+                        >
+                          <option value="">— Local —</option>
+                          {locations.map((l) => (
+                            <option key={l.id} value={l.name}>{l.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input value={it.local_nombre ?? ""} onChange={(e) => upd(i, { local_nombre: e.target.value })} placeholder="Local" style={inputStyle} />
+                      )}
                     </td>
                     <td style={{ padding: "8px 14px", textAlign: "right" }}>
                       <button onClick={() => remove(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", padding: 4 }}><Trash2 size={14} /></button>

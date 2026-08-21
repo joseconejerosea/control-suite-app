@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { isISO8601 } from 'class-validator';
 import { DataSource } from 'typeorm';
 import { TenantRepository } from '../../common/repositories/tenant.repository';
 import { Project } from './project.entity';
@@ -9,6 +10,85 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
 import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
 import { UserRole } from '../../common/enums/user-role.enum';
+
+// ── B5: Project-scoped location sync ──────────────────────────────────────────
+
+export interface LocaleEntry {
+  nombre?: string | null;
+  direccion?: string | null;
+}
+
+/**
+ * B5 — Synchronises a project's PDV list into the `locations` table.
+ *
+ * Rules:
+ *  - INSERT new locations (by lower(name)) that don't exist yet for this project.
+ *  - UPDATE address if a location with the same lower(name) already exists.
+ *  - DEACTIVATE (status='inactive') any project-linked location whose lower(name)
+ *    is no longer present in `locales`. Does NOT DELETE — preserves activation FKs.
+ *  - Skips entries with empty or null `nombre`.
+ *
+ * Exported as a standalone async function so it can be unit-tested without
+ * NestJS/DI bootstrap and reused from both ProjectsService and ProjectInboxService.
+ *
+ * @param ds        The DataSource (or a QueryRunner's manager) to run queries on.
+ * @param clientId  The tenant (client_id) scope.
+ * @param projectId The project whose PDVs are being synced.
+ * @param locales   Array of {nombre, direccion} entries from config.locales or ia_extracted.locales.
+ */
+export async function syncProjectLocations(
+  ds: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> },
+  clientId: string,
+  projectId: string,
+  locales: LocaleEntry[],
+): Promise<void> {
+  // Normalise and filter out empty/null entries
+  const validLocales = locales
+    .map((l) => ({
+      nombre: (l.nombre ?? '').trim(),
+      direccion: (l.direccion ?? '').trim() || null,
+    }))
+    .filter((l) => l.nombre !== '');
+
+  // 1. Fetch current project-linked location rows (id + lower_name) for deactivation check
+  const existing = await ds.query(
+    `SELECT id, lower(name) AS lower_name
+       FROM locations
+      WHERE client_id = $1
+        AND project_id = $2`,
+    [clientId, projectId],
+  ) as { id: string; lower_name: string }[];
+
+  // 2. Upsert each valid locale: INSERT … ON CONFLICT (client_id, project_id, lower(name))
+  //    WHERE project_id IS NOT NULL → UPDATE address (re-activate too in case it was inactive).
+  for (const locale of validLocales) {
+    await ds.query(
+      `INSERT INTO locations (client_id, project_id, name, address, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       ON CONFLICT (client_id, project_id, lower(name))
+         WHERE project_id IS NOT NULL
+         DO UPDATE SET
+           address    = EXCLUDED.address,
+           status     = 'active',
+           updated_at = NOW()`,
+      [clientId, projectId, locale.nombre, locale.direccion],
+    );
+  }
+
+  // 3. Deactivate locations whose name is no longer in the current locales list.
+  //    Compare lower(name) to cover case differences between runs.
+  const currentLowerNames = new Set(validLocales.map((l) => l.nombre.toLowerCase()));
+  const toDeactivate = existing.filter((row) => !currentLowerNames.has(row.lower_name));
+
+  for (const row of toDeactivate) {
+    await ds.query(
+      `UPDATE locations
+          SET status = 'inactive', updated_at = NOW()
+        WHERE id = $1`,
+      [row.id],
+    );
+  }
+}
 
 export interface ProjectSummary {
   project_id:       string;
@@ -26,6 +106,24 @@ interface ConvocatoriaItem {
   dia:              string;
   local_nombre?:    string;
   local_direccion?: string;
+}
+
+/**
+ * B3 — guard de fechas de convocatoria.
+ *
+ * La validación de `dia` se sacó del ValidationPipe global (emitía un mensaje
+ * crudo con prefijo `items.N.` y lo repetía una vez por anfitrión). En su lugar
+ * validamos a mano ambos flujos (enviarConvocatoria / convocarAnfitriones) con
+ * ESTE helper, que lanza UNA sola vez un mensaje limpio y accionable en cuanto
+ * cualquier item tiene la fecha ausente o no-ISO8601. Un único throw evita la
+ * duplicación por comas del pipe y no lleva prefijo de propiedad.
+ */
+export function assertConvocatoriaDatesValid(
+  items: Array<{ dia?: string }> | undefined | null,
+): void {
+  if (items?.some((it) => !it.dia || !isISO8601(it.dia))) {
+    throw new BadRequestException('Falta la fecha o no es válida. Revísala antes de enviar.');
+  }
 }
 
 export interface CalendarioConvocatoria {
@@ -86,7 +184,7 @@ export class ProjectsService {
     if (dto.start_date && dto.end_date && dto.start_date > dto.end_date) {
       throw new BadRequestException('start_date cannot be after end_date');
     }
-    return this.repo.create(clientId, {
+    const project = await this.repo.create(clientId, {
       name:        dto.name,
       description: dto.description ?? null,
       objectives:  dto.objectives ?? null,
@@ -96,6 +194,11 @@ export class ProjectsService {
       budget:      dto.budget ?? null,
       config:      dto.config ?? null,
     });
+
+    // B5 — Sync project-scoped locations from config.locales (if present)
+    await this.syncLocationsFromConfig(clientId, project.id, project.config);
+
+    return project;
   }
 
   async findAll(clientId: string): Promise<Project[]> {
@@ -133,6 +236,11 @@ export class ProjectsService {
     // F4 Fase 4: editar un proyecto cuya convocatoria YA se envió invalida la
     // aprobación → hay que re-aprobar antes de re-enviar (el gate vuelve a cerrar).
     await this.invalidarAprobacionSiEditadoPostEnvio(clientId, id, dto);
+
+    // B5 — Sync project-scoped locations if config (and therefore locales) changed.
+    if (dto.config !== undefined) {
+      await this.syncLocationsFromConfig(clientId, id, updated.config);
+    }
 
     return updated;
   }
@@ -182,6 +290,49 @@ export class ProjectsService {
     for (const admin of admins) {
       await this.wa.sendText(admin.phone, msg).catch(() => {});
     }
+  }
+
+  // ── B5: Project-scoped PDV sync ───────────────────────────────────────────
+
+  /**
+   * Extracts locales from project config (root-level AND ia_extracted) and calls
+   * syncProjectLocations. Runs silently on errors to avoid breaking the main flow.
+   */
+  private async syncLocationsFromConfig(
+    clientId: string,
+    projectId: string,
+    config: Record<string, unknown> | null | undefined,
+  ): Promise<void> {
+    if (!config) return;
+    const cfg = config as Record<string, any>;
+    const rootLocales: LocaleEntry[] = Array.isArray(cfg.locales) ? cfg.locales : [];
+    const iaLocales: LocaleEntry[]   = Array.isArray(cfg.ia_extracted?.locales) ? cfg.ia_extracted.locales : [];
+    const merged = [...rootLocales, ...iaLocales];
+    // JB-001 — Do NOT early-return on an empty merged list: syncProjectLocations
+    // handles empty correctly by deactivating every previously-synced PDV. Skipping
+    // it here would leave cleared PDVs active forever. Always call the sync.
+    await syncProjectLocations(this.dataSource, clientId, projectId, merged).catch((err) =>
+      this.logger.warn(`[B5] syncProjectLocations failed project=${projectId}: ${err.message}`),
+    );
+  }
+
+  /**
+   * B5 — Returns active PDVs for the project, for the dropdown.
+   * Delegates to raw SQL via dataSource to stay RLS-safe.
+   */
+  async getProjectLocations(
+    clientId: string,
+    projectId: string,
+  ): Promise<{ id: string; name: string; address: string | null }[]> {
+    return this.dataSource.query(
+      `SELECT id, name, address
+         FROM locations
+        WHERE client_id = $1
+          AND project_id = $2
+          AND status = 'active'
+        ORDER BY name ASC`,
+      [clientId, projectId],
+    );
   }
 
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
@@ -372,6 +523,9 @@ export class ProjectsService {
     items:     ConvocatoriaItem[],
     modo:      'ai' | 'manual',
   ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    // B3: valida fechas antes de tocar la DB — UN solo mensaje limpio.
+    assertConvocatoriaDatesValid(items);
+
     const [proyecto] = await this.dataSource.query(
       `SELECT name, aprobado_por_user_id, aprobado_at FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
@@ -638,6 +792,10 @@ export class ProjectsService {
     items: ConvocatoriaItem[], comentario?: string, force = false,
   ): Promise<{ enviados: number; errores: number; detalle: unknown[]; conflicts?: unknown[] }> {
     if (!items?.length) throw new BadRequestException('No hay anfitriones para convocar');
+
+    // B3: valida fechas antes de aprobar/crear turnos (evita escrituras parciales
+    // con fecha inválida) — UN solo mensaje limpio para todo el lote.
+    assertConvocatoriaDatesValid(items);
 
     if (!force) {
       const conflicts = await this.detectarChoquesDia(clientId, projectId, items);

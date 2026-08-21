@@ -8,6 +8,7 @@ const CLIENT = 'client-1';
 
 describe('MaterialIntakeService', () => {
   let svc: MaterialIntakeService;
+  let anySvc: any; // escape hatch for new public methods under test (avoids TS2339 before implementation)
   let store: Record<string, WhatsAppSession>;
   let queryMock: jest.Mock;
   let sessions: any;
@@ -19,10 +20,17 @@ describe('MaterialIntakeService', () => {
 
   beforeEach(() => {
     store = {};
+    const claimed = new Set<string>();
     sessions = {
       get: jest.fn(async (p: string) => store[p] ?? null),
       set: jest.fn(async (p: string, s: WhatsAppSession) => { store[p] = s; }),
       delete: jest.fn(async (p: string) => { delete store[p]; }),
+      // Emula el SET NX atómico: primera vez true, subsecuentes false para el mismo id.
+      claimMaterialRegistration: jest.fn(async (id: string) => {
+        if (claimed.has(id)) return false;
+        claimed.add(id);
+        return true;
+      }),
     };
 
     queryMock = jest.fn((sql: string) => {
@@ -62,6 +70,7 @@ describe('MaterialIntakeService', () => {
     evidenceIntake = { start: jest.fn().mockResolvedValue(undefined) };
 
     svc = new MaterialIntakeService(ds, classifyQueue, wa, sessions, skus, movimientos, evidenceIntake);
+    anySvc = svc as any;
   });
 
   it('walks nombre → proyecto → bodega → cantidad and registers SKU + entrada movement', async () => {
@@ -222,7 +231,25 @@ describe('MaterialIntakeService', () => {
   });
 
   it('"se usa hoy" with a single active activation records a consumo movement tied to the activation, no bodega', async () => {
+    // A4: consumo now requires a location step before registering.
     // default mock: FROM activations → [{ id: 'act-1' }] (single → auto-select)
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes("status='active'")) {
+        return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }, { id: 'proj-2', name: 'Proyecto Dos' }]);
+      }
+      if (sql.includes('FROM activations') && sql.includes('estado_f5')) {
+        // hasActiveActivation + askActivacion queries
+        return Promise.resolve([{ id: 'act-1', activation_date: null, location_name: null }]);
+      }
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        // handleLocationForMaterial location validation
+        return Promise.resolve([{ id: 'act-1', location: JSON.stringify({ lat: -33.0, lng: -70.0, radiusMeters: 200 }), status: 'in_progress' }]);
+      }
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      return Promise.resolve([]);
+    });
+
     await svc.start({ eventoCrudoId: 'evt-uso', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
     expect(await svc.handleResponse(PHONE, 'Silla ACME')).toBe(true);   // → proyecto
     expect(await svc.handleResponse(PHONE, '1')).toBe(true);            // proyecto → destino
@@ -231,7 +258,13 @@ describe('MaterialIntakeService', () => {
     // No preguntó bodega.
     const asked = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
     expect(asked).not.toMatch(/¿En qué bodega/i);
-    expect(await svc.handleResponse(PHONE, '5')).toBe(true);            // cantidad → register
+    expect(await svc.handleResponse(PHONE, '5')).toBe(true);            // cantidad → ubicacion (A4: pausa aquí)
+    // A4: paused at location step, not yet registered.
+    expect(store[PHONE]?.materialIntake?.step).toBe('ubicacion');
+    expect(movimientos.create).not.toHaveBeenCalled();
+
+    // Provide the location pin to complete registration.
+    expect(await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc')).toBe(true);
 
     expect(movimientos.create).toHaveBeenCalledTimes(1);
     const dto = movimientos.create.mock.calls[0][1];
@@ -245,13 +278,22 @@ describe('MaterialIntakeService', () => {
   });
 
   it('"se usa hoy" with multiple active activations asks which one, then records consumo for the chosen activation', async () => {
+    // A4: consumo requires a location step; the mock needs to handle both the activation
+    // list query AND the per-activation location validation query from handleLocationForMaterial.
     queryMock.mockImplementation((sql: string) => {
       if (sql.includes('set_config')) return Promise.resolve([]);
       if (sql.includes("status='active'")) return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }]);
-      if (sql.includes('FROM activations')) return Promise.resolve([
-        { id: 'act-1', activation_date: '2026-08-12', location_name: 'Jumbo Maipú' },
-        { id: 'act-2', activation_date: '2026-08-11', location_name: 'Líder Centro' },
-      ]);
+      // hasActiveActivation and askActivacion (both use 'FROM activations' with 'estado_f5')
+      if (sql.includes('FROM activations') && sql.includes('estado_f5')) {
+        return Promise.resolve([
+          { id: 'act-1', activation_date: '2026-08-12', location_name: 'Jumbo Maipú' },
+          { id: 'act-2', activation_date: '2026-08-11', location_name: 'Líder Centro' },
+        ]);
+      }
+      // handleLocationForMaterial per-activation validation
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        return Promise.resolve([{ id: 'act-2', location: JSON.stringify({ lat: -33.0, lng: -70.0, radiusMeters: 200 }), status: 'in_progress' }]);
+      }
       if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
       return Promise.resolve([]);
     });
@@ -268,11 +310,16 @@ describe('MaterialIntakeService', () => {
     expect(ask).toContain('Jumbo Maipú');
     expect(ask).toContain('Líder Centro');
     expect(await svc.handleResponse(PHONE, '2')).toBe(true);            // elige act-2 → single item sin qty → cantidad
-    expect(await svc.handleResponse(PHONE, '3')).toBe(true);            // cantidad → register
+    expect(await svc.handleResponse(PHONE, '3')).toBe(true);            // cantidad → ubicacion (A4: pausa aquí)
+    expect(store[PHONE]?.materialIntake?.step).toBe('ubicacion');
+
+    // Complete with a location pin.
+    expect(await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc')).toBe(true);
 
     const dto = movimientos.create.mock.calls[0][1];
     expect(dto).toMatchObject({ tipo: 'consumo', activacion_id: 'act-2', cantidad: 3 });
     expect(dto.bodega_origen_id).toBeUndefined();
+    expect(store[PHONE]).toBeUndefined();
   });
 
   it('retries on an invalid destino answer instead of proceeding', async () => {
@@ -360,6 +407,156 @@ describe('MaterialIntakeService', () => {
     expect(await svc.handleResponse(PHONE, 'hola')).toBe(false);
   });
 
+  // ── A4 · Ubicación obligatoria para consumo ────────────────────────────────
+
+  it('[A4] consumo flow transitions to ubicacion step instead of registering after cantidad', async () => {
+    // Single activation auto-selected; single item with no inline qty → asks cantidad.
+    await svc.start({ eventoCrudoId: 'evt-ub1', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    await svc.handleResponse(PHONE, 'Silla ACME');  // nombre → proyecto
+    await svc.handleResponse(PHONE, '1');            // proyecto → destino
+    await svc.handleResponse(PHONE, '2');            // destino: consumo → (auto activación) → cantidad
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+
+    await svc.handleResponse(PHONE, '5');            // cantidad → ubicacion (NOT register)
+
+    // Must NOT have registered yet.
+    expect(skus.create).not.toHaveBeenCalled();
+    expect(movimientos.create).not.toHaveBeenCalled();
+    // Session still live, step is 'ubicacion'.
+    expect(store[PHONE]).toBeDefined();
+    expect(store[PHONE].materialIntake?.step).toBe('ubicacion');
+    // Prompt asks for a location pin.
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/ubic[aá]ci[oó]n/i);
+    expect(msg).toMatch(/clip/i);
+  });
+
+  it('[A4] consumo flow (multi-item with inline qty) transitions to ubicacion step instead of registering (no cantidad step)', async () => {
+    // 3 items with inline quantity → no cantidad question; should pause for location.
+    let n = 0;
+    skus.create = jest.fn(async (_c: string, dto: any) => ({ id: `sku-${++n}`, codigo: dto.codigo, nombre: dto.nombre }));
+
+    await svc.start({ eventoCrudoId: 'evt-ub-multi', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/m.jpg' });
+    await svc.handleResponse(PHONE, '1 Volumétrico\n2 muebles\n6 canastos'); // nombre → proyecto
+    await svc.handleResponse(PHONE, '1');    // proyecto → destino
+    await svc.handleResponse(PHONE, '2');    // consumo → (auto activación, no cantidad) → ubicacion
+
+    expect(skus.create).not.toHaveBeenCalled();
+    expect(store[PHONE]).toBeDefined();
+    expect(store[PHONE].materialIntake?.step).toBe('ubicacion');
+  });
+
+  it('[A4] bodega flow still registers immediately, no ubicacion step', async () => {
+    await svc.start({ eventoCrudoId: 'evt-ub-bod', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    await svc.handleResponse(PHONE, 'Silla ACME');  // nombre → proyecto
+    await svc.handleResponse(PHONE, '1');            // proyecto → destino
+    await svc.handleResponse(PHONE, '1');            // destino: bodega → bodega
+    await svc.handleResponse(PHONE, '1');            // bodega → cantidad
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+    await svc.handleResponse(PHONE, '3');            // cantidad → register (immediate, no ubicacion)
+
+    expect(skus.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    expect(store[PHONE]).toBeUndefined(); // session cleared = completed
+  });
+
+  it('[A4] handleLocationForMaterial: completes registration (VERIFIED), clears session, sends confirmation', async () => {
+    // Pre-seed session at step='ubicacion' with a consumo intake that already has activacionId.
+    store[PHONE] = {
+      state: 'awaiting_material',
+      projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-ub2', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    };
+
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      // activation with location for haversine
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        return Promise.resolve([{ id: 'act-1', location: JSON.stringify({ lat: -33.0, lng: -70.0, radiusMeters: 200 }), status: 'in_progress' }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    // Pin inside radius (same coordinates → 0m distance).
+    const result = await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-1');
+
+    expect(result).toBe(true);
+    // Registration happened.
+    expect(skus.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    const dto = movimientos.create.mock.calls[0][1];
+    expect(dto).toMatchObject({ tipo: 'consumo', activacion_id: 'act-1', cantidad: 5 });
+    // Session cleared.
+    expect(store[PHONE]).toBeUndefined();
+    // Confirmation sent (no mismatch warning).
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/activaci[oó]n/i);
+    expect(msg).not.toMatch(/fuera del rango/i);
+  });
+
+  it('[A4] handleLocationForMaterial: completes registration (MISMATCH) with a warning, does NOT block', async () => {
+    store[PHONE] = {
+      state: 'awaiting_material',
+      projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-ub3', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Mesa', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Mesa', cantidad: 2 }],
+      },
+    };
+
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Dos' }]);
+      // 5km away — well outside any radius
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        return Promise.resolve([{ id: 'act-1', location: JSON.stringify({ lat: -33.0, lng: -70.0, radiusMeters: 200 }), status: 'scheduled' }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    // 5km north: far outside radius
+    const result = await anySvc.handleLocationForMaterial(PHONE, -32.955, -70.0, 'evt-loc-2');
+
+    expect(result).toBe(true);
+    // Still registered despite mismatch.
+    expect(skus.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    expect(store[PHONE]).toBeUndefined();
+    // Confirmation includes a warning about the mismatch.
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/activaci[oó]n/i);
+    expect(msg).toMatch(/fuera del rango/i);
+  });
+
+  it('[A4] handleLocationForMaterial: returns false when there is no pending material-location', async () => {
+    // No session at all.
+    const result = await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-3');
+    expect(result).toBe(false);
+  });
+
+  it('[A4] handleLocationForMaterial: returns false when step is not ubicacion', async () => {
+    store[PHONE] = {
+      state: 'awaiting_material',
+      projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-ub4', storagePath: 'materials/x.jpg', step: 'cantidad',
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    };
+    const result = await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-4');
+    expect(result).toBe(false);
+  });
+
   it('retries on an invalid quantity instead of registering', async () => {
     store[PHONE] = {
       state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
@@ -420,6 +617,203 @@ describe('MaterialIntakeService', () => {
       ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='no_activation'"),
     );
     expect(noact).toBeUndefined();
+  });
+
+  // ── A4 · JD-001 · escalado en el paso de ubicación ─────────────────────────
+
+  it('[JD-001] escalates to an operator after MAX_ATTEMPTS of non-GPS replies at the ubicacion step', async () => {
+    // Seed a session paused at step='ubicacion' (consumo intake awaiting a pin).
+    store[PHONE] = {
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-esc', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    };
+
+    // First bad (text) reply → re-prompt, session stays alive, attempts incremented.
+    expect(await svc.handleResponse(PHONE, 'no sé mandar ubicación')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.step).toBe('ubicacion');
+    expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+    expect(movimientos.create).not.toHaveBeenCalled();
+
+    // Second bad reply → reaches MAX_ATTEMPTS → escalate + clear session.
+    expect(await svc.handleResponse(PHONE, 'sigo sin poder')).toBe(true);
+
+    // Event marked escalated, session cleared, no material created.
+    const esc = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+    );
+    expect(esc).toBeDefined();
+    expect(esc[1][1]).toContain('material_intake_max_attempts');
+    expect(store[PHONE]).toBeUndefined();
+    expect(skus.create).not.toHaveBeenCalled();
+    expect(movimientos.create).not.toHaveBeenCalled();
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/operador/i);
+  });
+
+  // ── A4 · JD-002 · sin GPS almacenado → status neutral, sin warning falso ────
+
+  it('[JD-002] activation without stored GPS → registers, NEUTRAL location status, NO false "fuera de rango" warning', async () => {
+    store[PHONE] = {
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-nogps', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    };
+
+    let locationCheckStatus: string | undefined;
+    queryMock.mockImplementation((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      // Activation exists but has NO stored GPS (location is null) — a normal case.
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        return Promise.resolve([{ id: 'act-1', location: null, status: 'in_progress' }]);
+      }
+      if (sql.includes('INSERT INTO activation_events')) {
+        locationCheckStatus = params?.[2]; // location_status column value
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-nogps');
+    expect(result).toBe(true);
+
+    // Still registered.
+    expect(skus.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    expect(store[PHONE]).toBeUndefined();
+
+    // NEUTRAL status written to LOCATION_CHECK — NOT 'MISMATCH'.
+    expect(locationCheckStatus).toBeDefined();
+    expect(locationCheckStatus).not.toBe('MISMATCH');
+
+    // No bogus "fuera de rango" warning in the confirmation.
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/activaci[oó]n/i);
+    expect(msg).not.toMatch(/fuera del rango/i);
+  });
+
+  it('[JD-002] activation lookup empty → registers, NEUTRAL status, NO false warning', async () => {
+    store[PHONE] = {
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-empty', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    };
+
+    let locationCheckStatus: string | undefined;
+    queryMock.mockImplementation((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      // Lookup returns 0 rows.
+      if (sql.includes('SELECT a.id, a.location, a.status')) return Promise.resolve([]);
+      if (sql.includes('INSERT INTO activation_events')) {
+        locationCheckStatus = params?.[2];
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-empty');
+    expect(result).toBe(true);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    expect(locationCheckStatus).not.toBe('MISMATCH');
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).not.toMatch(/fuera del rango/i);
+  });
+
+  it('[JD-002/JB-003] a legit coordinate of exactly 0 is compared, not skipped as falsy', async () => {
+    store[PHONE] = {
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-zero', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    };
+
+    let locationCheckStatus: string | undefined;
+    queryMock.mockImplementation((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      // Activation at the equator/prime meridian: lat=0, lng=0. Pin is the same point.
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        return Promise.resolve([{ id: 'act-1', location: JSON.stringify({ lat: 0, lng: 0, radiusMeters: 200 }), status: 'in_progress' }]);
+      }
+      if (sql.includes('INSERT INTO activation_events')) {
+        locationCheckStatus = params?.[2];
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+
+    // Pin exactly at (0,0) → distance 0 → VERIFIED (proves 0 coords were NOT skipped).
+    const result = await anySvc.handleLocationForMaterial(PHONE, 0, 0, 'evt-loc-zero');
+    expect(result).toBe(true);
+    expect(locationCheckStatus).toBe('VERIFIED');
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).not.toMatch(/fuera del rango/i);
+  });
+
+  // ── A4 · JD-003 · idempotencia: doble register no duplica inventario ────────
+
+  it('[JD-003] a double location-pin for the same eventoCrudoId registers movements only ONCE', async () => {
+    const seed = (): WhatsAppSession => ({
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId: 'evt-dup', storagePath: 'materials/x.jpg', step: 'ubicacion' as any,
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1', destino: 'consumo', activacionId: 'act-1',
+        items: [{ nombre: 'Silla', cantidad: 5 }],
+      },
+    });
+
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
+      if (sql.includes('SELECT a.id, a.location, a.status')) {
+        return Promise.resolve([{ id: 'act-1', location: JSON.stringify({ lat: -33.0, lng: -70.0, radiusMeters: 200 }), status: 'in_progress' }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    // Two concurrent pins (distinct location messageIds), both read the SAME live session
+    // at step='ubicacion' before either deletes it. Both call register() for evt-dup.
+    store[PHONE] = seed();
+    const s1 = store[PHONE];
+    store[PHONE] = seed();
+    const s2 = store[PHONE];
+
+    const [r1, r2] = await Promise.all([
+      anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-a'),
+      anySvc.handleLocationForMaterial(PHONE, -33.0, -70.0, 'evt-loc-b'),
+    ]);
+
+    expect(r1).toBe(true);
+    expect(r2).toBe(true);
+    // Inventory writes happened EXACTLY once despite two register() calls.
+    expect(skus.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+
+    // Direct double-register() also protected (both sessions point at evt-dup).
+    skus.create.mockClear();
+    movimientos.create.mockClear();
+    await anySvc.register(PHONE, s1);
+    await anySvc.register(PHONE, s2);
+    expect(skus.create).not.toHaveBeenCalled();
+    expect(movimientos.create).not.toHaveBeenCalled();
   });
 
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { Plus, Search, X, Pencil } from "lucide-react";
 
@@ -31,6 +31,16 @@ export type FieldDef = {
   optionsLabelKey?: string; // simple label field, e.g. "name"
   optionsLabel?: (row: Record<string, unknown>) => string; // composed label (takes precedence)
   optionsDataKey?: string; // if response wraps the array under a key
+  // Dependent (cascading) select: fetch options from an endpoint that depends on
+  // another field's value. `optionsEndpointFrom` receives the current form plus the
+  // raw fetched rows of every endpoint-backed field (keyed by field.key) and returns
+  // the endpoint to GET — or null to show empty options (and clear/disable the field).
+  // Refetched whenever the resolved endpoint changes. Kept separate from the static
+  // `optionsEndpoint` path so existing fetch-once-on-mount fields are unaffected.
+  optionsEndpointFrom?: (
+    form: Record<string, string>,
+    rows: Record<string, Record<string, unknown>[]>,
+  ) => string | null;
 };
 
 interface CrudTableProps {
@@ -297,6 +307,11 @@ export default function CrudTable({
   const [dynOpts, setDynOpts] = useState<
     Record<string, { value: string; label: string }[]>
   >({});
+  // Raw fetched rows per endpoint-backed field key, used by dependent-select
+  // resolvers (e.g. campaign_id → its project_id) to compute the child endpoint.
+  const [dynRows, setDynRows] = useState<
+    Record<string, Record<string, unknown>[]>
+  >({});
   const [loading, setLoad] = useState(true);
   const [saving, setSave] = useState(false);
   const [search, setSearch] = useState("");
@@ -310,6 +325,11 @@ export default function CrudTable({
   });
   const [editId, setEditId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+
+  // Mirror of `form` so async dependent-fetch callbacks can read the latest child
+  // value without nesting state setters. Kept in sync on every render.
+  const formRef = useRef(form);
+  formRef.current = form;
 
   const showToast = (msg: string, ok: boolean) => {
     setToast({ msg, ok });
@@ -355,8 +375,14 @@ export default function CrudTable({
               ? field.optionsLabel(row)
               : String(row[field.optionsLabelKey ?? "name"] ?? ""),
           }));
-          if (!cancelled)
+          if (!cancelled) {
             setDynOpts((prev) => ({ ...prev, [field.key]: opts }));
+            // Only dependent resolvers consume dynRows; skip this write entirely on
+            // pages without any optionsEndpointFrom field (zero behavior change).
+            if (hasDependentFields) {
+              setDynRows((prev) => ({ ...prev, [field.key]: rows }));
+            }
+          }
         })
         .catch(() => {
           if (!cancelled) setDynOpts((prev) => ({ ...prev, [field.key]: [] }));
@@ -369,9 +395,120 @@ export default function CrudTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // At least one field is a dependent (cascading) select. Computed once from the
+  // stable `fields` prop; gates dependent-only bookkeeping (e.g. storing dynRows)
+  // so existing optionsEndpoint-only pages keep zero behavior change.
+  const hasDependentFields = useMemo(
+    () => fields.some((f) => f.optionsEndpointFrom),
+    [fields],
+  );
+
+  // Dependent (cascading) selects: refetch options whenever the resolved endpoint
+  // changes. We serialize the resolved endpoint per dependent field into a stable
+  // key; the effect only re-runs when that serialization changes, so it will not
+  // loop on unrelated state updates (dynOpts/dynRows writes don't change the key
+  // unless they change a resolved endpoint). When the resolver returns null (e.g.
+  // no parent selected), we clear the options instead of fetching.
+  // Memoized so the resolvers (which read `form` + `dynRows`) aren't re-run on
+  // unrelated renders (e.g. dynOpts/toast/loading updates). Behavior identical.
+  const dependentKey = useMemo(() => {
+    const dependentEndpoints: Record<string, string | null> = {};
+    fields.forEach((field) => {
+      if (field.optionsEndpointFrom) {
+        dependentEndpoints[field.key] = field.optionsEndpointFrom(form, dynRows);
+      }
+    });
+    return JSON.stringify(dependentEndpoints);
+  }, [fields, form, dynRows]);
+
+  // Tracks the last resolved endpoint per dependent field. Used to distinguish an
+  // ACTIVE parent change (endpoint went from one non-empty value to a DIFFERENT
+  // one → prune the stale child) from an initial load / edit-open / same parent
+  // (endpoint appears for the first time → PRESERVE the child even if the fetched
+  // active-only options don't include it, so an activation's location on an
+  // now-inactive PDV is never silently blanked). JD-001.
+  const prevDependentUrl = useRef<Record<string, string | null>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolved: Record<string, string | null> = JSON.parse(dependentKey);
+    Object.entries(resolved).forEach(([fieldKey, url]) => {
+      const field = fields.find((f) => f.key === fieldKey);
+      if (!field) return;
+      // Did the parent actively change? True only when we previously had a
+      // non-empty endpoint and it is now a DIFFERENT non-empty endpoint. First
+      // resolution (prev undefined) and a return to null are NOT active changes.
+      const prevUrl = prevDependentUrl.current[fieldKey];
+      const parentChanged = !!prevUrl && !!url && prevUrl !== url;
+      prevDependentUrl.current[fieldKey] = url;
+      if (!url) {
+        // No endpoint resolvable (e.g. parent unselected) → empty options.
+        setDynOpts((prev) => ({ ...prev, [fieldKey]: [] }));
+        return;
+      }
+      api
+        .get<unknown>(url)
+        .then((res) => {
+          const raw = res as Record<string, unknown>;
+          const arr = field.optionsDataKey
+            ? raw[field.optionsDataKey]
+            : (raw.data ?? res);
+          const rows = Array.isArray(arr)
+            ? (arr as Record<string, unknown>[])
+            : [];
+          const opts = rows.map((row) => ({
+            value: String(row[field.optionsValueKey ?? "id"]),
+            label: field.optionsLabel
+              ? field.optionsLabel(row)
+              : String(row[field.optionsLabelKey ?? "name"] ?? ""),
+          }));
+          if (!cancelled) {
+            const cur = formRef.current[fieldKey];
+            const present = !!cur && opts.some((o) => o.value === cur);
+            if (parentChanged && cur && !present) {
+              // Parent actively changed and the old child value is no longer
+              // offered → prune it (prevents sending a value that belongs to a
+              // different parent). Functional update guards against a race.
+              setDynOpts((prev) => ({ ...prev, [fieldKey]: opts }));
+              setForm((prev) =>
+                prev[fieldKey] === cur ? { ...prev, [fieldKey]: "" } : prev,
+              );
+            } else if (cur && !present) {
+              // Preserve a still-selected value the active-only endpoint no longer
+              // returns (e.g. a since-deactivated PDV on edit-open, same parent) by
+              // injecting a synthetic option so the select still DISPLAYS it — the
+              // value is never blanked. Prefer the row's own <field>_name; else
+              // "(actual)". JD-001: saving without touching the parent never blanks.
+              const nameKey = fieldKey.replace(/_id$/, "_name");
+              const row = items.find((it) => String(it.id) === editId);
+              const label =
+                (row && typeof row[nameKey] === "string"
+                  ? (row[nameKey] as string)
+                  : "") || "(actual)";
+              setDynOpts((prev) => ({
+                ...prev,
+                [fieldKey]: [...opts, { value: cur, label }],
+              }));
+            } else {
+              setDynOpts((prev) => ({ ...prev, [fieldKey]: opts }));
+            }
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setDynOpts((prev) => ({ ...prev, [fieldKey]: [] }));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Re-run only when a resolved dependent endpoint changes. `fields` is a stable
+    // prop for a given page, so it is intentionally excluded from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dependentKey]);
+
   // Resolve fields: dynamic-options fields become selects with fetched options.
   const resolvedFields: FieldDef[] = fields.map((f) =>
-    f.optionsEndpoint
+    f.optionsEndpoint || f.optionsEndpointFrom
       ? { ...f, type: "select", options: dynOpts[f.key] ?? [] }
       : f,
   );
@@ -381,6 +518,10 @@ export default function CrudTable({
     Object.entries(defaultForm).forEach(([k, v]) => {
       f[k] = String(v ?? "");
     });
+    // Reset the dependent-endpoint baseline so the modal's first resolution is
+    // treated as "initial" (never a parent change), preventing a spurious prune
+    // from a prior modal session on the same mounted component. JD-001.
+    prevDependentUrl.current = {};
     setForm(f);
     setEditId(null);
     setModal("create");
@@ -391,6 +532,10 @@ export default function CrudTable({
     fields.forEach((field) => {
       f[field.key] = String(item[field.key] ?? "");
     });
+    // Reset the dependent-endpoint baseline: opening an edit is an "initial" load,
+    // so the preset child value must be PRESERVED even if the active-only options
+    // don't include it (e.g. a since-deactivated PDV). JD-001.
+    prevDependentUrl.current = {};
     setForm(f);
     setEditId(String(item.id));
     setModal("edit");
@@ -407,7 +552,7 @@ export default function CrudTable({
         // Omit empty non-required NON-text fields (selects, numbers, dates, endpoint-backed
         // selects). Backend @IsUUID/@IsDateString/@IsNumber reject "" even under @IsOptional.
         // Free-text keeps "" so clearing a text field on edit still works (JD B-001/A-003).
-        if (isEmpty && !f.required && (f.optionsEndpoint || !TEXT_LIKE.includes(f.type ?? "text"))) {
+        if (isEmpty && !f.required && (f.optionsEndpoint || f.optionsEndpointFrom || !TEXT_LIKE.includes(f.type ?? "text"))) {
           delete payload[f.key];
           return;
         }
