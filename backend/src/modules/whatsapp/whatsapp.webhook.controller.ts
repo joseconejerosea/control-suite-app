@@ -1048,8 +1048,15 @@ export class WhatsAppWebhookController {
   // ── Convocation reply (F4) ────────────────────────────────────────────────
 
   /**
-   * ¿El teléfono tiene una convocatoria sin resolver? Decide si un texto libre
-   * debe rutearse al clasificador F4 (Fase 2) en vez del handler genérico.
+   * ¿El teléfono tiene una convocatoria sin resolver Y VIGENTE? Decide si un texto
+   * libre debe rutearse al clasificador F4 (Fase 2) en vez del handler genérico.
+   *
+   * A1 · Caducidad: el estado pendiente de una convocatoria caduca por el DÍA del
+   * evento. Una convocatoria de hace semanas queda en 'enviada' para siempre; sin
+   * este bound capturaría todo texto entrante (incluso un "Hola" nuevo) y lo metería
+   * en una tarea vieja. Solo se considera vigente si su `dia` es hoy o futuro, con
+   * 1 día de gracia (respuestas tardías / desfase de zona horaria). Pasado ese plazo,
+   * el texto cae al menú principal (empieza de cero), como pide el reporte de terreno.
    */
   private async tieneConvocatoriaAbierta(from: string, clientId: string): Promise<boolean> {
     const digits = normalizePhone(from);
@@ -1060,6 +1067,7 @@ export class WhatsAppWebhookController {
       `SELECT 1 FROM convocatorias c
         WHERE c.client_id=$1
           AND c.estado IN ('enviada','pendiente')
+          AND c.dia >= CURRENT_DATE - INTERVAL '1 day'
           AND c.persona_id IN (
             SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1
           )

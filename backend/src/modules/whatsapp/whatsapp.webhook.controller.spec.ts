@@ -327,6 +327,43 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
   });
 
+  // ── 6b. A1 · Caducidad: una convocatoria vieja no debe capturar un "Hola" nuevo ─
+  describe('handleText · tieneConvocatoriaAbierta caducity (A1)', () => {
+    it('bounds the convocatorias lookup by the event day (dia) so stale ones stop capturing text', async () => {
+      // Saludo nuevo, sin estado de sesión: consulta convocatorias, pero con el bound
+      // temporal que hace caducar el estado pendiente (evento de hace semanas → no captura).
+      //
+      // NOTE (JD-002): this is a SQL-string assertion, not a true date-behavior test.
+      // `queryMock` routes purely by SQL substring and has no `dia` value nor CURRENT_DATE
+      // evaluation, so it cannot prove that a stale row is actually excluded vs a vigente
+      // one included — a broken bound (e.g. `+ INTERVAL '30 day'`) would still match here.
+      // Proving the runtime date behavior of BOTH convocatoria queries
+      // (tieneConvocatoriaAbierta here AND clientsWithOpenConvocatoria in
+      // sender-tenant-resolver.service) requires a real Postgres. This is the same
+      // integration-test gap flagged for the A2 bool_or aggregation tests.
+      // TODO(A1/JD-002 · integration): add a DB-backed spec that inserts a stale
+      // (dia = today - N days) and a vigente convocatoria and asserts capture/no-capture,
+      // covering both queries end-to-end.
+      await ctrl.handleText(FROM, textMsg('Hola'), CLIENT, CANAL, MSG_ID);
+
+      const convCalls = queryMock.mock.calls
+        .map((c: any[]) => c[0] as string)
+        .filter((s: string) => s.includes('FROM convocatorias'));
+      expect(convCalls.length).toBeGreaterThan(0);
+      // Both the caducity bound and the identical 1-day grace window must be present.
+      expect(convCalls[0]).toMatch(/c\.dia\s*>=\s*CURRENT_DATE/i);
+      expect(convCalls[0]).toMatch(/INTERVAL\s+'1 day'/i);
+    });
+
+    it('with no vigente convocatoria, a plain "Hola" falls through to the action menu (fresh start)', async () => {
+      hasOpenConvocatoria = false; // el bound por `dia` excluyó la convocatoria vieja
+      await ctrl.handleText(FROM, textMsg('Hola'), CLIENT, CANAL, MSG_ID);
+
+      expect(convocatoriaQueue.add).not.toHaveBeenCalled();
+      expect(sessions.setActionMenu).toHaveBeenCalledWith(FROM, CLIENT);
+    });
+  });
+
   // ── 7. routeByType directly: existing vs fresh, per type ─────────────────────
   describe('routeByType · existing event UPDATE vs fresh persist, per type', () => {
     const mediaArg = { storagePath: STORAGE, mimeType: MIME, caption: 'c' };

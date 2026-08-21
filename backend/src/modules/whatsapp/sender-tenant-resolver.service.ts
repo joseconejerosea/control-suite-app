@@ -96,8 +96,10 @@ export class SenderTenantResolverService {
 
   /**
    * Client ids where the sender has an OPEN convocatoria (F4). A convocatoria is open
-   * when its estado is 'enviada' or 'pendiente' and it belongs to a promoter whose
-   * phone digits match `from`. When exactly one candidate client appears here the
+   * when its estado is 'enviada' or 'pendiente', it is NOT caducated (its event `dia`
+   * is within a 1-day grace window of today — same bound as
+   * `tieneConvocatoriaAbierta`), and it belongs to a promoter whose phone digits match
+   * `from`. When exactly one candidate client appears here the
    * agency is unambiguous (the system itself sent that convocatoria), so the caller can
    * auto-resolve the tenant and route the reply straight to the F4 classifier instead
    * of asking "which agency?".
@@ -117,6 +119,7 @@ export class SenderTenantResolverService {
              FROM convocatorias c
              JOIN promoters p ON p.id = c.persona_id AND p.client_id = c.client_id
             WHERE c.estado IN ('enviada','pendiente')
+              AND c.dia >= CURRENT_DATE - INTERVAL '1 day'
               AND p.phone IS NOT NULL
               AND regexp_replace(p.phone, '\\D', '', 'g') = $1`,
           [digits],
