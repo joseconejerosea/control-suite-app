@@ -79,6 +79,34 @@ export class ClarificationService {
     private readonly projectInboxService: ProjectInboxService,
   ) {}
 
+  // ── Idempotency guard: check if a project clarification is already pending for this evento ──
+
+  /**
+   * Returns true if a project clarification was already triggered for `eventoId`.
+   * Used by classify.processor on BullMQ retries to avoid sending a duplicate prompt.
+   *
+   * Checks the eventos_crudos status and clarification_type in parsed_data.
+   * If the DB lookup errors → returns false (default-false: proceed to ask; the
+   * clarification service upserts idempotently by evento so re-prompting is safe).
+   * Errors are logged but NEVER thrown (JD-010).
+   */
+  async hasPendingProjectClarification(eventoId: string): Promise<boolean> {
+    try {
+      const rows = await this.ds.query(
+        `SELECT status, parsed_data FROM eventos_crudos
+          WHERE id = $1
+            AND status = 'awaiting_clarification'
+            AND (parsed_data->>'clarification_type') = 'project'
+          LIMIT 1`,
+        [eventoId],
+      );
+      return rows.length > 0;
+    } catch (err: any) {
+      this.logger.warn(`[Clarification] hasPendingProjectClarification error evento=${eventoId}: ${err.message}`);
+      return false;
+    }
+  }
+
   // ── Role gate: MANAGER-only may initiate project creation (ADR-4) ──────────
 
   /**

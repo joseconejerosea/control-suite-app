@@ -36,6 +36,7 @@ interface BuildOpts {
   beginProjectCreate?: jest.Mock;
   requestProjectClarification?: jest.Mock;
   requestDataClarification?: jest.Mock;
+  hasPendingProjectClarification?: jest.Mock;
   persistQueueAdd?: jest.Mock;
   sendText?: jest.Mock;
 }
@@ -68,6 +69,8 @@ function buildProcessor(opts: BuildOpts = {}) {
   const getUserLanguageForCreateMock = jest.fn().mockResolvedValue('es');
 
   const requestDataClarification = opts.requestDataClarification ?? jest.fn().mockResolvedValue(undefined);
+  // P2-T05: hasPendingProjectClarification defaults to false (no pending → proceed to ask)
+  const hasPendingProjectClarification = opts.hasPendingProjectClarification ?? jest.fn().mockResolvedValue(false);
 
   const clarificationService = {
     requestProjectClarification,
@@ -75,6 +78,7 @@ function buildProcessor(opts: BuildOpts = {}) {
     beginProjectCreate,
     canCreateProject: canCreateProjectMock,
     getUserLanguageForCreate: getUserLanguageForCreateMock,
+    hasPendingProjectClarification,
   };
 
   const resolveMock = jest.fn().mockResolvedValue(
@@ -108,7 +112,10 @@ function buildProcessor(opts: BuildOpts = {}) {
     proyecto_alternativos: [],
     alertas: [],
   };
-  jest.spyOn(processor as any, 'callClaude').mockResolvedValue(aiResult);
+  // Use direct property assignment instead of jest.spyOn to avoid spy leakage
+  // across test instances (jest.spyOn on prototype methods can bleed across instances
+  // since Jest tracks spies globally).
+  (processor as any).callClaude = jest.fn().mockResolvedValue(aiResult);
 
   return {
     processor,
@@ -116,6 +123,7 @@ function buildProcessor(opts: BuildOpts = {}) {
     beginProjectCreate,
     requestProjectClarification,
     requestDataClarification,
+    hasPendingProjectClarification,
     sendText,
     canCreateProjectMock,
     resolveMock,
@@ -443,5 +451,281 @@ describe('ClassifyProcessor · ADR-12 — resolved_project_id short-circuit', ()
 
     // resolve() must be called (null → today's behavior)
     expect(resolveMock).toHaveBeenCalled();
+  });
+
+  // P2: ADR-12 must also skip project clarification on HIGH-confidence docs
+  it('HIGH-confidence + resolvedProjectId set (ADR-12) → NO project clarification + persist called', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const beginProjectCreate = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+
+    const { processor } = buildProcessor({
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{ ocr_text: 'test', payload: { from: '5491155550000' }, canal: 'whatsapp',
+                    parsed_data: { resolved_project_id: 'P-adr12-highconf' } }];
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }];
+        return [];
+      },
+      aiResult: {
+        tipo: 'factura_recibida', destino: 'gastos', confidence_score: 0.92,
+        datos_extraidos: { monto_total: 100, fecha_emision: '2026-01-01', razon_social_emisor: 'Co' },
+        proyecto_id_sugerido: null, proyecto_alternativos: [], alertas: [],
+      },
+      resolveResult: null,
+      requestProjectClarification,
+      beginProjectCreate,
+      persistQueueAdd,
+    });
+
+    const job = buildJob('ec-adr12-highconf');
+    await (processor as any).classifyEvento(job);
+
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    expect(beginProjectCreate).not.toHaveBeenCalled();
+    expect(persistQueueAdd).toHaveBeenCalled();
+  });
+});
+
+// ─── P2-T05: AlwaysAskWhenProjectUnresolved + JD-008/009/010 ─────────────────
+
+describe('ClassifyProcessor · P2 — ask-project lifted out of low_confidence gate', () => {
+  // Common high-confidence AI result (processingStatus='processed')
+  const highConfAI = {
+    tipo: 'factura_recibida',
+    destino: 'gastos',
+    confidence_score: 0.92, // above F1_CONFIDENCE_AUTO = 0.85 → 'processed'
+    datos_extraidos: { monto_total: 100, fecha_emision: '2026-01-01', razon_social_emisor: 'Co' },
+    proyecto_id_sugerido: null,
+    proyecto_alternativos: [],
+    alertas: [],
+  };
+
+  function buildHighConfRows(fromPhone: string, parsedData: any = null) {
+    return (sql: string) => {
+      if (sql.includes('FROM eventos_crudos')) {
+        return [{ ocr_text: 'factura test', payload: { from: fromPhone }, canal: 'whatsapp', parsed_data: parsedData }];
+      }
+      if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+      if (sql.includes('equivalencias_ocr_cc')) return [];
+      if (sql.includes("status = 'active'")) {
+        return [{ id: 'p1', name: 'Proyecto A' }, { id: 'p2', name: 'Proyecto B' }];
+      }
+      return [];
+    };
+  }
+
+  it('high-confidence (processed) + no project + whatsapp → clarification triggered (sin-asignar hole closed, JD-008)', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+
+    const { processor } = buildProcessor({
+      dbRows: buildHighConfRows('5491155550000'),
+      aiResult: highConfAI,
+      requestProjectClarification,
+      persistQueueAdd,
+    });
+
+    const job = buildJob('ec-high-conf-no-project');
+    await (processor as any).classifyEvento(job);
+
+    // Project clarification must fire even though confidence is HIGH
+    expect(requestProjectClarification).toHaveBeenCalled();
+    // Persist must NOT be called (we're awaiting clarification)
+    expect(persistQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('classification.tipo=no_clasificable → project clarification NEVER triggered (JD-008 isClassifiable guard)', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const beginProjectCreate = jest.fn().mockResolvedValue(undefined);
+
+    const { processor } = buildProcessor({
+      dbRows: buildHighConfRows('5491155550000'),
+      aiResult: {
+        tipo: 'no_clasificable',
+        destino: null,
+        confidence_score: 0.1,
+        datos_extraidos: {},
+        proyecto_id_sugerido: null,
+        proyecto_alternativos: [],
+        alertas: [],
+      },
+      requestProjectClarification,
+      beginProjectCreate,
+    });
+
+    const job = buildJob('ec-no-clasificable');
+    await (processor as any).classifyEvento(job);
+
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    expect(beginProjectCreate).not.toHaveBeenCalled();
+  });
+
+  it('processingStatus=low_confidence + project resolved + missing critical fields → data-clarification only, no project ask', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const requestDataClarification = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+
+    const { processor } = buildProcessor({
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{ ocr_text: 'factura test', payload: { from: '5491155550000' }, canal: 'whatsapp', parsed_data: null }];
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p1', name: 'Proyecto A' }, { id: 'p2', name: 'Proyecto B' }];
+        return [];
+      },
+      aiResult: {
+        tipo: 'factura_recibida',
+        destino: 'gastos',
+        confidence_score: 0.4, // low_confidence
+        datos_extraidos: { monto_total: 0, fecha_emision: 'YYYY-MM-DD', razon_social_emisor: '' }, // missing fields
+        proyecto_id_sugerido: 'p1', // project already resolved by resolver
+        proyecto_alternativos: [],
+        alertas: [],
+      },
+      resolveResult: { projectId: 'p1', confidence: 0.98, method: 'location_checkin', alternatives: [] },
+      requestProjectClarification,
+      requestDataClarification,
+      persistQueueAdd,
+    });
+
+    const job = buildJob('ec-low-conf-proj-resolved');
+    await (processor as any).classifyEvento(job);
+
+    // Project ask must NOT fire (proyecto_id_sugerido is set → ask-project guard's !proyecto_id_sugerido is false)
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    // Data clarification MUST fire (low_confidence + missing fields)
+    expect(requestDataClarification).toHaveBeenCalled();
+    // Persist NOT called (awaiting data clarification)
+    expect(persistQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('canal=email (non-whatsapp) + no project → persists WITHOUT ask (JD-009 out-of-scope)', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const beginProjectCreate = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+
+    const { processor } = buildProcessor({
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{ ocr_text: 'factura test', payload: { from: '5491155550000' }, canal: 'email', parsed_data: null }];
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }];
+        return [];
+      },
+      aiResult: highConfAI,
+      requestProjectClarification,
+      beginProjectCreate,
+      persistQueueAdd,
+    });
+
+    const job = buildJob('ec-email-no-project', 'email');
+    await (processor as any).classifyEvento(job);
+
+    // Non-whatsapp: ask must NOT fire
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    expect(beginProjectCreate).not.toHaveBeenCalled();
+    // Persist IS called (email proceeds without clarification)
+    expect(persistQueueAdd).toHaveBeenCalled();
+  });
+
+  it('phone=null (no back-channel) + no project → persists WITHOUT ask', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const beginProjectCreate = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+
+    const { processor } = buildProcessor({
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{ ocr_text: 'factura test', payload: {}, canal: 'whatsapp', parsed_data: null }]; // no `from` in payload
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }];
+        return [];
+      },
+      aiResult: highConfAI,
+      requestProjectClarification,
+      beginProjectCreate,
+      persistQueueAdd,
+    });
+
+    const job = buildJob('ec-no-phone');
+    await (processor as any).classifyEvento(job);
+
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    expect(beginProjectCreate).not.toHaveBeenCalled();
+    expect(persistQueueAdd).toHaveBeenCalled();
+  });
+
+  it('BullMQ retry: hasPendingProjectClarification=true for eventoId → no duplicate prompt (JD-010)', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const beginProjectCreate = jest.fn().mockResolvedValue(undefined);
+    const persistQueueAdd = jest.fn().mockResolvedValue({});
+    const hasPendingProjectClarification = jest.fn().mockResolvedValue(true); // already asked
+
+    const { processor } = buildProcessor({
+      // Inline dbRows to rule out any closure sharing with buildHighConfRows
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{ ocr_text: 'factura retry', payload: { from: '5491155550000' }, canal: 'whatsapp', parsed_data: null }];
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }];
+        return [];
+      },
+      aiResult: highConfAI,
+      resolveResult: null,
+      requestProjectClarification,
+      beginProjectCreate,
+      persistQueueAdd,
+      hasPendingProjectClarification,
+    });
+
+    const job = buildJob('ec-bullmq-retry');
+    await (processor as any).classifyEvento(job);
+
+    // Idempotency: hasPendingProjectClarification must have been called
+    expect(hasPendingProjectClarification).toHaveBeenCalledWith('ec-bullmq-retry');
+    // Clarification was already sent → do NOT re-send
+    expect(requestProjectClarification).not.toHaveBeenCalled();
+    expect(beginProjectCreate).not.toHaveBeenCalled();
+    // Still does NOT persist (the original clarification is pending)
+    expect(persistQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('hasPendingProjectClarification throws → treated as false → ask fires (JD-010 default-false)', async () => {
+    const requestProjectClarification = jest.fn().mockResolvedValue(undefined);
+    const hasPendingProjectClarification = jest.fn().mockRejectedValue(new Error('DB down'));
+
+    const { processor } = buildProcessor({
+      dbRows: (sql: string) => {
+        if (sql.includes('FROM eventos_crudos')) {
+          return [{ ocr_text: 'factura throws', payload: { from: '5491155550000' }, canal: 'whatsapp', parsed_data: null }];
+        }
+        if (sql.includes('FROM clients')) return [{ nombre: 'Test', config: {} }];
+        if (sql.includes('equivalencias_ocr_cc')) return [];
+        if (sql.includes("status = 'active'")) return [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }];
+        return [];
+      },
+      aiResult: highConfAI,
+      resolveResult: null,
+      requestProjectClarification,
+      hasPendingProjectClarification,
+    });
+
+    const job = buildJob('ec-haspending-throws');
+    await (processor as any).classifyEvento(job);
+
+    // Error → default false → ask fires (requestProjectClarification called with 2 projects)
+    expect(requestProjectClarification).toHaveBeenCalled();
   });
 });

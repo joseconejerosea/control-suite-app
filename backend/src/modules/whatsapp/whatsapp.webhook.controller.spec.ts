@@ -371,10 +371,11 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     beforeEach(() => {
       // Fresh message: no session in flight.
       sessionStore[FROM] = null;
-      // The sender is a registered actor in TWO agencies → normally "which agency?".
+      // P1-T03: candidates now carry rota boolean. Two candidates, both rotating by default
+      // so the rota-skip path does NOT fire in existing convocatoria tests.
       senderResolver.candidatesFor.mockResolvedValue([
-        { clientId: 'c1', clientName: 'Agencia Uno' },
-        { clientId: 'c2', clientName: 'Agencia Dos' },
+        { clientId: 'c1', clientName: 'Agencia Uno', rota: true },
+        { clientId: 'c2', clientName: 'Agencia Dos', rota: true },
       ]);
       // Tenant-selection prompt + persistence used by the ask-agency path.
       selection.buildPrompt = jest.fn(() => '¿Para qué agencia es esto?');
@@ -469,6 +470,88 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(buffered.eventId).toBe('evt-1');
       expect(buffered.storagePath).toBe(STORAGE);
       expect(wa.sendText).toHaveBeenCalledWith(FROM, menu.buildTypeMenu());
+    });
+  });
+
+  // ── 10. resolveInboundTenant · rota-skip path (P1-T03)
+  describe('resolveInboundTenant · rota-aware skip for non-rotating senders', () => {
+    beforeEach(() => {
+      sessionStore[FROM] = null;
+      senderResolver.clientsWithOpenConvocatoria.mockResolvedValue([]);
+      selection.buildPrompt = jest.fn(() => '¿Para qué agencia es esto?');
+      selection.buildCodePrompt = jest.fn(() => 'Escribí tu código de afiliación.');
+      sessions.setTenantSelection = jest.fn().mockResolvedValue(undefined);
+    });
+
+    it('1 candidate + rota=false → auto-proceed, no "¿qué agencia?" prompt, pendingMedia present on return', async () => {
+      senderResolver.candidatesFor.mockResolvedValue([
+        { clientId: 'c1', clientName: 'Agencia Uno', rota: false },
+      ]);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
+
+      expect(resolution).toMatchObject({
+        status: 'proceed',
+        clientId: 'c1',
+        canalId: null,
+      });
+      // msg and pendingMedia are present on the return shape (pendingMedia may be null for text)
+      expect('msg' in resolution).toBe(true);
+      expect('pendingMedia' in resolution).toBe(true);
+      // No agency prompt sent, no tenant selection staged
+      expect(wa.sendText).not.toHaveBeenCalled();
+      expect(sessions.setTenantSelection).not.toHaveBeenCalled();
+    });
+
+    it('1 candidate + rota=true → still asks "¿qué agencia?" (rotating senders always ask)', async () => {
+      senderResolver.candidatesFor.mockResolvedValue([
+        { clientId: 'c1', clientName: 'Agencia Uno', rota: true },
+      ]);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(sessions.setTenantSelection).toHaveBeenCalledTimes(1);
+      expect(sessions.setTenantSelection.mock.calls[0][2]).toBe('awaiting_tenant');
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, '¿Para qué agencia es esto?');
+    });
+
+    it('2 candidates + rota=false → still asks (I-2: must have exactly 1 AND rota=false)', async () => {
+      senderResolver.candidatesFor.mockResolvedValue([
+        { clientId: 'c1', clientName: 'Agencia Uno', rota: false },
+        { clientId: 'c2', clientName: 'Agencia Dos', rota: false },
+      ]);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(sessions.setTenantSelection).toHaveBeenCalledTimes(1);
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, '¿Para qué agencia es esto?');
+    });
+
+    it('convocatoria path still wins regardless of rota (ordering preserved)', async () => {
+      // One candidate non-rotating, but it ALSO has an open convocatoria →
+      // convocatoria path fires FIRST; rota-skip never reached.
+      senderResolver.candidatesFor.mockResolvedValue([
+        { clientId: 'c1', clientName: 'Agencia Uno', rota: false },
+      ]);
+      senderResolver.clientsWithOpenConvocatoria.mockResolvedValue(['c1']);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('sí'));
+
+      expect(resolution).toMatchObject({ status: 'proceed', clientId: 'c1' });
+      // Still no agency prompt
+      expect(wa.sendText).not.toHaveBeenCalled();
+    });
+
+    it('candidatesFor throws → status:stop, no tenant auto-selected (fail-closed, JD-014)', async () => {
+      senderResolver.candidatesFor.mockRejectedValue(new Error('db down'));
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      // Error reply sent to the user
+      expect(wa.sendText).toHaveBeenCalled();
     });
   });
 });
