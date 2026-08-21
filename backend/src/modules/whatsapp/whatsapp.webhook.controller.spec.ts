@@ -327,6 +327,29 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
   });
 
+  // ── 6b. A1 · Caducidad: una convocatoria vieja no debe capturar un "Hola" nuevo ─
+  describe('handleText · tieneConvocatoriaAbierta caducity (A1)', () => {
+    it('bounds the convocatorias lookup by the event day (dia) so stale ones stop capturing text', async () => {
+      // Saludo nuevo, sin estado de sesión: consulta convocatorias, pero con el bound
+      // temporal que hace caducar el estado pendiente (evento de hace semanas → no captura).
+      await ctrl.handleText(FROM, textMsg('Hola'), CLIENT, CANAL, MSG_ID);
+
+      const convCalls = queryMock.mock.calls
+        .map((c: any[]) => c[0] as string)
+        .filter((s: string) => s.includes('FROM convocatorias'));
+      expect(convCalls.length).toBeGreaterThan(0);
+      expect(convCalls[0]).toMatch(/c\.dia\s*>=\s*CURRENT_DATE/i);
+    });
+
+    it('with no vigente convocatoria, a plain "Hola" falls through to the action menu (fresh start)', async () => {
+      hasOpenConvocatoria = false; // el bound por `dia` excluyó la convocatoria vieja
+      await ctrl.handleText(FROM, textMsg('Hola'), CLIENT, CANAL, MSG_ID);
+
+      expect(convocatoriaQueue.add).not.toHaveBeenCalled();
+      expect(sessions.setActionMenu).toHaveBeenCalledWith(FROM, CLIENT);
+    });
+  });
+
   // ── 7. routeByType directly: existing vs fresh, per type ─────────────────────
   describe('routeByType · existing event UPDATE vs fresh persist, per type', () => {
     const mediaArg = { storagePath: STORAGE, mimeType: MIME, caption: 'c' };
