@@ -70,7 +70,7 @@ export interface WhatsAppSession {
   // porque el remitente puede querer operar para una agencia nueva): el mensaje entrante
   // se BUFFEREA acá y al responder se reanuda `pendingMsg` bajo el client_id elegido.
   tenantSelection?: {
-    candidates: { clientId: string; clientName: string }[];  // opciones numeradas cacheadas
+    candidates: { clientId: string; clientName: string; rota: boolean }[];  // opciones numeradas cacheadas; rota=true→rotating
     pendingMsg: any;                                          // mensaje WA crudo a reanudar
     canalId: string | null;
     attempts: number;

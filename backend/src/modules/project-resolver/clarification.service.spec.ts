@@ -897,3 +897,40 @@ describe('ClarificationService · ADR-11 regression guard (SCENARIO-26)', () => 
     expect(result).toBe(true);
   });
 });
+
+// ─── P2-T04 — hasPendingProjectClarification ────────────────────────────────
+
+describe('ClarificationService · hasPendingProjectClarification (P2-T04)', () => {
+  it('returns true when evento has status=awaiting_clarification and clarification_type=project', async () => {
+    const svc = buildService({
+      dsQuery: jest.fn().mockResolvedValue([
+        { status: 'awaiting_clarification', parsed_data: { clarification_type: 'project' } },
+      ]),
+    });
+
+    const result = await svc.hasPendingProjectClarification('ec-pending');
+
+    expect(result).toBe(true);
+  });
+
+  it('returns false when no matching row exists (no pending clarification)', async () => {
+    const svc = buildService({
+      dsQuery: jest.fn().mockResolvedValue([]),
+    });
+
+    const result = await svc.hasPendingProjectClarification('ec-unknown');
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false (not throws) when DB errors (JD-010 default-false)', async () => {
+    const svc = buildService({
+      dsQuery: jest.fn().mockRejectedValue(new Error('DB connection lost')),
+    });
+
+    // Must NOT throw — must return false
+    const result = await svc.hasPendingProjectClarification('ec-error');
+
+    expect(result).toBe(false);
+  });
+});

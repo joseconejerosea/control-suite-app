@@ -321,7 +321,7 @@ export class WhatsAppWebhookController {
     }
 
     // (3) Fresh message → resolve the agencies this sender is registered in.
-    let candidates: { clientId: string; clientName: string }[];
+    let candidates: { clientId: string; clientName: string; rota: boolean }[];
     try {
       candidates = await this.senderResolver.candidatesFor(from);
     } catch (err: any) {
@@ -362,6 +362,20 @@ export class WhatsAppWebhookController {
     // Pre-capture media BEFORE prompting: Meta media ids expire, so if we ask "which
     // agency?" and only download on resume, the id would 404 by the time they answer.
     const pendingMedia = await this.preCaptureMedia(incomingMsg);
+
+    // P1 — Non-rotating sender with exactly one candidate: skip "¿qué agencia?" and
+    // auto-proceed. Strict `=== false` so null/undefined (legacy pre-migration rows)
+    // never skip — they fall through to the ask path (I-1 conservative).
+    // pendingMedia rides along (JD-015: Meta media ids expire; downstream handlers need it).
+    if (candidates.length === 1 && candidates[0].rota === false) {
+      return {
+        status: 'proceed',
+        clientId: candidates[0].clientId,
+        canalId: null,
+        msg: incomingMsg,
+        pendingMedia,
+      };
+    }
 
     if (candidates.length === 0) {
       // Unknown sender: the affiliation code routes them to exactly one agency

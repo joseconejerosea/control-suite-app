@@ -9,6 +9,8 @@ import { runAsSystem } from '../../common/tenant/tenant-context';
 export interface ClientCandidate {
   clientId: string;
   clientName: string;
+  /** Resolved rota flag: true = rotating (still ask "¿qué agencia?"), false = non-rotating (can skip). */
+  rota: boolean;
 }
 
 /**
@@ -39,25 +41,39 @@ export class SenderTenantResolverService {
     try {
       const rows = await runAsSystem(() =>
         this.ds.query(
-          `SELECT DISTINCT c.id AS "clientId", c.nombre AS "clientName"
+          // 3-table UNION with bool_or(x.rota) so that if ANY row for this sender+client
+          // is rotating, the candidate is treated as rotating (conservative I-1 fail-safe).
+          // - promoters: use the stored `rota` column; NULL (pre-migration) → true via COALESCE.
+          // - collaborators: derived from `role_label` (English enum, verified column) + `is_active`.
+          //   All four valid values (observer|supervisor|coordinator|brand_manager) → false.
+          //   Unknown label → true (conservative: keep asking).
+          // - users (staff): constant false (single-tenant by login).
+          `SELECT c.id AS "clientId", c.nombre AS "clientName",
+                  bool_or(x.rota) AS "rota"
              FROM clients c
-            WHERE c.id IN (
-              SELECT client_id FROM promoters
+             JOIN (
+               SELECT client_id, COALESCE(rota, true) AS rota
+                 FROM promoters
                 WHERE status = 'active'
                   AND phone IS NOT NULL
                   AND regexp_replace(phone, '\\D', '', 'g') = $1
-              UNION
-              SELECT client_id FROM collaborators
+               UNION ALL
+               SELECT client_id,
+                 CASE WHEN role_label IN ('observer','supervisor','coordinator','brand_manager')
+                      THEN false ELSE true END AS rota
+                 FROM collaborators
                 WHERE is_active = true
                   AND phone IS NOT NULL
                   AND regexp_replace(phone, '\\D', '', 'g') = $1
-              UNION
-              SELECT client_id FROM users
+               UNION ALL
+               SELECT client_id, false AS rota
+                 FROM users
                 WHERE is_active = true
                   AND role IN ($2, $3, $4)
                   AND phone IS NOT NULL
                   AND regexp_replace(phone, '\\D', '', 'g') = $1
-            )
+             ) x ON x.client_id = c.id
+            GROUP BY c.id, c.nombre
             ORDER BY c.nombre`,
           [digits, UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERVISOR],
         ),
@@ -66,6 +82,7 @@ export class SenderTenantResolverService {
       return (rows as ClientCandidate[]).map((r) => ({
         clientId: r.clientId,
         clientName: r.clientName,
+        rota: r.rota as boolean,
       }));
     } catch (err: any) {
       // A DB error is NOT a genuine 0-candidates result. Returning [] here would route
