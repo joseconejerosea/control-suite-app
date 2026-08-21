@@ -97,6 +97,7 @@ function PromotersContent() {
             email: "",
             phone: prefillPhone,
             rol: "",
+            rol_tipo: "",
             status: "active",
           }}
           columns={[
@@ -104,7 +105,8 @@ function PromotersContent() {
             { key: "last_name", label: "Apellido" },
             { key: "email", label: "Email" },
             { key: "phone", label: "Teléfono" },
-            { key: "rol", label: "Rol" },
+            { key: "rol_tipo", label: "Tipo de rol" },
+            { key: "rol", label: "Rol (legado)" },
             { key: "status", label: "Estado", render: StatusBadge },
           ]}
           fields={[
@@ -133,9 +135,26 @@ function PromotersContent() {
               placeholder: "+56 9 1234 5678",
             },
             {
+              // Tipo de rol estructurado (enum). El servidor deriva `rota`; no
+              // se expone `rota` como campo editable (spec I-6).
+              key: "rol_tipo",
+              label: "Tipo de rol",
+              type: "select",
+              options: [
+                { value: "", label: "— Sin especificar —" },
+                { value: "promotor", label: "Promotor/a" },
+                { value: "anfitrion", label: "Anfitrión/a" },
+                { value: "productor", label: "Productor/a" },
+                { value: "supervisor", label: "Supervisor/a" },
+                { value: "coordinador", label: "Coordinador/a" },
+                { value: "brand_manager", label: "Brand Manager" },
+                { value: "observer", label: "Observer" },
+              ],
+            },
+            {
               key: "rol",
-              label: "Rol",
-              placeholder: "Promotora / Anfitriona / Supervisor",
+              label: "Rol (texto libre, legado)",
+              placeholder: "Ej: Promotora / Anfitriona",
             },
             {
               key: "status",
