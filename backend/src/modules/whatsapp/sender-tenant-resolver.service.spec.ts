@@ -132,6 +132,20 @@ describe('SenderTenantResolverService — clientsWithOpenConvocatoria', () => {
     expect(params[0]).toBe(normalizePhone(FROM));
   });
 
+  it('caducity (A1/JD-001): bounds the convocatorias lookup by the event day (dia) so a stale one cannot auto-resolve the tenant', async () => {
+    // Mirrors `tieneConvocatoriaAbierta` in the webhook controller: a weeks-old
+    // convocatoria in estado enviada/pendiente must NOT auto-resolve the tenant for
+    // a fresh greeting (which would suppress the "¿para qué agencia?" prompt). The
+    // grace window is kept identical (1 day) for consistency across both queries.
+    query.mockResolvedValueOnce([]);
+
+    await service.clientsWithOpenConvocatoria(FROM);
+
+    const [sql] = query.mock.calls[0];
+    expect(sql).toMatch(/\.dia\s*>=\s*CURRENT_DATE/i);
+    expect(sql).toMatch(/INTERVAL\s+'1 day'/i);
+  });
+
   it('rethrows a DB error (a swallowed error would wrongly skip the convocatoria path)', async () => {
     // If this call swallowed the error and returned [], the controller would skip the
     // convocatoria auto-resolve and fall back to "which agency?", pre-empting the F4
