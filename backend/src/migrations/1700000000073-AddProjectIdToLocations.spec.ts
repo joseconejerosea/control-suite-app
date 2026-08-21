@@ -1,9 +1,10 @@
 /// <reference types="jest" />
-// TODO(B5/JD-003 · integration): these specs mock QueryRunner.query and only
-// string-match the emitted SQL. They CANNOT prove real migration/index/backfill
-// behavior (case-variant dedup on the partial unique index, ON CONFLICT DO NOTHING,
-// NULLIF address normalization, FK idempotency on re-run). Proving that needs a
-// pg-backed test (e.g. pg-mem), which is NOT installed in this repo. Do not fake it.
+// NOTE(B5/JD-003): these specs mock QueryRunner.query and only string-match the
+// emitted SQL — they document the migration shape but CANNOT prove real behavior.
+// The real migration behavior (case-variant dedup on the partial unique index via
+// ON CONFLICT DO NOTHING within one multi-row backfill, NULLIF address normalization,
+// FK idempotency) IS proven against a real Postgres cluster in
+// `test/b5-project-locations.e2e-spec.ts` (gated: skips if no DB; `npm run test:e2e`).
 /**
  * Spec para la migración 1700000000073 — AddProjectIdToLocations.
  *

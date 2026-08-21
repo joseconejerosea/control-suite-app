@@ -1,8 +1,10 @@
 /// <reference types="jest" />
-// TODO(B5/JD-003 · integration): these specs mock DataSource.query and only
-// string-match the emitted SQL. They CANNOT prove real ON CONFLICT DO UPDATE
-// per-row semantics or the partial unique index behavior against Postgres.
-// Proving that needs a pg-backed test (e.g. pg-mem), which is NOT installed here.
+// NOTE(B5/JD-003): these specs mock DataSource.query and only string-match the
+// emitted SQL — they document intent/shape but CANNOT prove real ON CONFLICT DO
+// UPDATE per-row semantics or the partial unique index behavior. That real behavior
+// (dedup, trim, deactivate-on-remove, re-activate, empty-list deactivation) IS proven
+// against a real Postgres cluster in `test/b5-project-locations.e2e-spec.ts`
+// (gated: skips if no DB; run with `npm run test:e2e`).
 /**
  * Spec para syncProjectLocations() — helper privado de ProjectsService.
  *
