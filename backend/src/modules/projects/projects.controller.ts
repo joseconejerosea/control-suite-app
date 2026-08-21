@@ -138,6 +138,15 @@ export class ProjectsController {
     return this.service.summary(req.user.client_id, id);
   }
 
+  // ── B5: Project-scoped PDV dropdown ──────────────────────────────────────
+  //   GET /projects/:id/locations → active locations for this project (id, name, address)
+
+  @Get(':id/locations')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  getProjectLocations(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getProjectLocations(req.user.client_id, id);
+  }
+
   // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
   //   GET /projects/:id/report-recipients → lista configurada
   //   PUT /projects/:id/report-recipients → reemplaza la lista
