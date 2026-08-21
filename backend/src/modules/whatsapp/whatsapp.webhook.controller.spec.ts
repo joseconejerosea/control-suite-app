@@ -474,6 +474,100 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
   });
 
+  // ── A4. handleLocation with pending material-location step ────────────────────
+  describe('handleLocation · A4 pending material-location', () => {
+    const locationMsg = (lat: number, lng: number) => ({
+      type: 'location',
+      location: { latitude: lat, longitude: lng, name: '', address: '' },
+    });
+
+    it('routes location to materialIntake.handleLocationForMaterial when it returns true (pending material)', async () => {
+      materialIntake.handleLocationForMaterial = jest.fn().mockResolvedValue(true);
+
+      await ctrl.handleLocation(FROM, locationMsg(-33.0, -70.0), CLIENT, CANAL, MSG_ID);
+
+      expect(materialIntake.handleLocationForMaterial).toHaveBeenCalledTimes(1);
+      const [phone, lat, lng] = materialIntake.handleLocationForMaterial.mock.calls[0];
+      expect(phone).toBe(FROM);
+      expect(lat).toBeCloseTo(-33.0);
+      expect(lng).toBeCloseTo(-70.0);
+      // Standalone check-in must NOT run when material intake handled it.
+      // No sendText about "Ubicacion verificada" or "fuera del rango" from the standalone path.
+      // (materialIntake handles the reply itself.)
+      const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]);
+      expect(texts.every((t: string) => !t.includes('Ubicacion verificada'))).toBe(true);
+    });
+
+    it('falls through to standalone check-in when handleLocationForMaterial returns false (no pending material)', async () => {
+      materialIntake.handleLocationForMaterial = jest.fn().mockResolvedValue(false);
+
+      // Query mock for standalone: an activation with a location.
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('INSERT INTO eventos_crudos')) {
+          return Promise.resolve([{ id: `evt-${nextEventId++}` }]);
+        }
+        // The standalone SQL is multi-line; match by the column list which is on one line.
+        if (sql.includes('SELECT a.id, a.location, a.status')) {
+          return Promise.resolve([
+            { id: 'act-1', location: JSON.stringify({ lat: -33.0, lng: -70.0, radiusMeters: 200 }), status: 'in_progress' },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      await ctrl.handleLocation(FROM, locationMsg(-33.0, -70.0), CLIENT, CANAL, MSG_ID);
+
+      expect(materialIntake.handleLocationForMaterial).toHaveBeenCalledTimes(1);
+      // Standalone path ran: a LOCATION_CHECK insert was attempted.
+      const locationInsert = queryMock.mock.calls.find(
+        (c) => String(c[0]).includes('INSERT INTO activation_events'),
+      );
+      expect(locationInsert).toBeDefined();
+    });
+
+    it('standalone check-in runs and reports "no activacion" when handleLocationForMaterial returns false and no activations found', async () => {
+      materialIntake.handleLocationForMaterial = jest.fn().mockResolvedValue(false);
+
+      // No activations returned → standalone path runs → "No hay activacion activa" message.
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('INSERT INTO eventos_crudos')) return Promise.resolve([{ id: 'evt-1' }]);
+        if (sql.includes('SELECT a.id, a.location, a.status')) return Promise.resolve([]);
+        return Promise.resolve([]);
+      });
+
+      await ctrl.handleLocation(FROM, locationMsg(-33.0, -70.0), CLIENT, CANAL, MSG_ID);
+
+      expect(materialIntake.handleLocationForMaterial).toHaveBeenCalledTimes(1);
+      // "No hay activacion activa" message = standalone path ran with no matches.
+      const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]);
+      expect(texts.some((t: string) => t.includes('No hay activacion activa'))).toBe(true);
+    });
+  });
+
+  // ── A4b. handleText during awaiting_material step='ubicacion' → re-prompt ───
+  describe('handleText · A4 re-prompt for location when step=ubicacion', () => {
+    beforeEach(() => {
+      sessionStore[FROM] = {
+        state: 'awaiting_material',
+        clientId: CLIENT,
+        canalId: CANAL,
+      } as unknown as WhatsAppSession;
+      // materialIntake.handleResponse returns true to indicate "pending material-location, re-prompted"
+      materialIntake.handleResponse = jest.fn().mockResolvedValue(true);
+    });
+
+    it('re-prompts for location when text arrives during step=ubicacion (materialIntake.handleResponse returns true)', async () => {
+      await ctrl.handleText(FROM, textMsg('hola'), CLIENT, CANAL, MSG_ID);
+
+      expect(materialIntake.handleResponse).toHaveBeenCalledWith(FROM, 'hola');
+      // The handler consumed the message — no other handler ran.
+      expect(evidenceIntake.handleResponse).not.toHaveBeenCalled();
+      expect(sessions.setActionMenu).not.toHaveBeenCalled();
+    });
+  });
+
   // ── 8. handleImage re-buffer: a SECOND photo while awaiting_type cleans up the first
   describe('handleImage · re-buffer cleanup of a superseded photo', () => {
     beforeEach(() => {

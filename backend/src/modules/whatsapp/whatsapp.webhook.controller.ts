@@ -815,6 +815,12 @@ export class WhatsAppWebhookController {
         payload: { lat, lng, name, address },
       });
 
+      // A4 · Si hay un intake de material esperando ubicación (step='ubicacion'), el pin
+      // completa ese registro en vez de correr el check-in standalone. handleLocationForMaterial
+      // retorna true si consumió el evento; false → no había material pendiente → check-in normal.
+      const consumedByMaterial = await this.materialIntake.handleLocationForMaterial(from, lat, lng, eventId);
+      if (consumedByMaterial) return;
+
       const activations = await this.ds.query(
         `SELECT a.id, a.location, a.status
          FROM activations a

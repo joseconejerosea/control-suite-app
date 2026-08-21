@@ -47,7 +47,7 @@ export interface WhatsAppSession {
   materialIntake?: {
     eventoCrudoId: string;
     storagePath: string;                 // foto del material → foto_key del SKU y del movimiento
-    step: 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad';
+    step: 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad' | 'ubicacion';
     attempts: number;
     suggestedLabel?: string | null;      // nombre sugerido por la visión (ambigüedad/ayuda)
     nombre?: string;
@@ -331,5 +331,36 @@ export class WhatsAppSessionService implements OnModuleInit {
   /** Libera la reclamación para permitir el reintento de Meta si el procesamiento falló. */
   async releaseMessage(messageId: string): Promise<void> {
     await this.redis.del(`${DEDUP_PREFIX}${messageId}`);
+  }
+
+  // ── Claim atómico del registro de material (A4 / JD-003) ────────────────────
+  //
+  // El registro de material POP crea SKUs + movimientos de inventario, escrituras
+  // IRREVERSIBLES. Dos pins de ubicación concurrentes (messageIds distintos, ambos
+  // pasan el dedup por-messageId) pueden leer step==='ubicacion' y llamar register()
+  // los dos → SKUs/movimientos duplicados. `SET key val NX` es el mismo primitivo
+  // atómico que claimMessage: el primero que reclama el eventoCrudoId del intake gana
+  // y el segundo hace no-op limpio. Keyed por el evento crudo del material (estable
+  // durante toda la conversación), NO por el messageId del pin (que varía).
+
+  /** Reclama el registro de un intake de material de forma atómica. true = recién reclamado; false = ya reclamado. */
+  async claimMaterialRegistration(eventoCrudoId: string): Promise<boolean> {
+    const res = await this.redis.set(
+      `${DEDUP_PREFIX}material:${eventoCrudoId}`,
+      '1',
+      'EX',
+      DEDUP_TTL_SECONDS,
+      'NX',
+    );
+    return res === 'OK';
+  }
+
+  /**
+   * Libera el claim de registro de material. Se llama SOLO cuando el registro falló,
+   * para no bloquear 24h un reintento legítimo del mismo evento. En el camino de éxito
+   * el claim se conserva a propósito (es lo que evita el doble registro).
+   */
+  async releaseMaterialRegistration(eventoCrudoId: string): Promise<void> {
+    await this.redis.del(`${DEDUP_PREFIX}material:${eventoCrudoId}`);
   }
 }
