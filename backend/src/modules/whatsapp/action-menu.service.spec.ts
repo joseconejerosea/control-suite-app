@@ -91,3 +91,54 @@ describe('WhatsAppActionMenuService', () => {
     });
   });
 });
+
+describe('WhatsAppActionMenuService · isGreeting', () => {
+  const service = new WhatsAppActionMenuService();
+
+  const positives = [
+    'hola',
+    'Hola',
+    'HOLA',
+    'holaa',
+    'buenas',
+    'buenos dias',
+    'buenos días',
+    'buenas tardes',
+    'buenas noches',
+    'hey',
+    'hi',
+    'hello',
+    'menu',
+    'menú',
+    'inicio',
+    'empezar',
+    'reiniciar',
+    'volver',
+    // trailing punctuation and surrounding whitespace are tolerated
+    'Hola!',
+    'buenas.',
+    '  hola  ',
+  ];
+
+  it.each(positives)('returns true for a plain greeting/restart word: %p', (text) => {
+    expect(service.isGreeting(text)).toBe(true);
+  });
+
+  const negatives = [
+    '1',
+    '3',
+    '45000',
+    '',
+    'hola quiero cargar una factura',
+    'buenas ondas srl',
+  ];
+
+  it.each(negatives)('returns false for a non-greeting message: %p', (text) => {
+    expect(service.isGreeting(text)).toBe(false);
+  });
+
+  it('guards against null/undefined input', () => {
+    expect(service.isGreeting(null as unknown as string)).toBe(false);
+    expect(service.isGreeting(undefined as unknown as string)).toBe(false);
+  });
+});

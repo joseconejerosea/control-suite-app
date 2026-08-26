@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../common/tenant/tenant-context';
 import { WhatsAppSessionService, WhatsAppSession } from '../whatsapp/whatsapp-session.service';
+import { WhatsAppActionMenuService } from '../whatsapp/action-menu.service';
 
 // Non-null clarification sub-object shape, derived from the session union so that
 // field mismatches (e.g. reading a field that does not exist on the union) are
@@ -77,6 +78,7 @@ export class ClarificationService {
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
     private readonly projectInboxService: ProjectInboxService,
+    private readonly actionMenu: WhatsAppActionMenuService,
   ) {}
 
   // ── Idempotency guard: check if a project clarification is already pending for this evento ──
@@ -350,6 +352,21 @@ export class ClarificationService {
     }
 
     const { clarification } = session;
+
+    // A1 · A fresh greeting mid-clarification is a restart intent, not an answer. Reset to
+    // the action menu WITHOUT counting an attempt or escalating (José 16-ago report: the bot
+    // was escalating a greeting to a human operator unnecessarily). The evento_crudo is left
+    // as-is (still awaiting_clarification, recoverable from the panel) — no worse than today.
+    // For an in-progress `data` clarification, any already-`collected` field answers are
+    // intentionally discarded here (clarification set to null): the sender restarts clean.
+    if (this.actionMenu.isGreeting(text)) {
+      session.clarification = null;
+      session.state = 'awaiting_action';
+      await this.sessions.set(phoneNumber, session);
+      await this.wa.sendText(phoneNumber, this.actionMenu.buildMenu());
+      this.logger.log(`[Clarification] A1 greeting reset for ${phoneNumber} — cleared pending ${clarification.type}, showed action menu`);
+      return true;
+    }
 
     if (clarification.type === 'project') {
       return this.handleProjectResponse(phoneNumber, text, session, messageId, canalId);

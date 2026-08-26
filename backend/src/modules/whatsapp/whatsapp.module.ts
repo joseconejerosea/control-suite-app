@@ -31,6 +31,6 @@ const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
   ],
   controllers: [WhatsAppWebhookController],
   providers:   [WhatsAppService, WhatsAppSessionService, WhatsAppMediaService, WhatsappOutputService, OperatorNotifierService, PromptShieldService, SenderTenantResolverService, WhatsAppTenantSelectionService, WhatsAppActionMenuService],
-  exports:     [WhatsAppService, WhatsAppSessionService, WhatsappOutputService, OperatorNotifierService],
+  exports:     [WhatsAppService, WhatsAppSessionService, WhatsappOutputService, OperatorNotifierService, WhatsAppActionMenuService],
 })
 export class WhatsAppModule {}

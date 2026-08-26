@@ -21,6 +21,22 @@ export const ACTION_MENU_CLOSING_INVITE =
  */
 @Injectable()
 export class WhatsAppActionMenuService {
+  /**
+   * A whole message that is JUST a greeting or restart word. Anchored (^…$) so a
+   * multi-word supplier/project name that merely STARTS with "hola"/"buenas"
+   * (e.g. "hola quiero cargar una factura", "buenas ondas srl") does NOT match —
+   * only a bare salutation is a restart intent. Case-insensitive; trailing
+   * punctuation ("!", ".") and surrounding whitespace are tolerated.
+   */
+  private static readonly GREETING_RE =
+    /^\s*(hola+|buenas|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|hey|hi|hello|men[uú]|inicio|empezar|reiniciar|volver)\s*[!.]*\s*$/i;
+
+  /** True when the whole trimmed message is only a greeting / restart word. */
+  isGreeting(text: string): boolean {
+    if (text == null) return false;
+    return WhatsAppActionMenuService.GREETING_RE.test(text);
+  }
+
   private readonly options: { n: number; kind: ActionKind; label: string }[] = [
     { n: 1, kind: 'factura', label: 'Cargar factura o boleta' },
     { n: 2, kind: 'material', label: 'Registrar material POP' },

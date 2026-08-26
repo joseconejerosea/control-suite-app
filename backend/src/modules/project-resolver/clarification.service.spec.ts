@@ -10,6 +10,10 @@
  */
 import { DataSource } from 'typeorm';
 import { ClarificationService } from './clarification.service';
+import { WhatsAppActionMenuService } from '../whatsapp/action-menu.service';
+
+// Mirrors the (module-private) MAX_ATTEMPTS in clarification.service.ts.
+const MAX_ATTEMPTS = 2;
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +75,8 @@ function buildService(opts: {
     wa as any,
     sessions as any,
     projectInboxService as any,
+    // A1 · real, dependency-free instance — cleaner than a mock for a pure helper.
+    new WhatsAppActionMenuService(),
   );
   return svc;
 }
@@ -508,6 +514,7 @@ describe('ClarificationService · handleProjectCreateResponse (A09)', () => {
       wa as any,
       sessions as any,
       { createDraftFromWhatsApp: createDraftMock } as any,
+      new WhatsAppActionMenuService(),
     );
 
     await (svc as any).handleProjectCreateResponse(
@@ -541,6 +548,7 @@ describe('ClarificationService · handleProjectCreateResponse (A09)', () => {
       wa as any,
       sessions as any,
       { createDraftFromWhatsApp: createDraftMock } as any,
+      new WhatsAppActionMenuService(),
     );
 
     await expect(
@@ -756,7 +764,11 @@ describe('ClarificationService · handleClarificationResponse — project_create
     const waSpy = jest.fn().mockResolvedValue(true);
     const svc = buildService({ sessions, wa: { sendText: waSpy } });
 
-    const nonMatchingReplies = ['hola', 'ok', '123', 'si', 'no', 'gracias', 'nuevo proyecto extra'];
+    // NB: 'hola' was moved out of this list — a bare greeting is now a recognized restart
+    // intent (A1), handled by handleClarificationResponse's greeting guard (returns true,
+    // resets to the action menu). It is covered by the 'A1 greeting reset' block instead.
+    // The remaining replies are genuine non-matches: still return false, offer untouched.
+    const nonMatchingReplies = ['ok', '123', 'si', 'no', 'gracias', 'nuevo proyecto extra'];
     for (const reply of nonMatchingReplies) {
       const result = await svc.handleClarificationResponse('5491155550000', reply, 'msg-nomatch', null);
       // MUST return false — message proceeds to standard handleText, no session consumed
@@ -932,5 +944,310 @@ describe('ClarificationService · hasPendingProjectClarification (P2-T04)', () =
     const result = await svc.hasPendingProjectClarification('ec-error');
 
     expect(result).toBe(false);
+  });
+});
+
+// ─── A1 — greeting mid-clarification resets to the action menu ────────────────
+//
+// Bug (José 16-ago report): a sender with a pending clarification who writes a fresh
+// "Hola"/"buenas" was being treated as an invalid numbered option, incremented an
+// attempt, and after MAX_ATTEMPTS was escalated to a human operator. A greeting is a
+// restart intent → clear the pending clarification, show the action menu, DO NOT count
+// an attempt and DO NOT escalate.
+
+describe('ClarificationService · A1 greeting reset', () => {
+  function buildProjectClarificationSession(): any {
+    return {
+      state: 'awaiting_clarification',
+      clientId: 'client-1',
+      projects: [],
+      base64: '',
+      mimeType: '',
+      caption: '',
+      canalId: null,
+      updatedAt: new Date().toISOString(),
+      clarification: {
+        eventoCrudoId: 'ec-a1',
+        type: 'project',
+        attempts: 0,
+        options: [
+          { id: 'p1', label: '1. Proyecto A' },
+          { id: 'p2', label: '2. Proyecto B' },
+        ],
+      },
+    };
+  }
+
+  function buildDataClarificationSession(): any {
+    return {
+      state: 'awaiting_clarification',
+      clientId: 'client-1',
+      projects: [],
+      base64: '',
+      mimeType: '',
+      caption: '',
+      canalId: null,
+      updatedAt: new Date().toISOString(),
+      clarification: {
+        eventoCrudoId: 'ec-a1-data',
+        type: 'data',
+        attempts: 0,
+        pendingFields: ['monto_total'],
+        collected: {},
+      },
+    };
+  }
+
+  // project_create sub-state: sender is mid-name-collection (beginProjectCreate shape).
+  function buildProjectCreateSession(): any {
+    return {
+      state: 'awaiting_clarification',
+      clientId: 'client-1',
+      projects: [],
+      base64: '',
+      mimeType: '',
+      caption: '',
+      canalId: null,
+      updatedAt: new Date().toISOString(),
+      clarification: {
+        eventoCrudoId: 'ec-a1-create',
+        type: 'project_create',
+        attempts: 0,
+        pendingEventoIds: ['ec-a1-create'],
+      },
+    };
+  }
+
+  // project_create_offer sub-state: bot offered "reply NUEVO to create" (handleProjectCreateOfferResponse shape).
+  function buildProjectCreateOfferSession(): any {
+    return {
+      state: 'awaiting_clarification',
+      clientId: 'client-1',
+      projects: [],
+      base64: '',
+      mimeType: '',
+      caption: '',
+      canalId: null,
+      updatedAt: new Date().toISOString(),
+      clarification: {
+        eventoCrudoId: 'ec-a1-offer',
+        type: 'project_create_offer',
+        attempts: 0,
+        autoAssignedProjectId: 'proj-solo',
+      },
+    };
+  }
+
+  it('greeting on a project clarification → resets to action menu, returns true', async () => {
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildProjectClarificationSession()),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ sessions, wa: { sendText: waSpy } });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'hola', 'msg-a1', null);
+
+    expect(result).toBe(true);
+
+    // Session must be cleared to awaiting_action with clarification=null (NOT preserved).
+    expect(setMock).toHaveBeenCalledTimes(1);
+    const savedSession = setMock.mock.calls[0][1];
+    expect(savedSession.clarification).toBeNull();
+    expect(savedSession.state).toBe('awaiting_action');
+
+    // Action menu text was sent.
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /¿Qué querés hacer\?/.test(t))).toBe(true);
+
+    // Greeting path must NEVER escalate: sessions.delete not called, no "operador" message.
+    expect(deleteMock).not.toHaveBeenCalled();
+    expect(sentTexts.some((t: string) => /operador/i.test(t))).toBe(false);
+  });
+
+  it('greeting on a data clarification → resets to action menu, returns true', async () => {
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildDataClarificationSession()),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ sessions, wa: { sendText: waSpy } });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'buenas', 'msg-a1-data', null);
+
+    expect(result).toBe(true);
+    const savedSession = setMock.mock.calls[0][1];
+    expect(savedSession.clarification).toBeNull();
+    expect(savedSession.state).toBe('awaiting_action');
+    expect(deleteMock).not.toHaveBeenCalled();
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /¿Qué querés hacer\?/.test(t))).toBe(true);
+    expect(sentTexts.some((t: string) => /operador/i.test(t))).toBe(false);
+  });
+
+  it('REGRESSION: a real invalid project reply still increments and escalates at MAX_ATTEMPTS', async () => {
+    // attempts already at MAX_ATTEMPTS - 1 (=1); an invalid "99" for a 2-option list
+    // must increment to 2 and escalate (sessions.delete called) — the greeting guard
+    // must NOT swallow genuinely invalid answers.
+    const session = buildProjectClarificationSession();
+    session.clarification.attempts = MAX_ATTEMPTS - 1;
+
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(session),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ sessions, wa: { sendText: waSpy } });
+
+    const result = await svc.handleClarificationResponse('5491155550000', '99', 'msg-invalid', null);
+
+    expect(result).toBe(true);
+    // Escalation path deletes the session.
+    expect(deleteMock).toHaveBeenCalled();
+    // Escalation message mentions the operator.
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /operador/i.test(t))).toBe(true);
+  });
+
+  it('REGRESSION: a real invalid data reply still increments and escalates at MAX_ATTEMPTS', async () => {
+    const session = buildDataClarificationSession();
+    session.clarification.attempts = MAX_ATTEMPTS - 1;
+
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(session),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ sessions, wa: { sendText: waSpy } });
+
+    // "xyz" is not a valid monto_total (no digits) → invalid → escalate at MAX_ATTEMPTS.
+    const result = await svc.handleClarificationResponse('5491155550000', 'xyz', 'msg-invalid-data', null);
+
+    expect(result).toBe(true);
+    expect(deleteMock).toHaveBeenCalled();
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /operador/i.test(t))).toBe(true);
+  });
+
+  // ── Gap 1 (R3-001) — greeting reset on the write-heavy sub-flows ────────────
+
+  it('greeting on a project_create clarification → resets, NEVER creates a draft named "hola"', async () => {
+    // Without the guard, handleProjectCreateResponse runs: 'hola'.trim().slice(0,200) = 4 chars
+    // ≥ 3 → treated as a VALID project name → createDraftFromWhatsApp({name:'hola'}). The guard
+    // must intercept first. Explicit spy so the assertion is real (not the buried default mock).
+    const createDraftMock = jest.fn().mockResolvedValue({ id: 'draft-x' });
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildProjectCreateSession()),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({
+      sessions,
+      wa: { sendText: waSpy },
+      projectInboxService: { createDraftFromWhatsApp: createDraftMock },
+    });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'hola', 'msg-a1-create', null);
+
+    expect(result).toBe(true);
+    // CRITICAL: a greeting must never create a draft project named "hola".
+    expect(createDraftMock).not.toHaveBeenCalled();
+    // Reset happened: clarification cleared, state → awaiting_action.
+    expect(setMock).toHaveBeenCalledTimes(1);
+    const savedSession = setMock.mock.calls[0][1];
+    expect(savedSession.clarification).toBeNull();
+    expect(savedSession.state).toBe('awaiting_action');
+    // Menu sent, no escalation.
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /¿Qué querés hacer\?/.test(t))).toBe(true);
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it('greeting on a project_create_offer clarification → resets, does NOT proceed into the create flow', async () => {
+    // The discriminator here is returns-true + menu-sent + set(clarification=null): without the
+    // guard, handleProjectCreateOfferResponse would see 'hola' fail NUEVO_REGEX and return FALSE.
+    // (The no-createDraft / no-project_create-transition checks are kept per task but are
+    // decorative for this sub-flow — a bare greeting never matches NUEVO_REGEX anyway.)
+    const createDraftMock = jest.fn().mockResolvedValue({ id: 'draft-y' });
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(buildProjectCreateOfferSession()),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({
+      sessions,
+      wa: { sendText: waSpy },
+      projectInboxService: { createDraftFromWhatsApp: createDraftMock },
+    });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'hola', 'msg-a1-offer', null);
+
+    // Guard fired (real discriminator): handled as restart, not passed through as a non-match.
+    expect(result).toBe(true);
+    // Reset to the menu with clarification cleared (session cleared, NOT consumed-into-create).
+    expect(setMock).toHaveBeenCalledTimes(1);
+    const savedSession = setMock.mock.calls[0][1];
+    expect(savedSession.clarification).toBeNull();
+    expect(savedSession.state).toBe('awaiting_action');
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /¿Qué querés hacer\?/.test(t))).toBe(true);
+    // Did NOT transition into project_create, and no draft created.
+    const createTransition = setMock.mock.calls.find(
+      (c: any[]) => c[1]?.clarification?.type === 'project_create',
+    );
+    expect(createTransition).toBeUndefined();
+    expect(createDraftMock).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  // ── Gap 2 (R3-002) — guard intercepts BEFORE the attempt/escalation boundary ──
+
+  it('greeting on a project clarification with one failed attempt already → resets, does NOT escalate', async () => {
+    // attempts:1 (MAX_ATTEMPTS=2) means the NEXT invalid reply would escalate. This is the exact
+    // complement of the REGRESSION test above (attempts:1 + invalid → escalate + delete). A
+    // greeting at this boundary must be intercepted by the guard BEFORE the attempt/escalation
+    // check — proving the guard runs at the boundary where the original bug fired. At attempts:0
+    // (the happy-path tests) escalation can't fire even without the guard, so this is the
+    // load-bearing case.
+    const session = buildProjectClarificationSession();
+    session.clarification.attempts = 1;
+
+    const setMock = jest.fn().mockResolvedValue(undefined);
+    const deleteMock = jest.fn().mockResolvedValue(undefined);
+    const sessions = buildSessions({
+      get: jest.fn().mockResolvedValue(session),
+      set: setMock,
+      delete: deleteMock,
+    });
+    const waSpy = jest.fn().mockResolvedValue(true);
+    const svc = buildService({ sessions, wa: { sendText: waSpy } });
+
+    const result = await svc.handleClarificationResponse('5491155550000', 'buenas', 'msg-a1-boundary', null);
+
+    expect(result).toBe(true);
+    // Guard intercepted BEFORE escalation: session not deleted, no operator message.
+    expect(deleteMock).not.toHaveBeenCalled();
+    const sentTexts = waSpy.mock.calls.map((c: any[]) => c[1]);
+    expect(sentTexts.some((t: string) => /operador/i.test(t))).toBe(false);
+    // Menu was sent.
+    expect(sentTexts.some((t: string) => /¿Qué querés hacer\?/.test(t))).toBe(true);
   });
 });
