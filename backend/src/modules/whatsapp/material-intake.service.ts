@@ -289,6 +289,12 @@ export class MaterialIntakeService {
    */
   private async askActivacion(phone: string, session: WhatsAppSession): Promise<boolean> {
     const mi = session.materialIntake!;
+    // Anexo · revalidación al elegir proyecto: la activación destino debe ser DEL proyecto
+    // que el remitente ya eligió, no de cualquiera del cliente (antes listaba todas las
+    // activas del tenant → podías atar consumo a una activación de OTRO proyecto). Mismo
+    // criterio de link que activations.findByProject: project_id directo O vía la campaña.
+    // Guard $2 IS NULL: si por alguna razón el proyecto no está fijado, no filtramos (no
+    // regresión al comportamiento anterior).
     const activaciones = await runWithTenant(this.ds, session.clientId!, () =>
       this.ds.query(
         `SELECT a.id, a.activation_date, l.name AS location_name
@@ -297,8 +303,11 @@ export class MaterialIntakeService {
           WHERE a.client_id=$1
             AND a.status IN ('scheduled','in_progress')
             AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+            AND ($2::uuid IS NULL
+                 OR a.project_id = $2
+                 OR a.campaign_id IN (SELECT id FROM campaigns WHERE project_id = $2 AND client_id = $1))
           ORDER BY a.activation_date DESC LIMIT 10`,
-        [session.clientId],
+        [session.clientId, mi.proyectoId ?? null],
       ),
     ).catch(() => []);
 
