@@ -33,7 +33,7 @@ export default function ConfigPage() {
   const [toast, setToast]   = useState<string | null>(null);
 
   // Cuenta
-  const [cuenta, setCuenta] = useState({ nombre: "", rut: "", plan: "", email_contacto: "" });
+  const [cuenta, setCuenta] = useState({ nombre: "", rut: "", plan: "", email_contacto: "", telefono_manager: "" });
 
   // Operaciones
   const [bodegas, setBodegas]   = useState<any[]>([]);
@@ -66,6 +66,7 @@ export default function ConfigPage() {
             nombre: d.client.nombre ?? "",
             rut:    d.client.rut    ?? "",
             plan:   d.client.plan   ?? "basic",
+            telefono_manager: (d.client.config?.manager_phone as string) ?? "",
           }));
         }
       }).catch(() => {});
@@ -90,7 +91,12 @@ export default function ConfigPage() {
       await fetch(`${API}/clients/${user.client_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ nombre: cuenta.nombre, rut: cuenta.rut }),
+        // config se mergea en backend (no pisa otras claves): solo enviamos manager_phone.
+        body: JSON.stringify({
+          nombre: cuenta.nombre,
+          rut: cuenta.rut,
+          config: { manager_phone: cuenta.telefono_manager },
+        }),
       });
       showToast("Cuenta actualizada ✓");
     } catch { showToast("Error al guardar"); }
@@ -151,6 +157,11 @@ export default function ConfigPage() {
             <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>RUT</label>
             {input(cuenta.rut, v => setCuenta(p => ({ ...p, rut: v })), "76.123.456-7")}
           </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>Teléfono del manager</label>
+          {input(cuenta.telefono_manager, v => setCuenta(p => ({ ...p, telefono_manager: v })), "+56 9 1234 5678", "tel")}
+          <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>Número de contacto del responsable de la cuenta.</div>
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>Plan actual</label>

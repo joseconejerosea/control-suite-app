@@ -10,8 +10,10 @@ export interface WorkspaceContext {
   client: {
     id: string;
     nombre: string;
+    rut: string | null;
     plan: string;
     status: string;
+    config: Record<string, unknown> | null;
   };
   user: {
     id: string;
@@ -56,8 +58,12 @@ export class WorkspaceService {
       client: {
         id: client.id,
         nombre: (client as unknown as { nombre: string }).nombre,
+        // rut + config los consume la pantalla de Configuración (Cuenta): sin devolverlos,
+        // el RUT y el teléfono del manager nunca precargaban. config guarda manager_phone.
+        rut: (client as unknown as { rut: string | null }).rut ?? null,
         plan,
         status: (client as unknown as { status: string }).status,
+        config: (client as unknown as { config: Record<string, unknown> | null }).config ?? null,
       },
       user: {
         id: user.id,

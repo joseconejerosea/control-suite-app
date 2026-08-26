@@ -565,6 +565,66 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
   });
 
+  // ── Anexo · escape de "cancelar" en la selección de agencia / código de afiliación ──
+  describe('resolveInboundTenant · cancelar escapa del código/agencia (Anexo)', () => {
+    const CANCEL_MSG = 'Listo, cancelé eso. Escribime cuando quieras retomar. 👍';
+
+    beforeEach(() => {
+      sessions.clearTenantSelection = jest.fn().mockResolvedValue(undefined);
+      sessions.setTenantSelection = jest.fn().mockResolvedValue(undefined);
+      affiliationCode.resolveClientByCode = jest.fn();
+      selection.parseSelection = jest.fn();
+    });
+
+    it('cancela desde awaiting_affiliation_code sin tratar el texto como código', async () => {
+      sessionStore[FROM] = {
+        state: 'awaiting_affiliation_code',
+        tenantSelection: { candidates: [], pendingMsg: textMsg('foto'), canalId: null, attempts: 0 },
+      } as unknown as WhatsAppSession;
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('cancelar'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(sessions.clearTenantSelection).toHaveBeenCalledWith(FROM);
+      expect(affiliationCode.resolveClientByCode).not.toHaveBeenCalled();
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, CANCEL_MSG);
+    });
+
+    it('cancela desde awaiting_tenant sin parsear la selección numerada', async () => {
+      sessionStore[FROM] = {
+        state: 'awaiting_tenant',
+        tenantSelection: {
+          candidates: [{ clientId: 'c1', clientName: 'Uno' }],
+          pendingMsg: textMsg('foto'),
+          canalId: null,
+          attempts: 0,
+        },
+      } as unknown as WhatsAppSession;
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('salir'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(sessions.clearTenantSelection).toHaveBeenCalledWith(FROM);
+      expect(selection.parseSelection).not.toHaveBeenCalled();
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, CANCEL_MSG);
+    });
+
+    it('un código real (no-cancelar) sigue resolviendo la agencia (regression)', async () => {
+      sessionStore[FROM] = {
+        state: 'awaiting_affiliation_code',
+        tenantSelection: { candidates: [], pendingMsg: textMsg('foto'), canalId: 'canal-1', attempts: 0 },
+      } as unknown as WhatsAppSession;
+      affiliationCode.resolveClientByCode.mockResolvedValue('c9');
+      (affiliation as any).affiliate = jest.fn().mockResolvedValue(undefined);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('ABC123'));
+
+      expect(sessions.clearTenantSelection).toHaveBeenCalledWith(FROM);
+      expect(affiliationCode.resolveClientByCode).toHaveBeenCalledWith('ABC123');
+      expect(resolution).toMatchObject({ status: 'proceed', clientId: 'c9', canalId: 'canal-1' });
+    });
+  });
+
   // ── A4. handleLocation with pending material-location step ────────────────────
   describe('handleLocation · A4 pending material-location', () => {
     const locationMsg = (lat: number, lng: number) => ({

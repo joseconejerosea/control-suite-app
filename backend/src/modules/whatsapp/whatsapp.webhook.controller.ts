@@ -257,6 +257,16 @@ export class WhatsAppWebhookController {
 
     // (1) Awaiting an affiliation code → treat the text as the code.
     if (session?.state === 'awaiting_affiliation_code' && session.tenantSelection) {
+      // Anexo · escape del sub-estado "código de agencia". Sin esto, el ÚNICO modo de
+      // salir era acertar un código válido o fallar 5 veces ("contactá a tu coordinador"):
+      // un remitente que cayó acá por error (eligió "Otra agencia" sin querer, o es un
+      // número desconocido) quedaba atrapado. Un "cancelar"/"salir" limpia la selección
+      // (clearTenantSelection resetea el state a '') y corta limpio.
+      if (this.isCancelIntent(text)) {
+        await this.sessions.clearTenantSelection(from);
+        await this.wa.sendText(from, 'Listo, cancelé eso. Escribime cuando quieras retomar. 👍');
+        return { status: 'stop' };
+      }
       // Non-text (media) or empty reply mid-selection: DON'T discard the intake — the
       // buffered pendingMsg stays intact. Re-prompt with a hint and count the attempt.
       if (!isUsableReply) {
@@ -285,6 +295,13 @@ export class WhatsAppWebhookController {
 
     // (2) Awaiting an agency choice → parse the numbered reply.
     if (session?.state === 'awaiting_tenant' && session.tenantSelection) {
+      // Anexo · mismo escape que en el código de agencia: un "cancelar"/"salir" a mitad
+      // de la elección de agencia limpia la selección y corta, en vez de re-preguntar.
+      if (this.isCancelIntent(text)) {
+        await this.sessions.clearTenantSelection(from);
+        await this.wa.sendText(from, 'Listo, cancelé eso. Escribime cuando quieras retomar. 👍');
+        return { status: 'stop' };
+      }
       // Non-text (media) or empty reply mid-selection: re-prompt, keep the intake.
       if (!isUsableReply) {
         return this.rejectSelectionReply(

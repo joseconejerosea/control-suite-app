@@ -103,7 +103,14 @@ export class ClientsService {
 
   async update(id: string, dto: UpdateClientDto): Promise<Client> {
     const client = await this.findOne(id);
-    Object.assign(client, dto);
+    // config es un jsonb con varias claves (manager_phone, etc.). Un PATCH parcial que
+    // manda `config: { manager_phone }` NO debe borrar el resto de las claves: mergeamos
+    // superficialmente en vez de dejar que Object.assign reemplace el objeto entero.
+    const { config, ...rest } = dto;
+    Object.assign(client, rest);
+    if (config !== undefined) {
+      client.config = { ...(client.config ?? {}), ...config };
+    }
     return this.clientRepo.save(client);
   }
 
