@@ -26,10 +26,17 @@ export default function EquivalenciasPage() {
 
   const save = async () => {
     const payload = { ...form, confianza_minima: parseFloat(form.confianza_minima) };
-    if (editing) await api.patch(`/v1/app/equivalencias/${editing.id}`, payload).catch(console.error);
-    else await api.post("/v1/app/equivalencias", payload).catch(console.error);
-    setModal(false);
-    fetchData();
+    // Anexo · NO tragar el error (antes: .catch(console.error) + cerrar el modal igual →
+    // "guardado silencioso": el form se cerraba como si funcionara aunque el POST fallara).
+    // Ahora solo cerramos/refrescamos en ÉXITO; en error avisamos y dejamos el modal abierto.
+    try {
+      if (editing) await api.patch(`/v1/app/equivalencias/${editing.id}`, payload);
+      else await api.post("/v1/app/equivalencias", payload);
+      setModal(false);
+      fetchData();
+    } catch (e) {
+      alert("No se pudo guardar la equivalencia: " + (e instanceof Error ? e.message : "error inesperado"));
+    }
   };
 
   const remove = async (id: string) => {
