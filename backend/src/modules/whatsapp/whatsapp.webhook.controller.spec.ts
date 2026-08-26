@@ -119,8 +119,8 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       remove: jest.fn().mockResolvedValue(undefined),
     };
 
-    materialIntake = { start: jest.fn().mockResolvedValue(undefined), handleResponse: jest.fn().mockResolvedValue(false) };
-    evidenceIntake = { start: jest.fn().mockResolvedValue(undefined), handleResponse: jest.fn().mockResolvedValue(false) };
+    materialIntake = { start: jest.fn().mockResolvedValue(undefined), handleResponse: jest.fn().mockResolvedValue(false), handleLocationForMaterial: jest.fn().mockResolvedValue(false) };
+    evidenceIntake = { start: jest.fn().mockResolvedValue(undefined), handleResponse: jest.fn().mockResolvedValue(false), handleLocationForEvidence: jest.fn().mockResolvedValue(false) };
     clarification = { handleClarificationResponse: jest.fn().mockResolvedValue(false) };
     projectResolver = { resolve: jest.fn().mockResolvedValue(null) };
 
@@ -543,6 +543,24 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       // "No hay activacion activa" message = standalone path ran with no matches.
       const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]);
       expect(texts.some((t: string) => t.includes('No hay activacion activa'))).toBe(true);
+    });
+
+    it('routes location to evidenceIntake.handleLocationForEvidence when it returns true (pending evidence); standalone does NOT run', async () => {
+      materialIntake.handleLocationForMaterial = jest.fn().mockResolvedValue(false);
+      evidenceIntake.handleLocationForEvidence = jest.fn().mockResolvedValue(true);
+
+      await ctrl.handleLocation(FROM, locationMsg(-33.0, -70.0), CLIENT, CANAL, MSG_ID);
+
+      // Material checked first, then evidence consumed it.
+      expect(materialIntake.handleLocationForMaterial).toHaveBeenCalledTimes(1);
+      expect(evidenceIntake.handleLocationForEvidence).toHaveBeenCalledTimes(1);
+      const [phone, lat, lng] = evidenceIntake.handleLocationForEvidence.mock.calls[0];
+      expect(phone).toBe(FROM);
+      expect(lat).toBeCloseTo(-33.0);
+      expect(lng).toBeCloseTo(-70.0);
+      // Standalone check-in must NOT run when evidence intake handled it.
+      const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]);
+      expect(texts.every((t: string) => !t.includes('Ubicacion verificada'))).toBe(true);
     });
   });
 

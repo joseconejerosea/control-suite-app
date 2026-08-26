@@ -95,11 +95,14 @@ export interface WhatsAppSession {
   evidenceIntake?: {
     eventoCrudoId: string;
     storagePath: string;                            // foto de la evidencia → foto_key del checkin
-    step: 'activacion' | 'observacion';
+    step: 'activacion' | 'observacion' | 'ubicacion';
     attempts: number;
     personaId: string;                              // promotor resuelto (persona_id del checkin)
     activaciones?: { id: string; label: string }[]; // opciones numeradas cacheadas
     activacionId?: string;
+    // A4 · La observación se resuelve ANTES del pin de ubicación, así que se parquea
+    // acá para que register() la use tras recibir la ubicación (paso obligatorio).
+    observacion?: string | null;
   } | null;
 }
 
@@ -368,5 +371,33 @@ export class WhatsAppSessionService implements OnModuleInit {
    */
   async releaseMaterialRegistration(eventoCrudoId: string): Promise<void> {
     await this.redis.del(`${DEDUP_PREFIX}material:${eventoCrudoId}`);
+  }
+
+  // ── Claim atómico del registro de evidencia (A4 / JD-003) ───────────────────
+  //
+  // Mismo riesgo que el material: dos pins de ubicación concurrentes (messageIds
+  // distintos, ambos pasan el dedup por-messageId) pueden leer step==='ubicacion'
+  // y llamar register() los dos → checkins duplicados (registro de presencia doble).
+  // Keyed por el evento crudo del intake de evidencia (estable durante la conversación).
+
+  /** Reclama el registro de un intake de evidencia de forma atómica. true = recién reclamado; false = ya reclamado. */
+  async claimEvidenceRegistration(eventoCrudoId: string): Promise<boolean> {
+    const res = await this.redis.set(
+      `${DEDUP_PREFIX}evidence:${eventoCrudoId}`,
+      '1',
+      'EX',
+      DEDUP_TTL_SECONDS,
+      'NX',
+    );
+    return res === 'OK';
+  }
+
+  /**
+   * Libera el claim de registro de evidencia. Se llama SOLO cuando el registro falló,
+   * para no bloquear 24h un reintento legítimo. En el camino de éxito el claim se
+   * conserva a propósito (es lo que evita el doble registro).
+   */
+  async releaseEvidenceRegistration(eventoCrudoId: string): Promise<void> {
+    await this.redis.del(`${DEDUP_PREFIX}evidence:${eventoCrudoId}`);
   }
 }

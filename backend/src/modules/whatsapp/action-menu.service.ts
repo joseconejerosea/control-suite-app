@@ -37,11 +37,14 @@ export class WhatsAppActionMenuService {
     return WhatsAppActionMenuService.GREETING_RE.test(text);
   }
 
+  // A4 · La ubicación (check-in) YA NO es una opción de menú suelta y evitable: la
+  // presencia se captura como paso OBLIGATORIO dentro de los flujos de registro
+  // (material "se usa hoy" y evidencia F5). Un pin GPS enviado suelto igual se procesa
+  // como check-in standalone en el webhook (handleLocation) — solo dejó de ofrecerse.
   private readonly options: { n: number; kind: ActionKind; label: string }[] = [
     { n: 1, kind: 'factura', label: 'Cargar factura o boleta' },
     { n: 2, kind: 'material', label: 'Registrar material POP' },
     { n: 3, kind: 'evidencia', label: 'Registrar evidencia de actividad (foto)' },
-    { n: 4, kind: 'ubicacion', label: 'Enviar mi ubicación (check-in)' },
   ];
 
   buildMenu(): string {

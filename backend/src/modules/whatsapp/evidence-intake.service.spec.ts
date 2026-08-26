@@ -57,6 +57,9 @@ describe('EvidenceIntakeService', () => {
 
   beforeEach(() => {
     store = {};
+    // JD-003 · claim atómico de registro. Por defecto reclama OK (true). Un test
+    // fuerza false para simular el segundo pin concurrente que pierde la carrera.
+    const claimStore = new Set<string>();
     sessions = {
       get: jest.fn(async (p: string) => store[p] ?? null),
       set: jest.fn(async (p: string, s: WhatsAppSession) => {
@@ -64,6 +67,14 @@ describe('EvidenceIntakeService', () => {
       }),
       delete: jest.fn(async (p: string) => {
         delete store[p];
+      }),
+      claimEvidenceRegistration: jest.fn(async (id: string) => {
+        if (claimStore.has(id)) return false;
+        claimStore.add(id);
+        return true;
+      }),
+      releaseEvidenceRegistration: jest.fn(async (id: string) => {
+        claimStore.delete(id);
       }),
     };
 
@@ -311,7 +322,9 @@ describe('EvidenceIntakeService', () => {
     expect(store[PHONE]?.evidenceIntake?.step).toBe('observacion');
   });
 
-  it('the observacion step inserts a checkin with foto_key + persona_id + observacion and flow F5_EVID', async () => {
+  // A4 · La observación ya NO cierra el registro: parquea la nota y pasa al paso
+  // OBLIGATORIO de ubicación. El checkin se inserta recién con el pin GPS.
+  it('the observacion step parks the observación and moves to the ubicacion step (no checkin yet)', async () => {
     store[PHONE] = {
       state: 'awaiting_evidence',
       projects: [],
@@ -337,35 +350,22 @@ describe('EvidenceIntakeService', () => {
       true,
     );
 
+    // No inserta el checkin todavía: espera la ubicación obligatoria.
     const insert = queryMock.mock.calls.find(
       ([sql]: [string]) =>
         typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
     );
-    expect(insert).toBeDefined();
-    expect(insert[1]).toEqual([
-      CLIENT,
-      'act-1',
-      'prom-1',
-      'evidence/x.jpg',
+    expect(insert).toBeUndefined();
+
+    expect(store[PHONE].evidenceIntake?.step).toBe('ubicacion');
+    expect(store[PHONE].evidenceIntake?.observacion).toBe(
       'Dos anfitrionas en el stand',
-    ]);
-
-    // Bookkeeping: flow='F5_EVID' (7 chars) entra en eventos_crudos.flow VARCHAR(10).
-    const eventUpdate = queryMock.mock.calls.find(
-      ([sql]: [string]) =>
-        typeof sql === 'string' &&
-        sql.includes('UPDATE eventos_crudos') &&
-        sql.includes('flow='),
     );
-    expect(eventUpdate).toBeDefined();
-    expect(eventUpdate[0]).toContain("flow='F5_EVID'");
-    const flowValue = eventUpdate[0].match(/flow='([^']+)'/)![1];
-    expect(flowValue.length).toBeLessThanOrEqual(10);
-
-    expect(store[PHONE]).toBeUndefined();
+    const asked = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(asked.toLowerCase()).toContain('ubicación');
   });
 
-  it('replying "listo" on the observacion step stores a null observacion', async () => {
+  it('replying "listo" on the observacion step parks a null observación and moves to ubicacion', async () => {
     store[PHONE] = {
       state: 'awaiting_evidence',
       projects: [],
@@ -389,19 +389,279 @@ describe('EvidenceIntakeService', () => {
 
     expect(await svc.handleResponse(PHONE, 'listo')).toBe(true);
 
+    expect(store[PHONE].evidenceIntake?.step).toBe('ubicacion');
+    expect(store[PHONE].evidenceIntake?.observacion).toBeNull();
     const insert = queryMock.mock.calls.find(
       ([sql]: [string]) =>
         typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
     );
-    expect(insert).toBeDefined();
-    expect(insert[1]).toEqual([
-      CLIENT,
-      'act-1',
-      'prom-1',
-      'evidence/x.jpg',
-      null,
-    ]);
-    expect(store[PHONE]).toBeUndefined();
+    expect(insert).toBeUndefined();
+  });
+
+  // ─── A4 — mandatory location (check-in) step in F5 ──────────────────────────
+  describe('A4 · ubicacion step — mandatory GPS pin', () => {
+    function seedUbicacionSession(observacion: string | null = 'nota') {
+      store[PHONE] = {
+        state: 'awaiting_evidence',
+        projects: [],
+        base64: '',
+        mimeType: '',
+        caption: '',
+        clientId: CLIENT,
+        canalId: null,
+        updatedAt: '',
+        clarification: null,
+        materialIntake: null,
+        evidenceIntake: {
+          eventoCrudoId: 'evt-loc',
+          storagePath: 'evidence/x.jpg',
+          step: 'ubicacion',
+          attempts: 0,
+          personaId: 'prom-1',
+          activacionId: 'act-1',
+          observacion,
+        },
+      };
+    }
+
+    it('a GPS pin in step=ubicacion inserts the checkin (with verificacion_ia + parked observación) and closes the session', async () => {
+      seedUbicacionSession('Dos anfitrionas');
+
+      // Activación sin coords → NO_GPS: se registra igual (la obligatoriedad es que el pin llegue).
+      expect(
+        await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'evt-locpin'),
+      ).toBe(true);
+
+      const insert = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
+      );
+      expect(insert).toBeDefined();
+      // client, activacion, persona, foto_key, observacion parqueada, verificacion_ia jsonb
+      expect(insert[1][0]).toBe(CLIENT);
+      expect(insert[1][1]).toBe('act-1');
+      expect(insert[1][2]).toBe('prom-1');
+      expect(insert[1][3]).toBe('evidence/x.jpg');
+      expect(insert[1][4]).toBe('Dos anfitrionas');
+      const verif = JSON.parse(insert[1][5]);
+      expect(verif.location_status).toBe('NO_GPS');
+      expect(verif.lat).toBe(-33.45);
+      expect(verif.lng).toBe(-70.66);
+
+      // LOCATION_CHECK escrito en activation_events con source=evidence_intake.
+      const locCheck = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' &&
+          sql.includes('INSERT INTO activation_events') &&
+          sql.includes('LOCATION_CHECK'),
+      );
+      expect(locCheck).toBeDefined();
+      // Params: [clientId, activacionId, locationStatus, lat, lng, metadata($6 → idx 5)]
+      expect(JSON.parse(locCheck[1][5]).source).toBe('evidence_intake');
+
+      expect(store[PHONE]).toBeUndefined();
+    });
+
+    it('VERIFIED when the pin falls inside the activation radius', async () => {
+      seedUbicacionSession();
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('SELECT a.id, a.location'))
+          return Promise.resolve([
+            {
+              id: 'act-1',
+              status: 'in_progress',
+              location: { lat: -33.45, lng: -70.66, radiusMeters: 200 },
+            },
+          ]);
+        if (sql.includes('INSERT INTO checkins'))
+          return Promise.resolve([{ id: 'chk-1' }]);
+        return Promise.resolve([]);
+      });
+
+      // Mismo punto → distancia 0 → VERIFIED.
+      await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'evt-locpin');
+
+      const insert = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
+      );
+      expect(JSON.parse(insert[1][5]).location_status).toBe('VERIFIED');
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).not.toContain('fuera del rango');
+    });
+
+    it('MISMATCH when the pin is outside the radius: still registers, warns in the message', async () => {
+      seedUbicacionSession();
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('SELECT a.id, a.location'))
+          return Promise.resolve([
+            {
+              id: 'act-1',
+              status: 'in_progress',
+              location: { lat: -33.45, lng: -70.66, radiusMeters: 200 },
+            },
+          ]);
+        if (sql.includes('INSERT INTO checkins'))
+          return Promise.resolve([{ id: 'chk-1' }]);
+        return Promise.resolve([]);
+      });
+
+      // Punto lejano → MISMATCH.
+      await svc.handleLocationForEvidence(PHONE, -34.6, -58.38, 'evt-locpin');
+
+      const insert = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
+      );
+      expect(insert).toBeDefined();
+      expect(JSON.parse(insert[1][5]).location_status).toBe('MISMATCH');
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).toContain('fuera del rango');
+    });
+
+    it('VERIFIED pin on a SCHEDULED activation transitions it to en_vivo (in_progress)', async () => {
+      seedUbicacionSession();
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('SELECT a.id, a.location'))
+          return Promise.resolve([
+            {
+              id: 'act-1',
+              status: 'scheduled',
+              location: { lat: -33.45, lng: -70.66, radiusMeters: 200 },
+            },
+          ]);
+        if (sql.includes('INSERT INTO checkins'))
+          return Promise.resolve([{ id: 'chk-1' }]);
+        return Promise.resolve([]);
+      });
+
+      await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'evt-locpin');
+
+      const transition = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' &&
+          sql.includes('UPDATE activations') &&
+          sql.includes("estado_f5 = 'en_vivo'"),
+      );
+      expect(transition).toBeDefined();
+      expect(transition[0]).toContain("status = 'in_progress'");
+    });
+
+    it('does NOT transition when the activation is already in_progress (VERIFIED)', async () => {
+      seedUbicacionSession();
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('SELECT a.id, a.location'))
+          return Promise.resolve([
+            {
+              id: 'act-1',
+              status: 'in_progress',
+              location: { lat: -33.45, lng: -70.66, radiusMeters: 200 },
+            },
+          ]);
+        if (sql.includes('INSERT INTO checkins'))
+          return Promise.resolve([{ id: 'chk-1' }]);
+        return Promise.resolve([]);
+      });
+
+      await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'evt-locpin');
+
+      const transition = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('UPDATE activations'),
+      );
+      expect(transition).toBeUndefined();
+    });
+
+    it('does NOT transition to en_vivo on MISMATCH or NO_GPS (only VERIFIED counts as presence)', async () => {
+      // MISMATCH: scheduled activation with coords, pin far away → out of range.
+      seedUbicacionSession();
+      queryMock.mockImplementation((sql: string) => {
+        if (sql.includes('set_config')) return Promise.resolve([]);
+        if (sql.includes('SELECT a.id, a.location'))
+          return Promise.resolve([
+            {
+              id: 'act-1',
+              status: 'scheduled',
+              location: { lat: -33.45, lng: -70.66, radiusMeters: 200 },
+            },
+          ]);
+        if (sql.includes('INSERT INTO checkins'))
+          return Promise.resolve([{ id: 'chk-1' }]);
+        return Promise.resolve([]);
+      });
+
+      await svc.handleLocationForEvidence(PHONE, -34.6, -58.38, 'evt-locpin');
+
+      const transition = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('UPDATE activations'),
+      );
+      expect(transition).toBeUndefined();
+    });
+
+    it('returns false (does not consume) when there is no evidence intake in this step', async () => {
+      // No session at all.
+      expect(
+        await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'e'),
+      ).toBe(false);
+
+      // Session exists but in a different step → false (standalone check-in handles it).
+      seedUbicacionSession();
+      store[PHONE].evidenceIntake!.step = 'observacion';
+      expect(
+        await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'e'),
+      ).toBe(false);
+    });
+
+    it('[JD-003] a second concurrent pin for the same intake is a clean no-op (no duplicate checkin)', async () => {
+      seedUbicacionSession('nota');
+
+      // Primer pin → reclama y registra el checkin.
+      expect(
+        await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'pin-1'),
+      ).toBe(true);
+      // El primer register borró la sesión; re-seedeamos como si el 2do pin hubiera
+      // leído la MISMA sesión en step='ubicacion' antes de que el 1ro la borrara.
+      seedUbicacionSession('nota');
+      expect(
+        await svc.handleLocationForEvidence(PHONE, -33.45, -70.66, 'pin-2'),
+      ).toBe(true);
+
+      // Sólo UN INSERT de checkin pese a los dos pins (mismo eventoCrudoId reclamado).
+      const inserts = queryMock.mock.calls.filter(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
+      );
+      expect(inserts.length).toBe(1);
+    });
+
+    it('a TEXT reply in step=ubicacion reprompts (does NOT register), then escalates after MAX_ATTEMPTS', async () => {
+      seedUbicacionSession();
+
+      // 1er texto → reprompt, sigue esperando el pin.
+      expect(await svc.handleResponse(PHONE, 'no puedo mandarla')).toBe(true);
+      expect(store[PHONE].evidenceIntake?.step).toBe('ubicacion');
+      let insert = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' && sql.includes('INSERT INTO checkins'),
+      );
+      expect(insert).toBeUndefined();
+
+      // 2do texto → alcanza MAX_ATTEMPTS (2) → escala y limpia la sesión.
+      expect(await svc.handleResponse(PHONE, 'sigo sin poder')).toBe(true);
+      expect(store[PHONE]).toBeUndefined();
+      const escalated = queryMock.mock.calls.find(
+        ([sql]: [string]) =>
+          typeof sql === 'string' &&
+          sql.includes('UPDATE eventos_crudos') &&
+          sql.includes("status='escalated'"),
+      );
+      expect(escalated).toBeDefined();
+    });
   });
 
   it('parses the number on the activacion step, then asks for observacion', async () => {
