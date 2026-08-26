@@ -40,6 +40,14 @@ type PostCommitNotify =
   | { kind: 'duplicate'; phone: string }
   | null;
 
+// A2: invoices.project_id is a uuid column. proyecto_id_sugerido is RAW, UNVALIDATED LLM output —
+// it can be '' (empty), a project NAME, or a malformed id when the resolver found no match. Any of
+// those reaching a ::uuid comparison throws at Postgres (`invalid input syntax for type uuid`) →
+// the whole persist throws → BullMQ exhausts retries → the factura is PERMANENTLY LOST. We drop
+// anything that is not a canonical uuid to null BEFORE the INSERT so $12 is uuid-or-null and the
+// INSERT's tenant-scoped `SELECT id FROM projects WHERE id = $12` subquery never cast-errors.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const TIPO_LABELS: Record<string, string> = {
   factura_recibida: 'Factura recibida',
   factura_emitida: 'Factura emitida',
@@ -246,21 +254,59 @@ export class PersistProcessor extends WorkerHost {
       }
     }
 
+    // A2 — write the resolved project onto the invoice row so it is not left "sin asignar"
+    // in the panel when the resolver DID identify a project. The prior ADR-12 work threaded
+    // this project to the rendición and the WhatsApp confirmation but never to
+    // invoices.project_id (the INSERT below omitted the column). Same precedence as those
+    // two sites: resolved_project_id > proyecto_id_sugerido > payload.project_id > null.
+    let projectId: string | null =
+      resolvedProjectId
+      ?? classification.proyecto_id_sugerido
+      ?? (typeof payload === 'object' ? payload?.project_id : null)
+      ?? null;
+
+    // A2: normalize BEFORE the INSERT. proyecto_id_sugerido is RAW, UNVALIDATED LLM output; drop
+    // anything that is not a canonical uuid to null so $12 is uuid-or-null and the subquery's
+    // `id = $12` comparison never cast-errors. Use `!projectId ||` (not `projectId &&`) so the
+    // empty string '' — which `??` does NOT skip — coerces to null without a spurious warn (an ''
+    // reaching a ::uuid comparison would throw `invalid input syntax for type uuid: ""`).
+    if (!projectId || !UUID_RE.test(projectId)) {
+      if (projectId) {
+        this.logger.warn(`[F1Persist] discarding non-uuid project id "${projectId}" for evento ${evento_crudo_id} — persisting sin asignar`);
+      }
+      projectId = null;
+    }
+
+    // A2: resolve project_id ATOMICALLY inside the INSERT via a tenant-scoped correlated subquery,
+    // and RETURN the resolved value. persistEvento runs inside runWithTenant = ONE Postgres
+    // transaction, so the prior guard-SELECT + FK-retry was BROKEN: a 23503 FK violation ABORTS
+    // the transaction, so the retry INSERT fails with 25P02 ("current transaction is aborted"),
+    // never 23503 → the retry was dead code and the factura was still lost (project memory
+    // `no-catch-swallow-in-tx`). With the subquery the FK can NEVER be violated (the value is
+    // drawn FROM projects) and there is no guard/INSERT race (one atomic statement): if the
+    // project exists for this tenant the subquery yields its id, otherwise NULL.
     const invoiceResult = await this.dataSource.query(
       `INSERT INTO invoices (
         client_id, source, vendor_name, amount, currency,
         invoice_date, category, description, status,
-        raw_payload, ai_extracted
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      RETURNING id`,
+        raw_payload, ai_extracted, project_id
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+        (SELECT id FROM projects WHERE id = $12 AND client_id = $1 LIMIT 1)
+      )
+      RETURNING id, project_id`,
       [
         client_id, channel, vendorName, amount, datos.moneda ?? 'CLP',
         invoiceDate, category, description, 'pending',
-        JSON.stringify(classification), JSON.stringify(classification),
+        JSON.stringify(classification), JSON.stringify(classification), projectId,
       ],
     );
 
     const invoiceId = invoiceResult[0].id;
+    // Authoritative resolved project: the id if it exists in this tenant, else null. Never a
+    // FK violation (the value comes FROM projects), no TOCTOU (single atomic statement). Every
+    // downstream site (rendición, confirmation, offer) uses this so they agree with the row.
+    const assignedProjectId: string | null = invoiceResult[0].project_id ?? null;
 
     await this.dataSource.query(
       `UPDATE eventos_crudos SET factura_id=$1, processing_status_new='processed', status='processed', processed_at=NOW() WHERE id=$2`,
@@ -272,15 +318,13 @@ export class PersistProcessor extends WorkerHost {
     // ─── f2-rendicion: agrupar gasto en rendición semanal ─────────────────
     if (category === 'expense') {
       try {
-        // B06 — ADR-12: resolved_project_id takes precedence over all other sources.
-        const projectId = resolvedProjectId
-          ?? classification.proyecto_id_sugerido
-          ?? (typeof payload === 'object' ? payload?.project_id : null)
-          ?? null;
+        // B06 — ADR-12 / A2: use assignedProjectId (the value the DB actually persisted via
+        // RETURNING project_id) so the rendición and the invoice row agree — including the
+        // "sin asignar" case where the tenant-scoped subquery yielded NULL.
         const personaId = await this.resolvePersonaId(client_id, payload, channel);
         if (personaId) {
           await this.rendicionesService.asignarFacturaARendicion(
-            client_id, invoiceId, personaId, projectId, amount, invoiceDate,
+            client_id, invoiceId, personaId, assignedProjectId, amount, invoiceDate,
           );
         }
       } catch (err: any) {
@@ -325,8 +369,9 @@ export class PersistProcessor extends WorkerHost {
       amount,
       currency: datos.moneda ?? 'CLP',
       vendorName,
-      // B07 — ADR-12: resolved_project_id takes precedence at confirmation site too.
-      proyectoId: resolvedProjectId ?? classification.proyecto_id_sugerido ?? null,
+      // B07 — ADR-12 / A2: use assignedProjectId (the DB-resolved RETURNING value) so the
+      // confirmation message, the rendición, the invoice row, and the offer context all agree.
+      proyectoId: assignedProjectId,
       // [Slice C] Pass resolver_method and invoiceId so sendWhatsAppConfirmation
       // can compute the ADR-10 NUEVO offer for single_active_project events.
       resolverMethod: classification.resolver_method ?? null,
