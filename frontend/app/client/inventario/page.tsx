@@ -123,10 +123,14 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
   const requiereProyecto = TIPOS_CON_PROYECTO.has(form.tipo);
   // El traslado exige ambas bodegas (origen y destino); el backend las requiere.
   const esTraslado = form.tipo === "transfer";
+  // T12 · Bodega obligatoria en los movimientos de depósito (entrada/salida/devolución):
+  // sin ella el movimiento no dice dónde está el stock. Consumo/merma NO la requieren.
+  const requiereBodega = ["entrada", "salida", "devolucion"].includes(form.tipo);
   // Anexo · validar la cantidad PARSEADA (chilena) > 0, no el string crudo: "4.800" es
   // válido (→4800), pero "0"/""/"abc" no deben habilitar Guardar.
   const canSave = !!form.sku_id && parseEntero(form.cantidad) > 0
     && (!requiereProyecto || !!form.proyecto_destino_id)
+    && (!requiereBodega || !!form.bodega_origen_id)
     && (!esTraslado || (!!form.bodega_origen_id && !!form.bodega_destino_id));
 
   const save = async () => {
@@ -182,9 +186,9 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label style={labelStyle}>Bodega origen</label>
+              <label style={labelStyle}>Bodega origen {(requiereBodega || esTraslado) ? "*" : ""}</label>
               <select value={form.bodega_origen_id} onChange={e => setForm(f => ({ ...f, bodega_origen_id: e.target.value }))} style={fieldStyle}>
-                <option value="">Ninguna</option>
+                <option value="">{(requiereBodega || esTraslado) ? "Selecciona una bodega…" : "Ninguna"}</option>
                 {bodegas.map(b => <option key={b.id} value={b.id}>{b.nombre}</option>)}
               </select>
             </div>

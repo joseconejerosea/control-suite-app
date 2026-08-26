@@ -48,6 +48,16 @@ export class MovimientosPopService {
       return this.createAdjustment(clientId, dto);
     }
 
+    // T12 · Bodega obligatoria para los movimientos de depósito (entrada/salida/devolución):
+    // sin ella el movimiento no dice DÓNDE está el stock (el bug reportado: movimientos "sin
+    // lugar"). Consumo/merma NO la requieren (se consumen en la activación). El traslado ya la
+    // exige (ambas) en createTransfer. El flujo de WhatsApp ya provee la bodega en las entradas.
+    if (['entrada', 'salida', 'devolucion'].includes(dto.tipo) && !dto.bodega_origen_id) {
+      throw new BadRequestException(
+        `El movimiento de tipo "${dto.tipo}" requiere una bodega. Elegí la bodega antes de guardar.`,
+      );
+    }
+
     // Verificar stock disponible para salida
     if (dto.tipo === 'salida' && dto.bodega_origen_id) {
       await this.checkStock(clientId, dto.sku_id, dto.bodega_origen_id, dto.cantidad);
