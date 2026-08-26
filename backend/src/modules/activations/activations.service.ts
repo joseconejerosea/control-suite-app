@@ -75,8 +75,29 @@ export class ActivationsService {
     return activation;
   }
 
-  update(clientId: string, id: string, dto: UpdateActivationDto): Promise<Activation> {
-    return this.repo.update(clientId, id, dto as unknown as Record<string, unknown>);
+  async update(clientId: string, id: string, dto: UpdateActivationDto): Promise<Activation> {
+    const patch: Record<string, unknown> = { ...(dto as unknown as Record<string, unknown>) };
+
+    // T2 · Reactivación: el gate del bot de terreno considera una activación "activa"
+    // solo si `status ∈ (scheduled, in_progress)` Y `estado_f5 != 'cerrada'` — dos
+    // ciclos INDEPENDIENTES. Reabrir una activación desde la UI cambia `status` pero
+    // dejaba `estado_f5='cerrada'` intacto, así que el bot la seguía rechazando. Acá,
+    // al reabrir (status → agendada/en curso) una activación que estaba CERRADA en F5,
+    // reseteamos `estado_f5='pendiente'` y limpiamos `cerrada_at` para que vuelva a ser
+    // reconocida. Guardado condicional: si el F5 NO estaba cerrado (pendiente/en_vivo),
+    // una edición normal (cambiar fecha, notas, etc.) NO lo toca.
+    if (dto.status === 'scheduled' || dto.status === 'in_progress') {
+      const current = await this.repo.findOne(clientId, id);
+      if (current.estado_f5 === 'cerrada') {
+        patch.estado_f5 = 'pendiente';
+        patch.cerrada_at = null;
+        this.logger.log(
+          `Activation ${id} reabierta (status=${dto.status}): estado_f5 'cerrada' → 'pendiente'`,
+        );
+      }
+    }
+
+    return this.repo.update(clientId, id, patch);
   }
 
   remove(clientId: string, id: string): Promise<void> {
