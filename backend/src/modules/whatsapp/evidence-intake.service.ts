@@ -208,6 +208,10 @@ export class EvidenceIntakeService {
         return this.handleActivacion(phoneNumber, text, session);
       case 'observacion':
         return this.handleObservacion(phoneNumber, text, session);
+      case 'ubicacion':
+        // A4 · Estamos esperando el pin GPS (mensaje 'location'), no texto. Un texto
+        // acá NO cierra el registro: re-pregunta la ubicación (acotado por attempts).
+        return this.handleUbicacionReprompt(phoneNumber, session);
       default:
         return false;
     }
@@ -248,8 +252,15 @@ export class EvidenceIntakeService {
     const skip = ['listo', 'no', 'omitir', 'skip', '-', ''].includes(
       raw.toLowerCase(),
     );
-    const observacion = skip ? null : raw.slice(0, 500);
-    return this.register(phone, session, observacion);
+    // A4 · La observación se resuelve acá pero NO cierra el registro: la parqueamos
+    // y pasamos al paso OBLIGATORIO de ubicación. El checkin se inserta recién cuando
+    // llega el pin GPS (handleLocationForEvidence).
+    ei.observacion = skip ? null : raw.slice(0, 500);
+    ei.step = 'ubicacion';
+    ei.attempts = 0;
+    await this.sessions.set(phone, session);
+    await this.askUbicacion(phone);
+    return true;
   }
 
   private async askObservacion(phone: string): Promise<void> {
@@ -259,28 +270,89 @@ export class EvidenceIntakeService {
     );
   }
 
+  private async askUbicacion(phone: string): Promise<void> {
+    await this.wa.sendText(
+      phone,
+      'Para cerrar el registro, compartí tu ubicación 📍 (tocá el clip → Ubicación). Es obligatoria para confirmar tu presencia en la activación.',
+    );
+  }
+
+  /**
+   * A4 · En step='ubicacion' esperamos el pin GPS. Si el remitente responde con TEXTO,
+   * re-preguntamos la ubicación sin perder el registro pendiente. Igual que el resto de
+   * los pasos, NO re-pregunta infinitamente: incrementa attempts y, tras MAX_ATTEMPTS,
+   * deriva al operador y limpia la sesión (retryOrEscalate).
+   */
+  private async handleUbicacionReprompt(
+    phone: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    return this.retryOrEscalate(
+      phone,
+      session,
+      'Necesito tu ubicación para confirmar tu presencia. Tocá el clip → Ubicación y enviá el pin GPS 📍.',
+    );
+  }
+
   // ── Registro ──────────────────────────────────────────────────────────────
 
   private async register(
     phone: string,
     session: WhatsAppSession,
-    observacion: string | null,
   ): Promise<boolean> {
     const ei = session.evidenceIntake;
     const clientId = session.clientId;
+    const observacion = ei.observacion ?? null;
+
+    // JD-003 · Guard de idempotencia ATÓMICO. Dos pins de ubicación concurrentes
+    // (messageIds distintos, ambos pasan el dedup por-messageId) pueden leer la MISMA
+    // sesión en step='ubicacion' y llamar register() los dos → checkins duplicados
+    // (doble registro de presencia). claimEvidenceRegistration usa SET NX keyed por el
+    // eventoCrudoId del intake (estable durante la conversación). El primero gana; el
+    // segundo hace no-op limpio.
+    const claimed = await this.sessions.claimEvidenceRegistration(
+      ei.eventoCrudoId,
+    );
+    if (!claimed) {
+      this.logger.log(
+        `[Evidence] register() duplicado ignorado (evento ${ei.eventoCrudoId} ya reclamado)`,
+      );
+      await this.sessions.delete(phone);
+      return true;
+    }
+
+    // A4 · Resultado del check de ubicación (obligatorio). handleLocationForEvidence
+    // lo deja en la sesión antes de llamar acá. NO_GPS por defecto (la activación no
+    // tenía coords o el lookup no comparó): la ubicación se envió igual, sin warning falso.
+    const locationStatus = (ei as any)._locationStatus as
+      | 'VERIFIED'
+      | 'MISMATCH'
+      | 'NO_GPS'
+      | undefined;
+    const distanceM = (ei as any)._locationDistanceM as number | null | undefined;
+    const lat = (ei as any)._locationLat as number | undefined;
+    const lng = (ei as any)._locationLng as number | undefined;
 
     try {
-      // Alta CRÍTICA: el checkin (la prueba de presencia que DEBE persistir).
+      // Alta CRÍTICA: el checkin (la prueba de presencia que DEBE persistir). El check
+      // de ubicación va en verificacion_ia (JSONB) — su propósito es exactamente ese:
+      // dejar registrado si la presencia quedó verificada contra la activación.
       const rows = await runWithTenant(this.ds, clientId, () =>
         this.ds.query(
-          `INSERT INTO checkins (client_id, activacion_id, persona_id, foto_key, observacion)
-           VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+          `INSERT INTO checkins (client_id, activacion_id, persona_id, foto_key, observacion, verificacion_ia)
+           VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING id`,
           [
             clientId,
             ei.activacionId,
             ei.personaId,
             ei.storagePath,
             observacion,
+            JSON.stringify({
+              location_status: locationStatus ?? 'NO_GPS',
+              distance_m: distanceM ?? null,
+              lat: lat ?? null,
+              lng: lng ?? null,
+            }),
           ],
         ),
       );
@@ -310,9 +382,16 @@ export class EvidenceIntakeService {
       );
 
       await this.sessions.delete(phone);
+      // A4 · Sólo avisamos "fuera de rango" ante un MISMATCH real (la activación TENÍA
+      // coords y el pin quedó fuera del radio). Con NO_GPS no hubo comparación → sin
+      // warning falso. La obligatoriedad es que el pin SE ENVÍE, no que caiga en el radio.
+      const mismatchLine =
+        locationStatus === 'MISMATCH'
+          ? `\n⚠️ Ubicación fuera del rango de la activación (${distanceM != null ? `${distanceM}m` : 'distancia no disponible'}).`
+          : '';
       await this.wa.sendText(
         phone,
-        `✅ Evidencia guardada en la activación. ¡Gracias!${ACTION_MENU_CLOSING_INVITE}`,
+        `✅ Evidencia guardada en la activación. ¡Gracias!${mismatchLine}${ACTION_MENU_CLOSING_INVITE}`,
       );
       this.logger.log(
         `[Evidence] Registrado checkin ${checkinId} (evento ${ei.eventoCrudoId})`,
@@ -322,6 +401,10 @@ export class EvidenceIntakeService {
       this.logger.error(
         `[Evidence] Error registrando evidencia (evento ${ei.eventoCrudoId}): ${err.message}`,
       );
+      // Liberar el claim: el registro NO se completó, así que un reintento legítimo del
+      // mismo evento no debe quedar bloqueado por el claim de 24h (JD-003 defensa en
+      // profundidad). En el éxito el claim se conserva para evitar el doble registro.
+      await this.sessions.releaseEvidenceRegistration(ei.eventoCrudoId);
       await this.sessions.delete(phone);
       await this.wa.sendText(
         phone,
@@ -329,6 +412,152 @@ export class EvidenceIntakeService {
       );
       return true;
     }
+  }
+
+  // ── Ubicación (A4 · check-in obligatorio) ──────────────────────────────────
+
+  /**
+   * A4 · Punto de entrada para un mensaje de tipo 'location' desde el webhook.
+   * Si este remitente tiene un intake de evidencia en step='ubicacion', valida la
+   * ubicación GPS contra la activación elegida (haversine + radio), escribe el
+   * LOCATION_CHECK en activation_events, y completa el registro del checkin.
+   *
+   * Returns true → el pin fue consumido por el intake de evidencia (el caller NO debe
+   *   correr el check-in standalone). Returns false → no había evidencia pendiente en
+   *   este paso, el caller debe continuar con la lógica standalone normal.
+   *
+   * MISMATCH policy: la ubicación es OBLIGATORIA (el promotor debe compartir el pin),
+   * pero un MISMATCH NO bloquea el registro. Se completa igual y se avisa en el mensaje.
+   */
+  async handleLocationForEvidence(
+    phone: string,
+    lat: number,
+    lng: number,
+    locationEventoCrudoId: string,
+  ): Promise<boolean> {
+    const session = await this.sessions.get(phone);
+    if (!session?.evidenceIntake || session.state !== STATE) return false;
+    const ei = session.evidenceIntake;
+    if (ei.step !== 'ubicacion') return false;
+
+    const clientId = session.clientId;
+    // NEUTRAL por defecto. Sólo pasa a VERIFIED/MISMATCH si REALMENTE hubo una
+    // comparación (la activación tiene coords y el pin se comparó). Si la activación no
+    // tiene GPS almacenado, o el lookup vino vacío/falló, se queda NO_GPS: se registra
+    // igual, sin el warning falso de "fuera de rango".
+    let locationStatus: 'VERIFIED' | 'MISMATCH' | 'NO_GPS' = 'NO_GPS';
+    let distanceM: number | null = null;
+    let actStatus: string | undefined;
+
+    try {
+      const rows = await runWithTenant(this.ds, clientId, () =>
+        this.ds.query(
+          `SELECT a.id, a.location, a.status
+             FROM activations a
+            WHERE a.id = $1 AND a.client_id = $2`,
+          [ei.activacionId, clientId],
+        ),
+      ).catch(() => []);
+
+      if (rows.length > 0) {
+        const act = rows[0];
+        actStatus = act.status;
+        const loc =
+          typeof act.location === 'string'
+            ? JSON.parse(act.location)
+            : act.location;
+        // Checks numéricos, NO truthiness: una coordenada legítima de exactamente 0
+        // (ecuador / meridiano de Greenwich) es falsy y se saltaría.
+        if (
+          loc != null &&
+          Number.isFinite(Number(loc.lat)) &&
+          Number.isFinite(Number(loc.lng))
+        ) {
+          const distance = this.haversine(
+            lat,
+            lng,
+            Number(loc.lat),
+            Number(loc.lng),
+          );
+          const radius = loc.radiusMeters ?? 200;
+          distanceM = Math.round(distance);
+          locationStatus = distance <= radius ? 'VERIFIED' : 'MISMATCH';
+        }
+      }
+
+      // LOCATION_CHECK ligado a la activación (misma tabla y forma que material/standalone).
+      await runWithTenant(this.ds, clientId, () =>
+        this.ds.query(
+          `INSERT INTO activation_events
+             (client_id, activation_id, event_type, location_status, lat, lng, metadata, created_at)
+           VALUES ($1, $2, 'LOCATION_CHECK', $3, $4, $5, $6::jsonb, NOW())`,
+          [
+            clientId,
+            ei.activacionId,
+            locationStatus,
+            lat,
+            lng,
+            JSON.stringify({
+              distance_m: distanceM,
+              from: phone,
+              source: 'evidence_intake',
+              location_evento_crudo_id: locationEventoCrudoId,
+            }),
+          ],
+        ),
+      ).catch((e: any) =>
+        this.logger.warn(`[Evidence] LOCATION_CHECK insert falló: ${e.message}`),
+      );
+
+      // Decisión de José: la primera evidencia con ubicación VERIFICADA (pin dentro del
+      // radio) marca la activación como "en vivo" — espeja el check-in standalone del
+      // menú viejo (ahora removido). Sólo con VERIFIED: NO_GPS (sin coords para comparar)
+      // y MISMATCH (fuera de rango) NO transicionan. Sólo si estaba 'scheduled', para no
+      // pisar una activación ya en curso o cerrada. Best-effort: un fallo acá no voltea
+      // el checkin ni bloquea el registro.
+      if (locationStatus === 'VERIFIED' && actStatus === 'scheduled') {
+        await runWithTenant(this.ds, clientId, () =>
+          this.ds.query(
+            `UPDATE activations
+                SET status = 'in_progress', estado_f5 = 'en_vivo', updated_at = NOW()
+              WHERE id = $1 AND client_id = $2 AND status = 'scheduled'`,
+            [ei.activacionId, clientId],
+          ),
+        ).catch((e: any) =>
+          this.logger.warn(
+            `[Evidence] transición a en_vivo falló (activación ${ei.activacionId}): ${e.message}`,
+          ),
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(`[Evidence] Validación de ubicación falló: ${e.message}`);
+    }
+
+    // Se guarda el resultado en la sesión para que register() lo persista en
+    // verificacion_ia y arme el mensaje de confirmación. El checkin se crea igual,
+    // sea VERIFIED, MISMATCH o NO_GPS.
+    (ei as any)._locationStatus = locationStatus;
+    (ei as any)._locationDistanceM = distanceM;
+    (ei as any)._locationLat = lat;
+    (ei as any)._locationLng = lng;
+
+    return this.register(phone, session);
+  }
+
+  private haversine(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
+    const R = 6371000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   // ── Escalado / reintento ───────────────────────────────────────────────────

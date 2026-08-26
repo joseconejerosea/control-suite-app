@@ -5,7 +5,9 @@ describe('WhatsAppActionMenuService', () => {
   const service = new WhatsAppActionMenuService();
 
   describe('buildMenu', () => {
-    it('lists the four things a person can send, numbered', () => {
+    // A4 · La ubicación (check-in) YA NO se ofrece como opción de menú: la presencia
+    // se captura como paso obligatorio dentro de los flujos de registro (material/evidencia).
+    it('lists the three registration actions, numbered, WITHOUT a standalone location option', () => {
       const m = service.buildMenu();
       expect(m).toMatch(/¿Qué querés hacer/i);
       expect(m).toContain('1)');
@@ -14,25 +16,26 @@ describe('WhatsAppActionMenuService', () => {
       expect(m).toMatch(/material/i);
       expect(m).toContain('3)');
       expect(m).toMatch(/evidencia/i);
-      expect(m).toContain('4)');
-      expect(m).toMatch(/ubicación|ubicacion/i);
+      // A4: ninguna opción 4 de "enviar mi ubicación (check-in)".
+      expect(m).not.toContain('4)');
+      expect(m).not.toMatch(/ubicación|ubicacion/i);
     });
   });
 
   describe('parse', () => {
-    it('maps 1-4 to the corresponding action', () => {
+    it('maps 1-3 to the corresponding registration action', () => {
       expect(service.parse('1')).toEqual({ kind: 'factura' });
       expect(service.parse('2')).toEqual({ kind: 'material' });
       expect(service.parse('3')).toEqual({ kind: 'evidencia' });
-      expect(service.parse('4')).toEqual({ kind: 'ubicacion' });
     });
 
     it('tolerates surrounding whitespace', () => {
       expect(service.parse('  2  ')).toEqual({ kind: 'material' });
     });
 
-    it('is invalid for out-of-range, non-numeric or empty replies', () => {
+    it('is invalid for out-of-range, non-numeric or empty replies (4 is no longer a location option)', () => {
       expect(service.parse('0')).toEqual({ kind: 'invalid' });
+      expect(service.parse('4')).toEqual({ kind: 'invalid' });
       expect(service.parse('5')).toEqual({ kind: 'invalid' });
       expect(service.parse('factura')).toEqual({ kind: 'invalid' });
       expect(service.parse('')).toEqual({ kind: 'invalid' });

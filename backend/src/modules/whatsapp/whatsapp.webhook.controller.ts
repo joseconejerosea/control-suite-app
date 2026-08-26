@@ -821,6 +821,12 @@ export class WhatsAppWebhookController {
       const consumedByMaterial = await this.materialIntake.handleLocationForMaterial(from, lat, lng, eventId);
       if (consumedByMaterial) return;
 
+      // A4 · Ídem para evidencia (F5): si hay un intake de evidencia esperando la
+      // ubicación (step='ubicacion'), el pin cierra ese check-in en vez de correr el
+      // check-in standalone. Retorna true si consumió el evento.
+      const consumedByEvidence = await this.evidenceIntake.handleLocationForEvidence(from, lat, lng, eventId);
+      if (consumedByEvidence) return;
+
       const activations = await this.ds.query(
         `SELECT a.id, a.location, a.status
          FROM activations a
