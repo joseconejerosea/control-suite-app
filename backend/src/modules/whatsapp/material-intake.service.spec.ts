@@ -322,6 +322,30 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE]).toBeUndefined();
   });
 
+  it('Anexo · askActivacion escopa la lista de activaciones al proyecto elegido (project_id como $2)', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes("status='active'")) return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }]);
+      if (sql.includes('FROM activations') && sql.includes('estado_f5')) {
+        return Promise.resolve([{ id: 'act-1', activation_date: '2026-08-12', location_name: 'Jumbo' }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await svc.start({ eventoCrudoId: 'evt-scope', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    expect(await svc.handleResponse(PHONE, 'Silla')).toBe(true); // nombre → destino (1 proyecto auto)
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);     // se usa hoy → askActivacion
+
+    // La query que arma el picker (SELECT ... l.name AS location_name) debe filtrar por el
+    // proyecto elegido y pasarlo como $2, no listar todas las activaciones del cliente.
+    const askCall = queryMock.mock.calls.find(
+      (c: any[]) => c[0].includes('FROM activations') && c[0].includes('location_name'),
+    );
+    expect(askCall).toBeTruthy();
+    expect(askCall[0]).toContain('a.project_id = $2');
+    expect(askCall[1]).toEqual([CLIENT, 'proj-1']);
+  });
+
   it('retries on an invalid destino answer instead of proceeding', async () => {
     await svc.start({ eventoCrudoId: 'evt-badd', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
     await svc.handleResponse(PHONE, 'Silla ACME'); // → proyecto

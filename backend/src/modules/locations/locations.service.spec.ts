@@ -81,3 +81,58 @@ describe('LocationsService.findByProject()', () => {
     });
   });
 });
+
+describe('LocationsService.create() — dedup a nivel tenant (Anexo)', () => {
+  function makeDs(dedupRows: unknown[], findOneRecord: unknown = null) {
+    const repo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(findOneRecord),
+      create: jest.fn((d: any) => d),
+      save: jest.fn((d: any) => d),
+      remove: jest.fn(),
+    };
+    const ds = {
+      // dataSource.query se usa para el SELECT de dedup
+      query: jest.fn().mockResolvedValue(dedupRows),
+      getRepository: jest.fn().mockReturnValue(repo),
+    } as any;
+    return { ds, repo };
+  }
+
+  it('inserta cuando NO existe una tenant-level con el mismo nombre (y normaliza el nombre)', async () => {
+    const { ds, repo } = makeDs([]); // dedup SELECT → sin match
+    const service = new LocationsService(ds);
+
+    await service.create(CLIENT_ID, { name: '  Jumbo Maipú  ' } as any);
+
+    const [sql, params] = ds.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('project_id IS NULL');
+    expect(params).toContain(CLIENT_ID);
+    expect(repo.create).toHaveBeenCalled();
+    expect(repo.create.mock.calls[0][0]).toMatchObject({ name: 'Jumbo Maipú', client_id: CLIENT_ID });
+  });
+
+  it('actualiza (no duplica) y reactiva cuando YA existe una tenant-level con el mismo nombre', async () => {
+    const existing = { id: 'loc-existing', client_id: CLIENT_ID, name: 'Jumbo', address: 'Av Vieja', status: 'inactive' };
+    const { ds, repo } = makeDs([{ id: 'loc-existing' }], existing);
+    const service = new LocationsService(ds);
+
+    await service.create(CLIENT_ID, { name: 'jumbo', status: 'active' } as any);
+
+    expect(repo.create).not.toHaveBeenCalled();
+    const saved = repo.save.mock.calls[0][0];
+    expect(saved.id).toBe('loc-existing');
+    expect(saved.status).toBe('active');
+  });
+
+  it('no pisa la dirección existente con un blanco', async () => {
+    const existing = { id: 'loc-existing', client_id: CLIENT_ID, name: 'Jumbo', address: 'Av Vieja 123', status: 'active' };
+    const { ds, repo } = makeDs([{ id: 'loc-existing' }], existing);
+    const service = new LocationsService(ds);
+
+    await service.create(CLIENT_ID, { name: 'Jumbo', address: '   ' } as any);
+
+    const saved = repo.save.mock.calls[0][0];
+    expect(saved.address).toBe('Av Vieja 123');
+  });
+});

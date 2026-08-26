@@ -126,14 +126,28 @@ export const StatusBadge = (v: unknown) => {
   return <Badge value={val} map={map} />;
 };
 
-export const DateFmt = (v: unknown) =>
-  v ? (
+// Anexo · "fecha un día antes": una fecha date-only 'YYYY-MM-DD' con new Date(s) se
+// interpreta como UTC-medianoche → toLocaleDateString la corre a hora local (Chile, UTC-3/4)
+// → muestra el día ANTERIOR. Si es date-only, la parseamos como fecha LOCAL (sin drift). Un
+// timestamp con hora ('...T...') es un instante y se muestra tal cual.
+export function toLocalDate(v: unknown): Date {
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(s);
+}
+
+export const DateFmt = (v: unknown) => {
+  if (!v) return <span style={{ color: "var(--muted-foreground)" }}>—</span>;
+  const d = toLocalDate(v);
+  return (
     <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-      {new Date(String(v)).toLocaleDateString()}
+      {isNaN(d.getTime()) ? String(v) : d.toLocaleDateString()}
     </span>
-  ) : (
-    <span style={{ color: "var(--muted-foreground)" }}>—</span>
   );
+};
 
 export const MoneyFmt = (v: unknown) =>
   v ? (
@@ -530,7 +544,17 @@ export default function CrudTable({
   const openEdit = (item: Record<string, unknown>) => {
     const f: Record<string, string> = {};
     fields.forEach((field) => {
-      f[field.key] = String(item[field.key] ?? "");
+      const raw = item[field.key];
+      // Anexo · el modal de editar no precargaba la FECHA: un date/timestamp del backend
+      // ("2026-08-20T00:00:00.000Z" o un Date serializado) no matchea el "YYYY-MM-DD" que
+      // exige <input type="date"> → quedaba vacío (riesgo de borrarla al guardar). Extraemos
+      // el YYYY-MM-DD del inicio del string para los campos de tipo date.
+      if (field.type === "date" && raw != null && raw !== "") {
+        const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(raw));
+        f[field.key] = m ? m[1] : "";
+      } else {
+        f[field.key] = String(raw ?? "");
+      }
     });
     // Reset the dependent-endpoint baseline: opening an edit is an "initial" load,
     // so the preset child value must be PRESERVED even if the active-only options

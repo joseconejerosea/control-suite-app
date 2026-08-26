@@ -26,8 +26,30 @@ export class LocationsService {
     return this.repo.findOne(clientId, id);
   }
 
-  create(clientId: string, dto: CreateLocationDto): Promise<Location> {
-    return this.repo.create(clientId, dto as unknown as Record<string, unknown>);
+  async create(clientId: string, dto: CreateLocationDto): Promise<Location> {
+    // Anexo · dedup a nivel tenant. El índice único de `locations` es PARCIAL
+    // (WHERE project_id IS NOT NULL): las locations creadas desde la UI llevan
+    // project_id NULL, así que NO lo tocan y se podían duplicar sin límite (y quedar
+    // "incompletas" al recrear la misma sin dirección). Chequeamos por lower(name)
+    // dentro del tenant; si ya existe una tenant-level, mergeamos los campos provistos
+    // (sin pisar con blancos) y la reactivamos, en vez de insertar un duplicado.
+    const name = dto.name.trim();
+    const existing = (await this.dataSource.query(
+      `SELECT id FROM locations
+        WHERE client_id = $1 AND project_id IS NULL AND lower(name) = lower($2)
+        LIMIT 1`,
+      [clientId, name],
+    )) as { id: string }[];
+
+    if (existing.length > 0) {
+      const patch: Record<string, unknown> = { name, status: dto.status ?? 'active' };
+      for (const k of ['address', 'city', 'region', 'postal_code'] as const) {
+        const v = dto[k]?.trim();
+        if (v) patch[k] = v;
+      }
+      return this.repo.update(clientId, existing[0].id, patch);
+    }
+    return this.repo.create(clientId, { ...dto, name } as unknown as Record<string, unknown>);
   }
 
   update(clientId: string, id: string, dto: UpdateLocationDto): Promise<Location> {

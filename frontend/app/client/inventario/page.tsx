@@ -19,6 +19,15 @@ function getEstado(cantidad: number): string {
   return "ok";
 }
 
+// Anexo · Cantidades enteras en formato chileno: "4.800" (miles con punto) → 4800.
+// Se limpia a SOLO dígitos antes de parsear porque parseInt("4.800") = 4 (para en el
+// punto) → truncaba la cantidad y disparaba falsas alertas de stock bajo. NaN si no hay
+// dígitos. Mismo criterio que parseCLP del formulario de proyecto (B1).
+function parseEntero(v: string): number {
+  const digits = String(v ?? "").replace(/[^\d]/g, "");
+  return digits ? parseInt(digits, 10) : NaN;
+}
+
 const fieldStyle = { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any };
 const labelStyle = { fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase" as any, display: "block", marginBottom: 4 };
 
@@ -72,7 +81,7 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
     if (!form.nombre.trim()) return;
     setSaving(true); setError("");
     try {
-      await api.post("/v1/app/skus", { nombre: form.nombre, codigo: form.codigo || undefined, min_stock: parseInt(form.min_stock) || 5 });
+      await api.post("/v1/app/skus", { nombre: form.nombre, codigo: form.codigo || undefined, min_stock: parseEntero(form.min_stock) || 5 });
       onDone(); onClose();
     } catch (e: any) { setError(e.message ?? "Error"); } finally { setSaving(false); }
   };
@@ -87,7 +96,7 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
         <div className="p-5 space-y-3">
           <div><label style={labelStyle}>Nombre *</label><input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Afiche A3" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Codigo SKU</label><input value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} placeholder="MAT-001" style={fieldStyle} /></div>
-          <div><label style={labelStyle}>Stock minimo</label><input type="number" value={form.min_stock} onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))} style={fieldStyle} /></div>
+          <div><label style={labelStyle}>Stock minimo</label><input type="text" inputMode="numeric" value={form.min_stock} onChange={e => setForm(f => ({ ...f, min_stock: e.target.value.replace(/[^\d.]/g, "") }))} style={fieldStyle} /></div>
           {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
@@ -117,7 +126,9 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
   // T12 · Bodega obligatoria en los movimientos de depósito (entrada/salida/devolución):
   // sin ella el movimiento no dice dónde está el stock. Consumo/merma NO la requieren.
   const requiereBodega = ["entrada", "salida", "devolucion"].includes(form.tipo);
-  const canSave = !!form.sku_id && !!form.cantidad
+  // Anexo · validar la cantidad PARSEADA (chilena) > 0, no el string crudo: "4.800" es
+  // válido (→4800), pero "0"/""/"abc" no deben habilitar Guardar.
+  const canSave = !!form.sku_id && parseEntero(form.cantidad) > 0
     && (!requiereProyecto || !!form.proyecto_destino_id)
     && (!requiereBodega || !!form.bodega_origen_id)
     && (!esTraslado || (!!form.bodega_origen_id && !!form.bodega_destino_id));
@@ -131,7 +142,7 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
         bodega_origen_id: form.bodega_origen_id || undefined,
         bodega_destino_id: form.bodega_destino_id || undefined,
         tipo: form.tipo,
-        cantidad: parseInt(form.cantidad),
+        cantidad: parseEntero(form.cantidad),
         observacion: form.observacion || undefined,
         proyecto_destino_id: form.proyecto_destino_id || undefined,
       });
@@ -189,7 +200,7 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
               </select>
             </div>
           </div>
-          <div><label style={labelStyle}>Cantidad *</label><input type="number" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} placeholder="0" style={fieldStyle} /></div>
+          <div><label style={labelStyle}>Cantidad *</label><input type="text" inputMode="numeric" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value.replace(/[^\d.]/g, "") }))} placeholder="0" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Observacion</label><input value={form.observacion} onChange={e => setForm(f => ({ ...f, observacion: e.target.value }))} placeholder="Motivo del movimiento..." style={fieldStyle} /></div>
           {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>

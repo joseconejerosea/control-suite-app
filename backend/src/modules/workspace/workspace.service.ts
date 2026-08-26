@@ -10,8 +10,13 @@ export interface WorkspaceContext {
   client: {
     id: string;
     nombre: string;
+    rut: string | null;
     plan: string;
     status: string;
+    // Sólo el subconjunto de config que la UI necesita. NO exponer el blob entero:
+    // este endpoint no tiene gate de rol (lo ve un OPERADOR), y config puede guardar
+    // datos manager-only en el futuro (mismo criterio que affiliation-code gated).
+    config: { manager_phone: string | null };
   };
   user: {
     id: string;
@@ -56,8 +61,17 @@ export class WorkspaceService {
       client: {
         id: client.id,
         nombre: (client as unknown as { nombre: string }).nombre,
+        // rut + manager_phone los consume la pantalla de Configuración (Cuenta): sin
+        // devolverlos, el RUT y el teléfono del manager nunca precargaban. Devolvemos SÓLO
+        // manager_phone del jsonb config, no el blob entero (ver comentario del tipo).
+        rut: (client as unknown as { rut: string | null }).rut ?? null,
         plan,
         status: (client as unknown as { status: string }).status,
+        config: {
+          manager_phone:
+            ((client as unknown as { config: Record<string, unknown> | null }).config
+              ?.manager_phone as string | null) ?? null,
+        },
       },
       user: {
         id: user.id,

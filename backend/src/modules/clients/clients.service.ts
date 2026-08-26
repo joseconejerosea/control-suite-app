@@ -101,9 +101,35 @@ export class ClientsService {
     return client;
   }
 
+  /**
+   * Self-service de un Manager sobre SU PROPIO cliente. Whitelist estricta: sólo los
+   * campos de "Cuenta" editables (nombre, rut, config.manager_phone). NUNCA toca
+   * plan/status/affiliation_code. Vive en workspace (tenant-scoped, gateado a Manager),
+   * porque el ClientsController completo es super_admin-only.
+   */
+  async updateAccount(
+    clientId: string,
+    dto: { nombre?: string; rut?: string; manager_phone?: string },
+  ): Promise<Client> {
+    const client = await this.findOne(clientId);
+    if (dto.nombre !== undefined) client.nombre = dto.nombre;
+    if (dto.rut !== undefined) client.rut = dto.rut;
+    if (dto.manager_phone !== undefined) {
+      client.config = { ...(client.config ?? {}), manager_phone: dto.manager_phone };
+    }
+    return this.clientRepo.save(client);
+  }
+
   async update(id: string, dto: UpdateClientDto): Promise<Client> {
     const client = await this.findOne(id);
-    Object.assign(client, dto);
+    // config es un jsonb con varias claves (manager_phone, etc.). Un PATCH parcial que
+    // manda `config: { manager_phone }` NO debe borrar el resto de las claves: mergeamos
+    // superficialmente en vez de dejar que Object.assign reemplace el objeto entero.
+    const { config, ...rest } = dto;
+    Object.assign(client, rest);
+    if (config !== undefined) {
+      client.config = { ...(client.config ?? {}), ...config };
+    }
     return this.clientRepo.save(client);
   }
 
