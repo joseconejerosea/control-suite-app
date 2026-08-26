@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { ClientActiveGuard } from '../../common/guards/client-active.guard';
@@ -28,6 +28,20 @@ export class WorkspaceController {
   @Get('master-data-status')
   masterDataStatus(@Req() req: AuthedRequest) {
     return this.service.masterDataStatus(req.user.client_id);
+  }
+
+  // Self-service de la cuenta (Config → Cuenta): un Manager edita nombre/rut/teléfono de
+  // SU propio cliente. El ClientsController es super_admin-only, así que sin esto el botón
+  // "Guardar cambios" del panel de cliente daba 403. Whitelist en el service.
+  @Patch('account')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.MANAGER, UserRole.SUPERADMIN)
+  updateAccount(@Req() req: AuthedRequest, @Body() body: any) {
+    return this.clients.updateAccount(req.user.client_id, {
+      nombre: body?.nombre,
+      rut: body?.rut,
+      manager_phone: body?.manager_phone ?? body?.config?.manager_phone,
+    });
   }
 
   // ── Agency affiliation code (tenant-scoped: the caller's OWN client only) ────

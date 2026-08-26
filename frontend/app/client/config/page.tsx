@@ -88,16 +88,18 @@ export default function ConfigPage() {
   const saveCuenta = async () => {
     setSaving(true);
     try {
-      await fetch(`${API}/clients/${user.client_id}`, {
+      // /workspace/account es el endpoint self-service (Manager) sobre el propio cliente.
+      // /clients/:id es super_admin-only → daba 403 desde el panel de cliente.
+      const res = await fetch(`${API}/workspace/account`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        // config se mergea en backend (no pisa otras claves): solo enviamos manager_phone.
         body: JSON.stringify({
           nombre: cuenta.nombre,
           rut: cuenta.rut,
-          config: { manager_phone: cuenta.telefono_manager },
+          manager_phone: cuenta.telefono_manager,
         }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showToast("Cuenta actualizada ✓");
     } catch { showToast("Error al guardar"); }
     finally { setSaving(false); }
