@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
-import { CheckCircle, Building2, UserPlus, Rocket, ArrowRight, ArrowLeft } from "lucide-react";
+import { WHATSAPP_NUMBER, WHATSAPP_WA_ME } from "@/lib/whatsapp";
+import { CheckCircle, Building2, UserPlus, Rocket, ArrowRight, ArrowLeft, MessageCircle } from "lucide-react";
 
 type StepData = { client?: Record<string, string>; admin?: Record<string, string> };
 
@@ -151,7 +152,8 @@ export default function OnboardingPage() {
                 { value: "enterprise", label: "Enterprise" },
               ]} />
               <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                WhatsApp queda listo automáticamente: el cliente recibe un código de afiliación para su staff. El correo se conecta después desde Configuración (Gmail).
+                WhatsApp queda listo automáticamente: el staff del cliente le escribe al número{" "}
+                <strong style={{ color: "var(--foreground)" }}>{WHATSAPP_NUMBER}</strong> con el código de afiliación. El correo se conecta después desde Configuración (Gmail).
               </p>
               <Btn onClick={step1} disabled={!client.nombre}><span>Crear cliente</span><ArrowRight size={14} /></Btn>
             </div>
@@ -188,6 +190,21 @@ export default function OnboardingPage() {
                   <strong style={{ color: "var(--foreground)" }}>{data.client?.nombre}</strong> esta configurado.<br />
                   Admin <strong style={{ color: "var(--foreground)" }}>{data.admin?.email}</strong> creado.
                 </p>
+              </div>
+              <div className="w-full rounded-xl p-4 flex flex-col items-center gap-1.5"
+                style={{ background: "var(--secondary)", border: "1px solid var(--border)" }}>
+                <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                  El staff del cliente le escribe por WhatsApp a
+                </span>
+                <a href={WHATSAPP_WA_ME} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-base font-semibold"
+                  style={{ color: "var(--foreground)", textDecoration: "none" }}>
+                  <MessageCircle size={16} style={{ color: "var(--success)" }} />
+                  {WHATSAPP_NUMBER}
+                </a>
+                <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                  con su código de afiliación.
+                </span>
               </div>
               <Btn onClick={step3}><Rocket size={14} /><span>Activar cliente</span></Btn>
             </div>

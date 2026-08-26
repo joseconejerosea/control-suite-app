@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Copy, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { KeyRound, Copy, RefreshCw, Loader2, AlertTriangle, MessageCircle } from "lucide-react";
 import { api } from "@/lib/api";
+import { WHATSAPP_NUMBER, WHATSAPP_WA_ME } from "@/lib/whatsapp";
 
 type AffiliationCodeResponse = { affiliation_code: string };
 // The backend wraps success responses as { data: <payload>, timestamp, path }.
@@ -98,8 +99,17 @@ export default function AffiliationCode({ onToast }: { onToast?: (msg: string) =
             </button>
           </div>
 
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, padding: "10px 14px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--secondary)" }}>
+            <MessageCircle size={15} style={{ color: "var(--success)", flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: "var(--muted-foreground)" }}>Tu staff le escribe a</span>
+            <a href={WHATSAPP_WA_ME} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)", textDecoration: "none" }}>
+              {WHATSAPP_NUMBER}
+            </a>
+          </div>
+
           <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 10 }}>
-            Es el código que promotores y anfitrionas escriben por WhatsApp para afiliarse a esta agencia. Compartilo solo con tu staff. Al rotarlo, el código anterior deja de funcionar.
+            Es el código que promotores y anfitrionas escriben por WhatsApp (al número de arriba) para afiliarse a esta agencia. Compartilo solo con tu staff. Al rotarlo, el código anterior deja de funcionar.
           </div>
         </>
       )}
