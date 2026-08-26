@@ -47,8 +47,14 @@ export interface WhatsAppSession {
   materialIntake?: {
     eventoCrudoId: string;
     storagePath: string;                 // foto del material → foto_key del SKU y del movimiento
-    step: 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad' | 'ubicacion';
+    step: 'nombre' | 'proyecto' | 'destino' | 'bodega' | 'activacion' | 'cantidad' | 'ubicacion' | 'confirmacion';
     attempts: number;
+    // A3 · echo-and-confirm for a free-text answer to a LIST step. When a sender
+    // answers a list step (proyecto/bodega/activacion) with a name instead of a
+    // number and the matcher resolves a unique option, we park the tentative
+    // selection here and ask "¿Te referís a *X*?" before applying it. On "sí" we
+    // apply optionId for forStep; on "no" we re-show that step's list.
+    pendingConfirm?: { forStep: 'proyecto' | 'bodega' | 'activacion'; optionId: string; label: string } | null;
     suggestedLabel?: string | null;      // nombre sugerido por la visión (ambigüedad/ayuda)
     nombre?: string;
     // Ítems del alta. Multi-ítem: el remitente lista "1 Volumétrico / 2 muebles / 6
