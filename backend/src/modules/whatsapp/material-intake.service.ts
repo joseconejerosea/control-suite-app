@@ -92,6 +92,7 @@ export class MaterialIntakeService {
       case 'destino':    return this.handleDestino(phoneNumber, text, session);
       case 'activacion': return this.handleActivacion(phoneNumber, text, session);
       case 'bodega':   return this.handleBodega(phoneNumber, text, session);
+      case 'confirmacion': return this.handleConfirmacion(phoneNumber, text, session);
       case 'cantidad': return this.handleCantidad(phoneNumber, text, session);
       case 'ubicacion': return this.handleUbicacionReprompt(phoneNumber, session);
       default:         return false;
@@ -147,6 +148,14 @@ export class MaterialIntakeService {
     const opts = mi.projects ?? [];
     const num = parseInt(text.trim(), 10);
     if (isNaN(num) || num < 1 || num > opts.length) {
+      // A3 · Not a number: try to resolve the free text to one project by name.
+      // A unique match asks for confirmation (echo-and-confirm); no/ambiguous match
+      // falls through to the existing retry/escalate safety net.
+      const labeled = opts.map((o) => ({ id: o.id, label: o.name }));
+      const idx = this.matchOption(text, labeled);
+      if (idx != null) {
+        return this.askConfirmacion(phone, session, 'proyecto', labeled[idx].id, labeled[idx].label);
+      }
       return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
     }
     mi.proyectoId = opts[num - 1].id;
@@ -180,7 +189,98 @@ export class MaterialIntakeService {
       mi.attempts = 0;
       return this.askActivacion(phone, session);
     }
+    // A3 · symptom 3: the digits 1/2 are not the only valid answer. Understand a
+    // natural-language reply for THIS step ("se usa hoy", "va a bodega", ...). Only
+    // an unambiguous match proceeds; a mixed/negated/unclear reply still falls
+    // through to retryOrEscalate so the escalation safety net stays intact.
+    const nl = this.resolveDestino(text);
+    if (nl === 'bodega') {
+      mi.destino = 'bodega';
+      mi.attempts = 0;
+      return this.askBodega(phone, session);
+    }
+    if (nl === 'consumo') {
+      mi.destino = 'consumo';
+      mi.attempts = 0;
+      return this.askActivacion(phone, session);
+    }
     return this.retryOrEscalate(phone, session, 'Respondé 1 (va a bodega) o 2 (se usa hoy en la activación).');
+  }
+
+  /**
+   * A3 · Pure helper: interpret a free-text destino answer. Returns 'bodega',
+   * 'consumo', or null when the input is ambiguous, negated, or unrecognized.
+   *
+   * Conservative by design — it only resolves a single, unambiguous, non-negated
+   * keyword set. It returns null (letting the caller re-prompt/escalate) when:
+   *   - a negation token is present (R3-001: "no se usa hoy", "no va a bodega",
+   *     "hoy no" mean the OPPOSITE of the keyword that fired, so we never route on
+   *     a negated single set — re-prompt instead of guessing wrong);
+   *   - BOTH sides match (a mixed message like "no a bodega, se usa hoy"); or
+   *   - NEITHER side matches.
+   * Word boundaries prevent false hits (e.g. "usualmente" must NOT match "usa").
+   */
+  private resolveDestino(text: string): 'bodega' | 'consumo' | null {
+    const normalized = (text ?? '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase();
+    // Negation overrides keyword resolution: a negated single set flips meaning,
+    // so bail to null and re-prompt rather than route to the wrong destino.
+    const hasNegation = /\b(no|nunca|tampoco|ni|jamas)\b/.test(normalized);
+    if (hasNegation) return null;
+    const hasConsumo = /\b(hoy|usa|uso|usar|usamos|consumo|consume|activacion|ahora|evento)\b/.test(normalized);
+    const hasBodega = /\b(bodega|deposito|guardar|guarda|almacen|stock|guardo|deposita)\b/.test(normalized);
+    if (hasBodega && !hasConsumo) return 'bodega';
+    if (hasConsumo && !hasBodega) return 'consumo';
+    return null;
+  }
+
+  /**
+   * A3 · Pure matcher for a free-text answer to a LIST step. Tries to resolve the
+   * input to exactly ONE option by name. Returns that option's index, or null when
+   * there is no significant token, no match, or a tie (ambiguous → caller re-prompts).
+   *
+   * Scoring uses WHOLE-WORD equality (not substring) so a token like "motorizado"
+   * does NOT match the label word "motor". A strict unique winner is required: the
+   * best score must be ≥ 1 and held by exactly one option. Anything else → null, so
+   * a wrong guess is never applied without the echo-and-confirm safety net.
+   */
+  private matchOption(text: string, options: { id: string; label: string }[]): number | null {
+    const normalize = (s: string): string =>
+      (s ?? '')
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase();
+    // Small Spanish stopword set: drop filler so "el de vega motors" scores on the
+    // significant tokens only. Tokens shorter than 3 chars are also dropped as noise.
+    const STOPWORDS = new Set(
+      'de la el los las del en para con un una y o a que es se lo al mi tu su'.split(' '),
+    );
+    const tokenize = (s: string): string[] =>
+      normalize(s)
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+    const inputTokens = tokenize(text).filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+    if (!inputTokens.length) return null;
+
+    let best = 0;
+    let bestIdx = -1;
+    let winners = 0;
+    options.forEach((opt, i) => {
+      const labelWords = new Set(tokenize(opt.label));
+      // Whole-word equality: count input tokens that appear as a full word in the label.
+      const score = inputTokens.reduce((acc, t) => acc + (labelWords.has(t) ? 1 : 0), 0);
+      if (score > best) {
+        best = score;
+        bestIdx = i;
+        winners = 1;
+      } else if (score === best && best > 0) {
+        winners += 1;
+      }
+    });
+    // Require a strict unique winner with at least one whole-word hit.
+    return best >= 1 && winners === 1 ? bestIdx : null;
   }
 
   /**
@@ -234,6 +334,11 @@ export class MaterialIntakeService {
     const opts = mi.activaciones ?? [];
     const num = parseInt(text.trim(), 10);
     if (isNaN(num) || num < 1 || num > opts.length) {
+      // A3 · Free text → try to resolve to one activación by its label (echo-and-confirm).
+      const idx = this.matchOption(text, opts);
+      if (idx != null) {
+        return this.askConfirmacion(phone, session, 'activacion', opts[idx].id, opts[idx].label);
+      }
       return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
     }
     mi.activacionId = opts[num - 1].id;
@@ -276,11 +381,134 @@ export class MaterialIntakeService {
     const opts = mi.bodegas ?? [];
     const num = parseInt(text.trim(), 10);
     if (isNaN(num) || num < 1 || num > opts.length) {
+      // A3 · Free text → try to resolve to one bodega by name (echo-and-confirm).
+      const labeled = opts.map((o) => ({ id: o.id, label: o.name }));
+      const idx = this.matchOption(text, labeled);
+      if (idx != null) {
+        return this.askConfirmacion(phone, session, 'bodega', labeled[idx].id, labeled[idx].label);
+      }
       return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
     }
     mi.bodegaId = opts[num - 1].id;
     mi.attempts = 0;
     return this.proceedToCantidad(phone, session);
+  }
+
+  // ── A3 · echo-and-confirm de una respuesta en lenguaje natural ──────────────
+
+  /**
+   * A3 · Park a tentative free-text selection and echo it back for confirmation.
+   * NOTE: we do NOT reset `attempts` here. A tentative match awaiting confirmation
+   * is not forward progress, so it must not earn a budget reset — otherwise a user
+   * repeatedly typing the same (deterministically matched) text and answering "no"
+   * would loop forever. attempts is reset only on a confirmed YES.
+   */
+  private async askConfirmacion(
+    phone: string,
+    session: WhatsAppSession,
+    forStep: 'proyecto' | 'bodega' | 'activacion',
+    optionId: string,
+    label: string,
+  ): Promise<boolean> {
+    const mi = session.materialIntake!;
+    mi.pendingConfirm = { forStep, optionId, label };
+    mi.step = 'confirmacion';
+    await this.sessions.set(phone, session);
+    await this.wa.sendText(phone, `¿Te referís a *${label}*? Respondé *sí* o *no*.`);
+    return true;
+  }
+
+  /**
+   * A3 · Handle the yes/no reply to an echo-and-confirm prompt. YES applies the
+   * parked selection and continues exactly as the numeric path would. NO re-shows
+   * that step's list. Unclear (both or neither) → retryOrEscalate to keep the
+   * attempt budget / escalation safety net intact.
+   */
+  private async handleConfirmacion(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
+    const pending = mi.pendingConfirm;
+    if (!pending) {
+      // Defensive: no parked selection (shouldn't happen). Treat as unclear.
+      return this.retryOrEscalate(phone, session, 'Respondé *sí* o *no*.');
+    }
+
+    const normalized = (text ?? '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase();
+    // R3-002: "no sé"/"ni idea"/"no estoy seguro" mean "I'm unsure", NOT a definitive NO.
+    // Diacritics are already stripped ("sé"→"se"). This MUST run before the yes/no regexes:
+    // "no se" sets no=true, so without this guard it would wrongly hit the NO (list re-show)
+    // branch and spend an attempt on a list the user never rejected. Route to UNCLEAR instead
+    // (re-ask "sí o no") — same attempt-budget/escalation as any other unclear reply.
+    const unsure = /\b(no se|ni idea|no estoy seguro|no se cual|nose)\b/.test(normalized);
+    if (unsure) {
+      return this.retryOrEscalate(phone, session, 'Respondé *sí* o *no*.');
+    }
+    // Accents are stripped, so "sí" → "si".
+    const yes = /\b(si|sisi|dale|correcto|exacto|ese|esa|eso|obvio|claro|asi es)\b/.test(normalized);
+    const no = /\b(no|nop|negativo|otro|otra|ninguno|ninguna|equivocado)\b/.test(normalized);
+    // Both or neither → unclear: keep the attempt budget and escalation.
+    if (yes === no) {
+      return this.retryOrEscalate(phone, session, 'Respondé *sí* o *no*.');
+    }
+
+    if (yes) {
+      mi.pendingConfirm = null;
+      mi.attempts = 0; // confirmed selection = forward progress → reset budget.
+      switch (pending.forStep) {
+        case 'proyecto':
+          mi.proyectoId = pending.optionId;
+          return this.askDestino(phone, session);
+        case 'bodega':
+          mi.bodegaId = pending.optionId;
+          return this.proceedToCantidad(phone, session);
+        case 'activacion':
+          mi.activacionId = pending.optionId;
+          return this.proceedToCantidad(phone, session);
+        // R3-001: compile-exhaustive fallback. All three real cases return above; this only
+        // closes an impossible fall-through so a future widening of pendingConfirm.forStep
+        // cannot silently drop a confirmed YES. Unreachable today (forStep is a 3-way union).
+        default: {
+          this.logger.warn(`[Material] Confirmación con forStep inesperado: ${String((pending as { forStep?: unknown }).forStep)}`);
+          return this.retryOrEscalate(phone, session, 'Respondé *sí* o *no*.');
+        }
+      }
+    }
+
+    // NO: discard the tentative match and re-show the step's list, still subject to
+    // the attempt budget (so a user stuck saying "no" escalates instead of looping).
+    mi.pendingConfirm = null;
+    mi.step = pending.forStep;
+    return this.reshowListOrEscalate(phone, session, pending.forStep);
+  }
+
+  /**
+   * A3 · Re-render a list step from the CACHED options (never re-query / re-run the
+   * auto-select-if-one logic) after a "no". Reuses retryOrEscalate so the re-show is
+   * bounded by the same attempt budget: at MAX_ATTEMPTS it escalates instead of
+   * re-showing the list, so a user repeatedly saying "no" can never loop forever.
+   */
+  private async reshowListOrEscalate(
+    phone: string,
+    session: WhatsAppSession,
+    forStep: 'proyecto' | 'bodega' | 'activacion',
+  ): Promise<boolean> {
+    const mi = session.materialIntake!;
+    let header: string;
+    let items: string[];
+    if (forStep === 'proyecto') {
+      header = '¿A qué proyecto se asocia?';
+      items = (mi.projects ?? []).map((p, i) => `${i + 1}. ${p.name}`);
+    } else if (forStep === 'bodega') {
+      header = '¿En qué bodega queda?';
+      items = (mi.bodegas ?? []).map((b, i) => `${i + 1}. ${b.name}`);
+    } else {
+      header = '¿A qué activación corresponde? (se usa hoy)';
+      items = (mi.activaciones ?? []).map((a, i) => `${i + 1}. ${a.label}`);
+    }
+    const listMsg = `${header}\n\n${items.join('\n')}\n\nRespondé con el número.`;
+    return this.retryOrEscalate(phone, session, listMsg);
   }
 
   /**

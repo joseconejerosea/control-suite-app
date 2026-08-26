@@ -331,6 +331,125 @@ describe('MaterialIntakeService', () => {
     expect(movimientos.create).not.toHaveBeenCalled();
   });
 
+  // ── A3 · symptom 3 · destino step understands natural language ──────────────
+
+  // Seed a session paused at step='destino' (post-proyecto), no walking from start().
+  const seedDestino = (eventoCrudoId: string): void => {
+    store[PHONE] = {
+      state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+      clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+      materialIntake: {
+        eventoCrudoId, storagePath: 'materials/x.jpg', step: 'destino',
+        attempts: 0, nombre: 'Silla', proyectoId: 'proj-1',
+      },
+    };
+  };
+
+  describe('resolveDestino (pure helper)', () => {
+    const cases: [string, 'bodega' | 'consumo' | null][] = [
+      // consumo keywords
+      ['se usa hoy', 'consumo'],
+      ['lo usamos ahora en el evento', 'consumo'],
+      ['activación', 'consumo'],       // accent normalized
+      ['va a la activacion', 'consumo'],
+      ['uso hoy', 'consumo'],
+      // bodega keywords
+      ['va a bodega', 'bodega'],
+      ['al deposito', 'bodega'],
+      ['guardar en almacen', 'bodega'],
+      ['queda en stock', 'bodega'],
+      // both → null (never guess)
+      ['no a bodega, se usa hoy', null],
+      ['va a bodega y se usa hoy', null],
+      // single-sided negation → null (R3-001: never route on a negated single set)
+      ['no se usa hoy', null],
+      ['no va a bodega', null],
+      ['hoy no', null],
+      ['tampoco se usa hoy', null],
+      // neither → null
+      ['xyz', null],
+      ['no sé', null],
+      // word boundary: "usualmente" must NOT match "usa"
+      ['usualmente', null],
+    ];
+
+    it.each(cases)('resolveDestino(%j) → %s', (text, expected) => {
+      expect(anySvc.resolveDestino(text)).toBe(expected);
+    });
+  });
+
+  it('[A3] destino "se usa hoy" (NL) → consumo, no escalation', async () => {
+    seedDestino('evt-nl-consumo');
+    expect(await svc.handleResponse(PHONE, 'se usa hoy')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.destino).toBe('consumo');
+    expect(store[PHONE]?.materialIntake?.attempts).toBe(0);
+    // askActivacion ran (default mock auto-selects the single activation).
+    const esc = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='escalated'"),
+    );
+    expect(esc).toBeUndefined();
+  });
+
+  it('[A3] destino "va a bodega" (NL) → bodega, asks bodega', async () => {
+    seedDestino('evt-nl-bodega');
+    expect(await svc.handleResponse(PHONE, 'va a bodega')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.destino).toBe('bodega');
+    expect(store[PHONE]?.materialIntake?.attempts).toBe(0);
+  });
+
+  it('[A3] destino "al deposito" (NL) → bodega', async () => {
+    seedDestino('evt-nl-deposito');
+    expect(await svc.handleResponse(PHONE, 'al deposito')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.destino).toBe('bodega');
+  });
+
+  it('[A3] destino "lo usamos ahora en el evento" (NL) → consumo', async () => {
+    seedDestino('evt-nl-ahora');
+    expect(await svc.handleResponse(PHONE, 'lo usamos ahora en el evento')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.destino).toBe('consumo');
+  });
+
+  it('[A3] destino accented "activación" (NL) → consumo', async () => {
+    seedDestino('evt-nl-accent');
+    expect(await svc.handleResponse(PHONE, 'activación')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.destino).toBe('consumo');
+  });
+
+  it('[A3] MIXED/NEGATED "no a bodega, se usa hoy" is NOT mis-picked → retryOrEscalate (safety net)', async () => {
+    seedDestino('evt-nl-mixed');
+    expect(await svc.handleResponse(PHONE, 'no a bodega, se usa hoy')).toBe(true);
+    // Not mis-picked: destino stays undefined, step stays destino, attempts incremented.
+    expect(store[PHONE]?.materialIntake?.destino).toBeUndefined();
+    expect(store[PHONE]?.materialIntake?.step).toBe('destino');
+    expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+    expect(movimientos.create).not.toHaveBeenCalled();
+  });
+
+  it('[A3] word boundary: "usualmente" does NOT match "usa" → re-prompt (not consumo)', async () => {
+    seedDestino('evt-nl-usual');
+    expect(await svc.handleResponse(PHONE, 'usualmente')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.destino).toBeUndefined();
+    expect(store[PHONE]?.materialIntake?.step).toBe('destino');
+    expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+  });
+
+  it('[A3] repeated unclear destino input still reaches MAX_ATTEMPTS → escalates', async () => {
+    seedDestino('evt-nl-esc');
+    // First unclear → re-prompt (attempts 0→1), session alive.
+    expect(await svc.handleResponse(PHONE, 'xyz')).toBe(true);
+    expect(store[PHONE]?.materialIntake?.step).toBe('destino');
+    expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+    // Second unclear → MAX_ATTEMPTS → escalate + clear session.
+    expect(await svc.handleResponse(PHONE, 'qwerty')).toBe(true);
+    const esc = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+    );
+    expect(esc).toBeDefined();
+    expect(esc![1][1]).toContain('material_intake_max_attempts');
+    expect(store[PHONE]).toBeUndefined();
+    expect(movimientos.create).not.toHaveBeenCalled();
+  });
+
   it('a bookkeeping failure after commit does NOT roll back the SKU/movement nor block the confirmation', async () => {
     // El cierre del evento (bookkeeping) corre en una tx SEPARADA post-commit. Si falla,
     // el alta real (SKU + movimiento) ya está commiteada y la confirmación igual sale.
@@ -814,6 +933,352 @@ describe('MaterialIntakeService', () => {
     await anySvc.register(PHONE, s2);
     expect(skus.create).not.toHaveBeenCalled();
     expect(movimientos.create).not.toHaveBeenCalled();
+  });
+
+  // ── A3 · natural language + echo-and-confirm for the LIST steps ─────────────
+
+  describe('matchOption (pure helper)', () => {
+    const projects = [
+      { id: 'p1', label: 'Vega Motors - Test Drive Tour Mall' },
+      { id: 'p2', label: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+    ];
+
+    it('resolves a multi-word phrase to the option whose label contains those words', () => {
+      expect(anySvc.matchOption('el de vega motors', projects)).toBe(0);
+    });
+
+    it('resolves a unique single-word match', () => {
+      expect(anySvc.matchOption('navidad', projects)).toBe(1);
+    });
+
+    it('returns null on a tie (a token matches two options equally)', () => {
+      const tie = [
+        { id: 'a', label: 'Banner Coca Cola' },
+        { id: 'b', label: 'Afiche Coca Cola' },
+      ];
+      expect(anySvc.matchOption('coca cola', tie)).toBeNull();
+    });
+
+    it('returns null when no significant token matches any option', () => {
+      expect(anySvc.matchOption('xyz', projects)).toBeNull();
+    });
+
+    it('returns null when the input is only stopwords / short tokens', () => {
+      expect(anySvc.matchOption('el de la', projects)).toBeNull();
+    });
+
+    it('matches WHOLE words only: a label word that is a substring of an input token does NOT match', () => {
+      // 'motorizado' contains 'motor' as a substring but is not the whole word
+      // 'motor'; whole-word scoring must NOT count it as a hit.
+      const opts = [{ id: 'x', label: 'Motor Show' }, { id: 'y', label: 'Feria Gastronomica' }];
+      expect(anySvc.matchOption('motorizado gastronomia', opts)).toBeNull();
+    });
+  });
+
+  describe('list step NL + echo-and-confirm', () => {
+    const seedStep = (
+      step: 'proyecto' | 'bodega' | 'activacion' | 'confirmacion',
+      extra: Partial<NonNullable<WhatsAppSession['materialIntake']>>,
+    ): void => {
+      store[PHONE] = {
+        state: 'awaiting_material', projects: [], base64: '', mimeType: '', caption: '',
+        clientId: CLIENT, canalId: null, updatedAt: '', clarification: null,
+        materialIntake: {
+          eventoCrudoId: `evt-${step}`, storagePath: 'materials/x.jpg', step,
+          attempts: 0, nombre: 'Silla', ...extra,
+        },
+      };
+    };
+
+    it('[proyecto] free text "vega motors" → confirmacion step, pendingConfirm set, echo message sent', async () => {
+      seedStep('proyecto', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+      });
+      expect(await svc.handleResponse(PHONE, 'vega motors')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'proyecto', optionId: 'p1' });
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).toMatch(/¿Te referís a \*Vega Motors/i);
+    });
+
+    it('[proyecto] then "sí" → proyectoId=p1, proceeds to destino (askDestino)', async () => {
+      seedStep('confirmacion', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+        pendingConfirm: { forStep: 'proyecto', optionId: 'p1', label: 'Vega Motors - Test Drive Tour Mall' },
+      });
+      expect(await svc.handleResponse(PHONE, 'sí')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.proyectoId).toBe('p1');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm == null).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('destino');
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).toMatch(/bodega/i);
+      expect(msg).toMatch(/se usa hoy/i);
+    });
+
+    it('[proyecto] then "no" → step back to proyecto, list re-shown, pendingConfirm cleared', async () => {
+      seedStep('confirmacion', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+        pendingConfirm: { forStep: 'proyecto', optionId: 'p1', label: 'Vega Motors - Test Drive Tour Mall' },
+      });
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('proyecto');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm == null).toBe(true);
+      expect(store[PHONE]?.materialIntake?.proyectoId).toBeUndefined();
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).toContain('Vega Motors - Test Drive Tour Mall');
+      expect(msg).toContain('Colectivo Fiesta - Trompo Azul Navidad 2027');
+    });
+
+    it('[proyecto] no-match free text → retryOrEscalate (unchanged), no confirmacion', async () => {
+      seedStep('proyecto', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+      });
+      expect(await svc.handleResponse(PHONE, 'zzz qqq')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('proyecto');
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      expect(store[PHONE]?.materialIntake?.pendingConfirm == null).toBe(true);
+    });
+
+    it('[proyecto] repeated no-match free text escalates at MAX_ATTEMPTS', async () => {
+      seedStep('proyecto', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+      });
+      expect(await svc.handleResponse(PHONE, 'zzz qqq')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      expect(await svc.handleResponse(PHONE, 'www vvv')).toBe(true);
+      const esc = queryMock.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+      );
+      expect(esc).toBeDefined();
+      expect(store[PHONE]).toBeUndefined();
+    });
+
+    it('[confirmacion] unclear yes/no ("tal vez") → retryOrEscalate (keeps attempt budget)', async () => {
+      seedStep('confirmacion', {
+        projects: [{ id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' }],
+        pendingConfirm: { forStep: 'proyecto', optionId: 'p1', label: 'Vega Motors - Test Drive Tour Mall' },
+      });
+      expect(await svc.handleResponse(PHONE, 'tal vez')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      expect(store[PHONE]?.materialIntake?.proyectoId).toBeUndefined();
+    });
+
+    it('[confirmacion] repeated "no" is bounded: eventually escalates (no infinite loop)', async () => {
+      seedStep('confirmacion', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+        attempts: 1, // already spent one attempt
+        pendingConfirm: { forStep: 'proyecto', optionId: 'p1', label: 'Vega Motors - Test Drive Tour Mall' },
+      });
+      // "no" → re-show list, but the attempt budget still ticks and escalates at MAX.
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      const esc = queryMock.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+      );
+      expect(esc).toBeDefined();
+      expect(store[PHONE]).toBeUndefined();
+    });
+
+    it('[confirmacion] full cycle match→no→re-match→no through the dispatcher is bounded (escalates, no infinite loop)', async () => {
+      seedStep('proyecto', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+      });
+      // match #1 (attempts stays 0 on the tentative match) → confirmacion
+      expect(await svc.handleResponse(PHONE, 'vega motors')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      // no #1 → back to proyecto, attempts 0→1
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('proyecto');
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      // re-match same text → confirmacion again (attempts NOT reset — carries 1)
+      expect(await svc.handleResponse(PHONE, 'vega motors')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      // no #2 → reaches MAX_ATTEMPTS → escalate + clear session (no loop).
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      const esc = queryMock.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+      );
+      expect(esc).toBeDefined();
+      expect(store[PHONE]).toBeUndefined();
+    });
+
+    it('[bodega] free text → confirm → "sí" applies bodegaId and proceeds to proceedToCantidad', async () => {
+      seedStep('bodega', {
+        proyectoId: 'proj-1', destino: 'bodega',
+        bodegas: [
+          { id: 'bod-1', name: 'Bodega Central' },
+          { id: 'bod-2', name: 'Regional Norte' },
+        ],
+        items: [{ nombre: 'Silla', cantidad: null }],
+      });
+      expect(await svc.handleResponse(PHONE, 'central')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'bodega', optionId: 'bod-1' });
+
+      expect(await svc.handleResponse(PHONE, 'dale')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.bodegaId).toBe('bod-1');
+      // single item without inline qty → proceedToCantidad asks quantity.
+      expect(store[PHONE]?.materialIntake?.step).toBe('cantidad');
+    });
+
+    it('[activacion] free text → confirm → "sí" applies activacionId and proceeds to proceedToCantidad', async () => {
+      seedStep('activacion', {
+        proyectoId: 'proj-1', destino: 'consumo',
+        activaciones: [
+          { id: 'act-1', label: 'Jumbo Maipú · 12-08-2026' },
+          { id: 'act-2', label: 'Líder Centro · 11-08-2026' },
+        ],
+        items: [{ nombre: 'Silla', cantidad: null }],
+      });
+      expect(await svc.handleResponse(PHONE, 'jumbo maipu')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'activacion', optionId: 'act-1' });
+
+      expect(await svc.handleResponse(PHONE, 'correcto')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.activacionId).toBe('act-1');
+      expect(store[PHONE]?.materialIntake?.step).toBe('cantidad');
+    });
+
+    // ── R3-003 · bodega & activacion NO paths + loop termination ──────────────
+
+    it('[bodega] free text → confirm → "no" re-shows the list, then a fresh match + "sí" applies bodegaId', async () => {
+      seedStep('bodega', {
+        proyectoId: 'proj-1', destino: 'bodega',
+        bodegas: [
+          { id: 'bod-1', name: 'Bodega Central' },
+          { id: 'bod-2', name: 'Regional Norte' },
+        ],
+        items: [{ nombre: 'Silla', cantidad: null }],
+      });
+
+      // Free text uniquely matches one bodega → confirmacion, pendingConfirm parked.
+      expect(await svc.handleResponse(PHONE, 'central')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'bodega', optionId: 'bod-1' });
+
+      // "no" → step back to bodega, list re-shown, pendingConfirm cleared, attempts incremented.
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('bodega');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm == null).toBe(true);
+      expect(store[PHONE]?.materialIntake?.bodegaId).toBeUndefined();
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      const listMsg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(listMsg).toContain('Bodega Central');
+      expect(listMsg).toContain('Regional Norte');
+
+      // Fresh match on the other bodega → confirmacion again → "sí" applies + proceeds.
+      expect(await svc.handleResponse(PHONE, 'regional')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'bodega', optionId: 'bod-2' });
+      expect(await svc.handleResponse(PHONE, 'sí')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.bodegaId).toBe('bod-2');
+      // single item without inline qty → proceedToCantidad asks quantity.
+      expect(store[PHONE]?.materialIntake?.step).toBe('cantidad');
+    });
+
+    it('[activacion] free text → confirm → "no" re-shows the list, then a fresh match + "sí" applies activacionId', async () => {
+      seedStep('activacion', {
+        proyectoId: 'proj-1', destino: 'consumo',
+        activaciones: [
+          { id: 'act-1', label: 'Jumbo Maipú · 12-08-2026' },
+          { id: 'act-2', label: 'Líder Centro · 11-08-2026' },
+        ],
+        items: [{ nombre: 'Silla', cantidad: null }],
+      });
+
+      expect(await svc.handleResponse(PHONE, 'jumbo maipu')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'activacion', optionId: 'act-1' });
+
+      // "no" → back to activacion, list re-shown, pendingConfirm cleared, attempts incremented.
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('activacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm == null).toBe(true);
+      expect(store[PHONE]?.materialIntake?.activacionId).toBeUndefined();
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      const listMsg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(listMsg).toContain('Jumbo Maipú');
+      expect(listMsg).toContain('Líder Centro');
+
+      // Fresh match on the other activación → confirmacion again → "sí" applies + proceeds.
+      expect(await svc.handleResponse(PHONE, 'lider centro')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'activacion', optionId: 'act-2' });
+      expect(await svc.handleResponse(PHONE, 'sí')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.activacionId).toBe('act-2');
+      expect(store[PHONE]?.materialIntake?.step).toBe('cantidad');
+    });
+
+    it('[bodega] full cycle match→no→re-match→no through the dispatcher is bounded (escalates, no infinite loop)', async () => {
+      seedStep('bodega', {
+        proyectoId: 'proj-1', destino: 'bodega',
+        bodegas: [
+          { id: 'bod-1', name: 'Bodega Central' },
+          { id: 'bod-2', name: 'Regional Norte' },
+        ],
+        items: [{ nombre: 'Silla', cantidad: null }],
+      });
+      // match #1 (attempts stays 0 on the tentative match) → confirmacion
+      expect(await svc.handleResponse(PHONE, 'central')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      // no #1 → back to bodega, attempts 0→1
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('bodega');
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      // re-match same text → confirmacion again (attempts NOT reset — carries 1)
+      expect(await svc.handleResponse(PHONE, 'central')).toBe(true);
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      // no #2 → reaches MAX_ATTEMPTS → escalate + clear session (no loop).
+      expect(await svc.handleResponse(PHONE, 'no')).toBe(true);
+      const esc = queryMock.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='escalated'"),
+      );
+      expect(esc).toBeDefined();
+      expect(store[PHONE]).toBeUndefined();
+    });
+
+    it('[confirmacion] "no sé" is UNCLEAR (re-ask sí/no), NOT a definitive NO: keeps confirmacion step + pendingConfirm, does NOT re-show the list', async () => {
+      seedStep('confirmacion', {
+        projects: [
+          { id: 'p1', name: 'Vega Motors - Test Drive Tour Mall' },
+          { id: 'p2', name: 'Colectivo Fiesta - Trompo Azul Navidad 2027' },
+        ],
+        pendingConfirm: { forStep: 'proyecto', optionId: 'p1', label: 'Vega Motors - Test Drive Tour Mall' },
+      });
+      expect(await svc.handleResponse(PHONE, 'no sé')).toBe(true);
+      // UNCLEAR branch: still at confirmacion, selection stays parked, attempt spent.
+      expect(store[PHONE]?.materialIntake?.step).toBe('confirmacion');
+      expect(store[PHONE]?.materialIntake?.pendingConfirm).toMatchObject({ forStep: 'proyecto', optionId: 'p1' });
+      expect(store[PHONE]?.materialIntake?.proyectoId).toBeUndefined();
+      expect(store[PHONE]?.materialIntake?.attempts).toBe(1);
+      // Must NOT re-show the list (that is the plain-"no" behavior, not UNCLEAR).
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).not.toContain('Vega Motors - Test Drive Tour Mall');
+      expect(msg).not.toContain('Colectivo Fiesta - Trompo Azul Navidad 2027');
+      // Re-asks the yes/no prompt.
+      expect(msg).toMatch(/s[ií].*o.*no/i);
+    });
   });
 
 });
