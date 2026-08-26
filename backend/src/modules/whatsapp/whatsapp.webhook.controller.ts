@@ -598,6 +598,25 @@ export class WhatsAppWebhookController {
     });
   }
 
+  /**
+   * T3/N08 · ¿Hay un intake de material/evidencia en curso? Si sí, un archivo NUEVO
+   * (foto/doc/audio/video) NO debe procesarse: la foto orphanearía el registro (setAwaitingType
+   * cambia state a 'awaiting_type'); un documento se procesaría como F1; audio/video guardarían
+   * un blob suelto. Avisamos y frenamos. Devuelve true si bloqueó (el caller debe `return`).
+   * La UBICACIÓN NO pasa por acá: es la entrada legítima del paso 'ubicacion'.
+   */
+  private async blockedByActiveIntake(from: string): Promise<boolean> {
+    const s = await this.sessions.get(from);
+    if (s?.state === 'awaiting_material' || s?.state === 'awaiting_evidence') {
+      await this.wa.sendText(
+        from,
+        'Estás cargando un registro. Terminá los pasos que te pido acá, o escribí *cancelar* para descartarlo y empezar de nuevo. 🙌',
+      );
+      return true;
+    }
+    return false;
+  }
+
   // ── Image handler ─────────────────────────────────────────────────────────
 
   private async handleImage(
@@ -617,6 +636,9 @@ export class WhatsAppWebhookController {
     }
 
     try {
+      // T3/N08 · Media a mitad de un intake en curso → bloquear (ver blockedByActiveIntake).
+      if (await this.blockedByActiveIntake(from)) return;
+
       // ── F3 devoluciones ──────────────────────────────────────────────────
       // Si el emisor tiene una devolución pendiente esperando foto, la imagen es
       // la evidencia de la devolución (no un documento F1). Se rutea a receivePhoto
@@ -706,6 +728,9 @@ export class WhatsAppWebhookController {
     if (!audioId && !pendingMedia) return;
 
     try {
+      // T3/N08 · Audio a mitad de un intake en curso → bloquear (no guardar blob suelto).
+      if (await this.blockedByActiveIntake(from)) return;
+
       const result = await this.resolveMedia(pendingMedia, audioId, clientId, 'evidence');
 
       await this.persistEvent({
@@ -732,6 +757,9 @@ export class WhatsAppWebhookController {
     if (!videoId && !pendingMedia) return;
 
     try {
+      // T3/N08 · Video a mitad de un intake en curso → bloquear (no guardar blob suelto).
+      if (await this.blockedByActiveIntake(from)) return;
+
       const result = await this.resolveMedia(pendingMedia, videoId, clientId, 'evidence');
 
       await this.persistEvent({
@@ -759,6 +787,9 @@ export class WhatsAppWebhookController {
     if (!docId && !pendingMedia) return;
 
     try {
+      // T3/N08 · Doc a mitad de un intake en curso → bloquear (no procesarlo como F1).
+      if (await this.blockedByActiveIntake(from)) return;
+
       const result = await this.resolveMedia(pendingMedia, docId, clientId, 'documents');
       const caption = msg.document?.caption ?? '';
 
@@ -895,6 +926,24 @@ export class WhatsAppWebhookController {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
+  // T3/N08 · Un mensaje que es SOLO "cancelar" (o variantes) → intención de descartar el
+  // registro en curso. Anclado (^…$) para no matchear un nombre de material que CONTENGA
+  // la palabra (ej. "cancelar pedido" como nombre). Case-insensitive, tolera "!"/".".
+  private static readonly CANCEL_RE =
+    /^\s*(cancelar|cancel[aáo]|salir|descartar|empezar\s+de\s+nuevo)\s*[!.]*\s*$/i;
+
+  /**
+   * ¿El mensaje entero es una intención EXPLÍCITA de cancelar el intake en curso?
+   * SOLO "cancelar" y variantes — deliberadamente NO incluye saludos: un "hola" suelto a
+   * mitad de un registro no debe borrar el progreso (los pasos del intake lo re-preguntan,
+   * ej. material step='ubicacion'). Abortar es una acción destructiva → requiere intención
+   * explícita, que es exactamente lo que promete el mensaje de bloqueo de handleImage.
+   */
+  private isCancelIntent(text: string): boolean {
+    if (!text) return false;
+    return WhatsAppWebhookController.CANCEL_RE.test(text);
+  }
+
   // ── Text handler ──────────────────────────────────────────────────────────
 
   private async handleText(
@@ -910,6 +959,25 @@ export class WhatsAppWebhookController {
     if (!shield.safe) {
       this.logger.warn(`[WhatsApp] Mensaje bloqueado por shield (${shield.category}) from=${from}`);
       await this.wa.sendText(from, 'No puedo procesar ese mensaje.');
+      return;
+    }
+
+    // T3/N08 · Escape de un intake en curso. Un "cancelar" (o un saludo/menú suelto) a
+    // mitad de un registro de material/evidencia ABORTA ese registro y vuelve al menú, en
+    // vez de quedar atrapado. Sin esto, el bloqueo de fotos de handleImage sería una
+    // trampa: las fotos no incrementan el contador de intentos del intake, así que no hay
+    // otra salida. Va ANTES de los interceptores de intake (si no, el texto se comería
+    // como respuesta del paso actual). Preserva el client_id (setActionMenu) para no
+    // re-preguntar la agencia al reanudar.
+    const intakeSession = await this.sessions.get(from);
+    if (
+      (intakeSession?.state === 'awaiting_material' ||
+        intakeSession?.state === 'awaiting_evidence') &&
+      this.isCancelIntent(text)
+    ) {
+      await this.sessions.delete(from);
+      await this.sessions.setActionMenu(from, clientId);
+      await this.wa.sendText(from, `Listo, cancelé ese registro. 👍\n\n${this.actionMenu.buildMenu()}`);
       return;
     }
 

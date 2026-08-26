@@ -191,6 +191,97 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
   });
 
+  // ── T3/N08 · interrupción de un intake en curso ──────────────────────────────
+  describe('T3/N08 · foto o cancelar durante un intake en curso', () => {
+    it('handleImage BLOQUEA una foto durante awaiting_material (no persiste, no buffera, guía a cancelar)', async () => {
+      sessionStore[FROM] = { state: 'awaiting_material', clientId: CLIENT, canalId: CANAL } as unknown as WhatsAppSession;
+
+      await ctrl.handleImage(FROM, imageMsg('otra foto'), CLIENT, CANAL, MSG_ID, null);
+
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg.toLowerCase()).toContain('cancelar');
+      // No persistió la foto, no la buffereó, no arrancó ningún intake.
+      expect(queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO eventos_crudos'))).toBe(false);
+      expect(sessions.setAwaitingType).not.toHaveBeenCalled();
+      expect(materialIntake.start).not.toHaveBeenCalled();
+    });
+
+    it('handleImage BLOQUEA una foto durante awaiting_evidence', async () => {
+      sessionStore[FROM] = { state: 'awaiting_evidence', clientId: CLIENT, canalId: CANAL } as unknown as WhatsAppSession;
+
+      await ctrl.handleImage(FROM, imageMsg(), CLIENT, CANAL, MSG_ID, null);
+
+      expect(wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n').toLowerCase()).toContain('cancelar');
+      expect(sessions.setAwaitingType).not.toHaveBeenCalled();
+      expect(evidenceIntake.start).not.toHaveBeenCalled();
+    });
+
+    it('handleDocument BLOQUEA un PDF durante awaiting_material (no lo procesa como F1)', async () => {
+      sessionStore[FROM] = { state: 'awaiting_material', clientId: CLIENT, canalId: CANAL } as unknown as WhatsAppSession;
+
+      await ctrl.handleDocument(FROM, { type: 'document', document: { id: 'doc-1', filename: 'guia.pdf' } }, CLIENT, CANAL, MSG_ID, null);
+
+      expect(wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n').toLowerCase()).toContain('cancelar');
+      expect(ocrQueue.add).not.toHaveBeenCalled();
+      expect(queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO eventos_crudos'))).toBe(false);
+    });
+
+    it('handleAudio BLOQUEA un audio durante awaiting_evidence (no guarda blob suelto)', async () => {
+      sessionStore[FROM] = { state: 'awaiting_evidence', clientId: CLIENT, canalId: CANAL } as unknown as WhatsAppSession;
+
+      await ctrl.handleAudio(FROM, { type: 'audio', audio: { id: 'aud-1' } }, CLIENT, CANAL, MSG_ID, null);
+
+      expect(wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n').toLowerCase()).toContain('cancelar');
+      expect(queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO eventos_crudos'))).toBe(false);
+    });
+
+    it('handleText "cancelar" durante awaiting_material aborta: borra sesión + menú, NO llama al intake', async () => {
+      sessionStore[FROM] = { state: 'awaiting_material', clientId: CLIENT } as unknown as WhatsAppSession;
+
+      await ctrl.handleText(FROM, textMsg('cancelar'), CLIENT, CANAL, MSG_ID);
+
+      expect(sessions.delete).toHaveBeenCalledWith(FROM);
+      expect(sessions.setActionMenu).toHaveBeenCalledWith(FROM, CLIENT);
+      const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(msg).toContain('cancelé');
+      expect(msg).toContain(menu.buildMenu());
+      expect(materialIntake.handleResponse).not.toHaveBeenCalled();
+    });
+
+    it('handleText "cancelá" (con acento) durante awaiting_evidence también aborta al menú', async () => {
+      sessionStore[FROM] = { state: 'awaiting_evidence', clientId: CLIENT } as unknown as WhatsAppSession;
+
+      await ctrl.handleText(FROM, textMsg('cancelá'), CLIENT, CANAL, MSG_ID);
+
+      expect(sessions.setActionMenu).toHaveBeenCalledWith(FROM, CLIENT);
+      expect(evidenceIntake.handleResponse).not.toHaveBeenCalled();
+    });
+
+    it('handleText saludo ("hola") durante un intake NO aborta: pasa al intake (lo re-pregunta)', async () => {
+      sessionStore[FROM] = { state: 'awaiting_material', clientId: CLIENT } as unknown as WhatsAppSession;
+      materialIntake.handleResponse.mockResolvedValueOnce(true); // el intake re-pregunta
+
+      await ctrl.handleText(FROM, textMsg('hola'), CLIENT, CANAL, MSG_ID);
+
+      // Un saludo NO es cancelar → no borra el registro; el intake maneja el mensaje.
+      expect(materialIntake.handleResponse).toHaveBeenCalledWith(FROM, 'hola');
+      expect(sessions.delete).not.toHaveBeenCalled();
+      expect(sessions.setActionMenu).not.toHaveBeenCalled();
+    });
+
+    it('handleText texto normal ("10") durante awaiting_material NO aborta: pasa al intake', async () => {
+      sessionStore[FROM] = { state: 'awaiting_material', clientId: CLIENT } as unknown as WhatsAppSession;
+      materialIntake.handleResponse.mockResolvedValueOnce(true); // el intake consume el paso
+
+      await ctrl.handleText(FROM, textMsg('10'), CLIENT, CANAL, MSG_ID);
+
+      expect(materialIntake.handleResponse).toHaveBeenCalledWith(FROM, '10');
+      // No es cancelar → no aborta ni cae al menú.
+      expect(sessions.setActionMenu).not.toHaveBeenCalled();
+      expect(sessions.delete).not.toHaveBeenCalled();
+    });
+  });
+
   // ── 2. handleText awaiting_type + bufferedMedia + valid number → route ───────
   describe('handleText · awaiting_type with bufferedMedia', () => {
     const buffered = { storagePath: STORAGE, mimeType: MIME, caption: 'c', eventId: 'evt-buffered' };
