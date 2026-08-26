@@ -191,6 +191,30 @@ export class PersistProcessor extends WorkerHost {
     return phone ?? null;
   }
 
+  /**
+   * T10 · Marca un evento como duplicado (no crea la invoice) y arma el aviso al remitente
+   * cuando el canal es WhatsApp (para no dejarlo colgado tras el ack inicial). Único punto
+   * para los dos checks de dedup (content-hash y natural-key). El envío se hace tras el
+   * commit (fuera de la tx del tenant), como el resto de las notificaciones post-commit.
+   */
+  private async markDuplicate(
+    eventoCrudoId: string,
+    channel: string,
+    payload: any,
+    reason: string,
+  ): Promise<{ kind: 'duplicate'; phone: string } | null> {
+    await this.dataSource.query(
+      `UPDATE eventos_crudos SET processing_status_new='duplicate', status='duplicate' WHERE id=$1`,
+      [eventoCrudoId],
+    );
+    this.logger.warn(`[F1Persist] Duplicate invoice (${reason}): ${eventoCrudoId}`);
+    if (channel === 'whatsapp') {
+      const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone ?? null) : null;
+      if (phone) return { kind: 'duplicate', phone };
+    }
+    return null;
+  }
+
   private async persistEvento(
     job: Job<{ evento_crudo_id: string; client_id: string; classification: any; processing_status: string }>,
   ): Promise<PostCommitNotify> {
@@ -232,25 +256,38 @@ export class PersistProcessor extends WorkerHost {
     const invoiceDate = datos.fecha_emision ?? new Date().toISOString().split('T')[0];
     const description = `${tipo} - ${classification.categoria ?? 'Sin categoría'} | Confidence: ${confidence}`;
 
-    // Natural key duplicate check
+    // T10 · Dedup por CONTENIDO (sha256). Cacha un reenvío byte-idéntico de la MISMA
+    // boleta — el caso reportado en el Anexo — que el natural-key de abajo NO cacha si el
+    // OCR no extrae numero_documento + rut_emisor (o los extrae distinto). El OCR guarda
+    // doc_sha256 en este evento; buscamos OTRO evento ya PROCESADO con el mismo hash del
+    // mismo tenant. El filtro 'processed' es el MISMO que el dedup de manual/email
+    // (invoices.service): la race de reenvíos concurrentes (ambos en vuelo) queda como
+    // limitación conocida compartida por los tres paths.
+    const dupByHash = await this.dataSource.query(
+      `SELECT dup.id
+         FROM eventos_crudos self
+         JOIN eventos_crudos dup
+           ON dup.client_id = self.client_id
+          AND dup.doc_sha256 = self.doc_sha256
+          AND dup.id <> self.id
+          AND dup.processing_status_new = 'processed'
+        WHERE self.id = $1 AND self.doc_sha256 IS NOT NULL
+        LIMIT 1`,
+      [evento_crudo_id],
+    );
+    if (dupByHash.length) {
+      return this.markDuplicate(evento_crudo_id, channel, payload, 'content-hash');
+    }
+
+    // Natural key duplicate check — cacha una RE-FOTO del mismo comprobante (bytes
+    // distintos, mismo numero_documento + rut_emisor) que el hash nunca podría cachar.
     if (datos.numero_documento && datos.rut_emisor) {
       const dupInvoice = await this.dataSource.query(
         `SELECT id FROM invoices WHERE client_id=$1 AND numero_documento=$2 AND rut_emisor=$3 LIMIT 1`,
         [client_id, datos.numero_documento, datos.rut_emisor],
       );
       if (dupInvoice.length) {
-        await this.dataSource.query(
-          `UPDATE eventos_crudos SET processing_status_new='duplicate', status='duplicate' WHERE id=$1`,
-          [evento_crudo_id],
-        );
-        this.logger.warn(`[F1Persist] Duplicate invoice: ${evento_crudo_id}`);
-        // No dejar colgado al remitente tras el ack inicial: avisar que ya estaba
-        // registrado. El envío se hace tras el commit (fuera de la tx del tenant).
-        if (channel === 'whatsapp') {
-          const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone ?? null) : null;
-          if (phone) return { kind: 'duplicate', phone };
-        }
-        return null;
+        return this.markDuplicate(evento_crudo_id, channel, payload, 'natural-key');
       }
     }
 

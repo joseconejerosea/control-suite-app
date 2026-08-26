@@ -1170,3 +1170,73 @@ describe('PersistProcessor — duplicate notification', () => {
     expect(confirmarProcesado).not.toHaveBeenCalled();
   });
 });
+
+describe('PersistProcessor — content-hash duplicate (T10)', () => {
+  it('marca duplicate + avisa cuando otro evento PROCESADO tiene el mismo doc_sha256, SIN natural-key', async () => {
+    const queryMock = jest.fn((sql: string, _params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' } },
+        ]);
+      }
+      // Dedup por CONTENIDO: el JOIN encuentra otro evento con el mismo hash.
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([{ id: 'prior-evt' }]);
+      // Natural-key NO matchea (aislamos el path del hash).
+      if (sql.includes('FROM invoices WHERE')) return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const avisarDuplicado = jest.fn().mockResolvedValue(true);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: jest.fn() } as any,
+      { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-hashdup',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          // Sin numero_documento/rut_emisor → el natural-key ni se evalúa; SOLO el hash caza.
+          datos_extraidos: { monto_total: 100 },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    expect(avisarDuplicado).toHaveBeenCalledWith('5492216205665');
+    expect(confirmarProcesado).not.toHaveBeenCalled();
+    // NO insertó invoice.
+    const insertCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'));
+    expect(insertCall).toBeUndefined();
+    // Marcó el evento como duplicate.
+    const dupUpdate = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes("processing_status_new='duplicate'"));
+    expect(dupUpdate).toBeDefined();
+  });
+});

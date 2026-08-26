@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -87,6 +88,20 @@ export class OcrProcessor extends WorkerHost {
         await this.notifyFailure(eventPayload, canal);
         return;
       }
+
+      // T10 · Dedup por contenido — guardá el sha256 del archivo (si aún no está) para
+      // que el persist processor pueda detectar un reenvío byte-idéntico de la MISMA
+      // boleta. Los paths manual/email setean doc_sha256 al ingresar; el de WhatsApp NO,
+      // así que acá lo backfilleamos para todos por igual (WHERE doc_sha256 IS NULL = no-op
+      // para manual/email). Best-effort: un fallo acá no debe voltear el OCR.
+      const docSha256 = crypto
+        .createHash('sha256')
+        .update(Buffer.from(base64, 'base64'))
+        .digest('hex');
+      await this.dataSource.query(
+        `UPDATE eventos_crudos SET doc_sha256=$1 WHERE id=$2 AND doc_sha256 IS NULL`,
+        [docSha256, evento_crudo_id],
+      ).catch((e: any) => this.logger.warn(`[F1OCR] no se pudo guardar doc_sha256: ${e.message}`));
 
       const startTime = Date.now();
       const ocrResult = await this.extractTextWithClaude(base64, mimeType);
