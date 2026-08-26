@@ -544,7 +544,17 @@ export default function CrudTable({
   const openEdit = (item: Record<string, unknown>) => {
     const f: Record<string, string> = {};
     fields.forEach((field) => {
-      f[field.key] = String(item[field.key] ?? "");
+      const raw = item[field.key];
+      // Anexo · el modal de editar no precargaba la FECHA: un date/timestamp del backend
+      // ("2026-08-20T00:00:00.000Z" o un Date serializado) no matchea el "YYYY-MM-DD" que
+      // exige <input type="date"> → quedaba vacío (riesgo de borrarla al guardar). Extraemos
+      // el YYYY-MM-DD del inicio del string para los campos de tipo date.
+      if (field.type === "date" && raw != null && raw !== "") {
+        const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(raw));
+        f[field.key] = m ? m[1] : "";
+      } else {
+        f[field.key] = String(raw ?? "");
+      }
     });
     // Reset the dependent-endpoint baseline: opening an edit is an "initial" load,
     // so the preset child value must be PRESERVED even if the active-only options
