@@ -20,7 +20,9 @@ const STATE = 'awaiting_material';
  * a este servicio, que conduce la conversación multi-paso y, al final, crea el
  * ítem y su movimiento de inventario reusando los servicios de dominio:
  *
- *   nombre → proyecto → destino → bodega/activación → cantidad → registrar
+ *   nombre → destino → (bodega: proyecto → bodega | consumo: activación⇒proyecto) → cantidad → registrar
+ *   (#7a · el destino se pregunta ANTES que el proyecto; en "se usa hoy" el proyecto se
+ *    DERIVA de la activación elegida, no se pregunta.)
  *
  * El evento crudo ya está persistido en eventos_crudos antes de llegar acá.
  *
@@ -116,6 +118,22 @@ export class MaterialIntakeService {
     mi.nombre = mi.items[0].nombre; // compat con logs / confirmación single-ítem
     mi.attempts = 0;
 
+    // Matriz v1.3 (#7a) · reorden: el DESTINO (bodega vs se usa hoy) se pregunta ANTES que
+    // el proyecto. Para "se usa hoy" el proyecto se DERIVA de la activación elegida (no se
+    // pregunta); para "va a bodega" se pregunta el proyecto (askProyecto). Así el material
+    // nunca queda "sin proyecto" y el remitente no necesita saber a qué proyecto pertenece
+    // la activación. La misma garantía anti-contaminación del Anexo se mantiene: la
+    // activación determina el proyecto, no al revés.
+    return this.askDestino(phone, session);
+  }
+
+  /**
+   * Rama "va a bodega": pregunta a qué proyecto se asocia el material. Lista los proyectos
+   * activos del cliente. 1 → auto-selecciona y salta a bodega; ≥2 → lista numerada. En la
+   * rama "se usa hoy" NO se llama: el proyecto sale de la activación elegida (askActivacion).
+   */
+  private async askProyecto(phone: string, session: WhatsAppSession): Promise<boolean> {
+    const mi = session.materialIntake!;
     const projects = await runWithTenant(this.ds, session.clientId!, () =>
       this.ds.query(
         `SELECT id, name FROM projects WHERE client_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 10`,
@@ -132,7 +150,7 @@ export class MaterialIntakeService {
     // Un solo proyecto → auto-seleccionar y saltar la pregunta.
     if (projects.length === 1) {
       mi.proyectoId = projects[0].id;
-      return this.askDestino(phone, session);
+      return this.askBodega(phone, session);
     }
 
     mi.projects = projects;
@@ -160,7 +178,9 @@ export class MaterialIntakeService {
     }
     mi.proyectoId = opts[num - 1].id;
     mi.attempts = 0;
-    return this.askDestino(phone, session);
+    // #7a · el proyecto solo se pregunta en la rama "va a bodega" (el destino ya se eligió),
+    // así que el siguiente paso es la bodega, no el destino.
+    return this.askBodega(phone, session);
   }
 
   /** Pregunta si el material va a bodega (depósito) o se usa hoy en la activación. */
@@ -182,7 +202,7 @@ export class MaterialIntakeService {
     if (num === 1) {
       mi.destino = 'bodega';
       mi.attempts = 0;
-      return this.askBodega(phone, session);
+      return this.askProyecto(phone, session);
     }
     if (num === 2) {
       mi.destino = 'consumo';
@@ -197,7 +217,7 @@ export class MaterialIntakeService {
     if (nl === 'bodega') {
       mi.destino = 'bodega';
       mi.attempts = 0;
-      return this.askBodega(phone, session);
+      return this.askProyecto(phone, session);
     }
     if (nl === 'consumo') {
       mi.destino = 'consumo';
@@ -289,20 +309,28 @@ export class MaterialIntakeService {
    */
   private async askActivacion(phone: string, session: WhatsAppSession): Promise<boolean> {
     const mi = session.materialIntake!;
-    // Anexo · revalidación al elegir proyecto: la activación destino debe ser DEL proyecto
-    // que el remitente ya eligió, no de cualquiera del cliente (antes listaba todas las
-    // activas del tenant → podías atar consumo a una activación de OTRO proyecto). Mismo
-    // criterio de link que activations.findByProject: project_id directo O vía la campaña.
-    // Guard $2 IS NULL: si por alguna razón el proyecto no está fijado, no filtramos (no
-    // regresión al comportamiento anterior).
+    // Matriz v1.3 (#7a) · "se usa hoy": el proyecto se DERIVA de la activación elegida (el
+    // destino se pregunta ANTES que el proyecto). Listamos TODAS las activaciones vigentes del
+    // cliente y traemos su proyecto (COALESCE project_id directo O vía la campaña, mismo link
+    // que activations.findByProject). La garantía anti-contaminación del Anexo se mantiene: la
+    // activación fija el proyecto, no al revés. El guard $2 se conserva por robustez (si algún
+    // flujo llegara con proyecto ya fijado sigue filtrando por él); con proyecto en null
+    // (consumo-first) lista todas y el proyecto se fija al seleccionar la activación.
     const activaciones = await runWithTenant(this.ds, session.clientId!, () =>
       this.ds.query(
-        `SELECT a.id, a.activation_date, l.name AS location_name
+        `SELECT a.id, a.activation_date, l.name AS location_name,
+                COALESCE(a.project_id, c.project_id) AS project_id
            FROM activations a
            LEFT JOIN locations l ON l.id = a.location_id
+           LEFT JOIN campaigns c ON c.id = a.campaign_id
           WHERE a.client_id=$1
             AND a.status IN ('scheduled','in_progress')
             AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · "activaciones vencidas": la destino debe ser vigente — hoy
+            -- (hora Chile) en adelante, o sin fecha. now() AT TIME ZONE 'America/Santiago'
+            -- y no CURRENT_DATE: éste usa el UTC del contenedor y cerca de la medianoche
+            -- chilena saltaría de día. NULL se conserva (fecha desconocida ≠ vencida).
+            AND (a.activation_date IS NULL OR a.activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
             AND ($2::uuid IS NULL
                  OR a.project_id = $2
                  OR a.campaign_id IN (SELECT id FROM campaigns WHERE project_id = $2 AND client_id = $1))
@@ -322,12 +350,13 @@ export class MaterialIntakeService {
     const opciones = activaciones.map((a: any) => {
       const date = a.activation_date ? new Date(a.activation_date).toLocaleDateString('es-CL') : '';
       const label = [a.location_name, date].filter(Boolean).join(' · ') || 'Activación';
-      return { id: a.id, label };
+      return { id: a.id, label, projectId: a.project_id ?? undefined };
     });
 
     if (opciones.length === 1) {
-      mi.activacionId = opciones[0].id;
-      return this.proceedToCantidad(phone, session);
+      // #7a · una sola activación vigente → auto-selección; el proyecto sale de ella (o se
+      // deriva a operador si esa activación no tiene proyecto — JD-001).
+      return this.setActivacionYProyecto(phone, session, opciones[0].id, opciones[0].projectId);
     }
 
     mi.activaciones = opciones;
@@ -350,9 +379,9 @@ export class MaterialIntakeService {
       }
       return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
     }
-    mi.activacionId = opts[num - 1].id;
-    mi.attempts = 0;
-    return this.proceedToCantidad(phone, session);
+    // #7a · el proyecto se deriva de la activación elegida (destino "se usa hoy"), o se deriva
+    // a operador si esa activación no tiene proyecto (JD-001).
+    return this.setActivacionYProyecto(phone, session, opts[num - 1].id, opts[num - 1].projectId);
   }
 
   private async askBodega(phone: string, session: WhatsAppSession): Promise<boolean> {
@@ -468,13 +497,17 @@ export class MaterialIntakeService {
       switch (pending.forStep) {
         case 'proyecto':
           mi.proyectoId = pending.optionId;
-          return this.askDestino(phone, session);
+          // #7a · el proyecto solo se confirma en la rama "va a bodega" → sigue la bodega.
+          return this.askBodega(phone, session);
         case 'bodega':
           mi.bodegaId = pending.optionId;
           return this.proceedToCantidad(phone, session);
-        case 'activacion':
-          mi.activacionId = pending.optionId;
-          return this.proceedToCantidad(phone, session);
+        case 'activacion': {
+          // #7a · derivar el proyecto de la activación confirmada (o derivar a operador si no
+          // tiene proyecto — JD-001).
+          const act = (mi.activaciones ?? []).find((a) => a.id === pending.optionId);
+          return this.setActivacionYProyecto(phone, session, pending.optionId, act?.projectId);
+        }
         // R3-001: compile-exhaustive fallback. All three real cases return above; this only
         // closes an impossible fall-through so a future widening of pendingConfirm.forStep
         // cannot silently drop a confirmed YES. Unreachable today (forStep is a 3-way union).
@@ -588,6 +621,19 @@ export class MaterialIntakeService {
     const mi = session.materialIntake!;
     const clientId = session.clientId!;
     const esConsumo = mi.destino === 'consumo';
+
+    // #7a / JD-001 · defensa en profundidad: un consumo NUNCA debe registrarse sin proyecto
+    // (proyecto_destino_id NULL = "material sin proyecto", la regresión A2). Los sitios de
+    // derivación (setActivacionYProyecto) ya lo garantizan; este guard evita la escritura
+    // irreversible de inventario si algún camino futuro se saltara ese chequeo.
+    if (esConsumo && !mi.proyectoId) {
+      this.logger.warn(`[Material] register() abortado: consumo sin proyecto derivado (evento ${mi.eventoCrudoId})`);
+      await this.notifyNoActivation(mi.eventoCrudoId, phone, clientId, {
+        reason: 'material_consumo_without_project',
+        message: 'No pude asociar el material a un proyecto. Avisale a tu coordinador para revisar la activación. 🙌',
+      });
+      return true;
+    }
 
     // JD-003 · Guard de idempotencia ATÓMICO. El alta crea SKUs + movimientos de
     // inventario (escrituras IRREVERSIBLES). Dos pins de ubicación concurrentes
@@ -884,6 +930,8 @@ export class MaterialIntakeService {
           WHERE client_id=$1
             AND status IN ('scheduled','in_progress')
             AND estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · vigente: hoy (hora Chile) en adelante, o sin fecha (ver askActivacion).
+            AND (activation_date IS NULL OR activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
           LIMIT 1`,
         [clientId],
       ),
@@ -897,21 +945,55 @@ export class MaterialIntakeService {
    * (solo auditoría, NO entra en la cola de escalados). No deja sesión: no hay
    * conversación que continuar.
    */
-  private async notifyNoActivation(eventoCrudoId: string, phone: string, clientId: string): Promise<void> {
+  private async notifyNoActivation(
+    eventoCrudoId: string,
+    phone: string,
+    clientId: string,
+    opts?: { message?: string; reason?: string },
+  ): Promise<void> {
     // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
     // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
     await runWithTenant(this.ds, clientId, () =>
       this.ds.query(
         `UPDATE eventos_crudos SET status='no_activation',
            parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-        [eventoCrudoId, JSON.stringify({ escalation_reason: 'material_no_active_activation', at: new Date().toISOString() })],
+        [eventoCrudoId, JSON.stringify({ escalation_reason: opts?.reason ?? 'material_no_active_activation', at: new Date().toISOString() })],
       ),
     ).catch(() => {});
     await this.sessions.delete(phone);
     await this.wa.sendText(
       phone,
-      'No veo una activación activa hoy para asociar este material. Pedile a tu coordinador que cargue la activación y volvé a enviármelo. 🙌',
+      opts?.message ??
+        'No veo una activación activa hoy para asociar este material. Pedile a tu coordinador que cargue la activación y volvé a enviármelo. 🙌',
     );
+  }
+
+  /**
+   * #7a · Fija la activación destino y DERIVA su proyecto. Si la activación no tiene proyecto
+   * asociado (COALESCE(a.project_id, c.project_id) = null: ambos vínculos nulos — p.ej. campaña
+   * sin proyecto, o proyecto borrado con ON DELETE SET NULL), NO registra: un consumo "sin
+   * proyecto" es la regresión A2 que este flujo debe evitar (JD-001). Avisa al remitente, marca
+   * el evento y NO escribe inventario.
+   */
+  private async setActivacionYProyecto(
+    phone: string,
+    session: WhatsAppSession,
+    activacionId: string,
+    projectId: string | undefined,
+  ): Promise<boolean> {
+    const mi = session.materialIntake!;
+    mi.activacionId = activacionId;
+    if (!projectId) {
+      await this.notifyNoActivation(mi.eventoCrudoId, phone, session.clientId!, {
+        reason: 'material_activation_without_project',
+        message:
+          'Esa activación no tiene un proyecto asociado, así que no puedo registrar el material. Avisale a tu coordinador para que la vincule a un proyecto. 🙌',
+      });
+      return true;
+    }
+    mi.proyectoId = projectId;
+    mi.attempts = 0;
+    return this.proceedToCantidad(phone, session);
   }
 
   private async retryOrEscalate(phone: string, session: WhatsAppSession, retryMsg: string): Promise<boolean> {

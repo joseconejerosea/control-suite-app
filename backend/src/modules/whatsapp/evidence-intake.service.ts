@@ -122,6 +122,10 @@ export class EvidenceIntakeService {
           WHERE client_id=$1 AND promoter_id=$2
             AND status IN ('scheduled','in_progress')
             AND estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · "activaciones vencidas": solo vigentes — hoy (hora Chile) en
+            -- adelante, o sin fecha. now() AT TIME ZONE 'America/Santiago' y no CURRENT_DATE
+            -- (UTC del contenedor). NULL se conserva (fecha desconocida ≠ vencida).
+            AND (activation_date IS NULL OR activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
           ORDER BY activation_date DESC LIMIT 10`,
         [opts.clientId, personaId],
       ),
@@ -134,6 +138,8 @@ export class EvidenceIntakeService {
             WHERE client_id=$1
               AND status IN ('scheduled','in_progress')
               AND estado_f5 IS DISTINCT FROM 'cerrada'
+              -- Matriz v1.3 · vigente: hoy (hora Chile) en adelante, o sin fecha (ver nivel 1).
+              AND (activation_date IS NULL OR activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
             ORDER BY activation_date DESC LIMIT 10`,
           [opts.clientId],
         ),
@@ -716,6 +722,8 @@ export class EvidenceIntakeService {
           WHERE a.client_id = $1
             AND a.status IN ('scheduled','in_progress')
             AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · vigente: hoy (hora Chile) en adelante, o sin fecha (ver askActivacion).
+            AND (a.activation_date IS NULL OR a.activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
           ORDER BY a.activation_date DESC
           LIMIT 2`,
         [clientId],

@@ -986,10 +986,18 @@ export class WhatsAppWebhookController {
     // otra salida. Va ANTES de los interceptores de intake (si no, el texto se comería
     // como respuesta del paso actual). Preserva el client_id (setActionMenu) para no
     // re-preguntar la agencia al reanudar.
+    //
+    // Matriz v1.3 · "cancelar en pasos que esperan foto": el escape también cubre
+    // awaiting_media ("Mandame la foto…") y awaiting_type ("¿Qué es esta foto?"). Antes
+    // solo escapaba de los pasos de TEXTO del intake; en los pasos de foto, un "cancelar"
+    // caía a "No entendí"/repetía el pedido y la única salida era mandar una imagen.
+    // delete() descarta también la foto buffereada (awaiting_type) y el pendingType.
     const intakeSession = await this.sessions.get(from);
     if (
       (intakeSession?.state === 'awaiting_material' ||
-        intakeSession?.state === 'awaiting_evidence') &&
+        intakeSession?.state === 'awaiting_evidence' ||
+        intakeSession?.state === 'awaiting_media' ||
+        intakeSession?.state === 'awaiting_type') &&
       this.isCancelIntent(text)
     ) {
       await this.sessions.delete(from);

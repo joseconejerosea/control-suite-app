@@ -65,7 +65,10 @@ export interface WhatsAppSession {
     bodegaId?: string;
     destino?: 'bodega' | 'consumo';           // rama elegida en el paso 'destino'
     activacionId?: string;                     // activación destino cuando destino='consumo'
-    activaciones?: { id: string; label: string }[];  // opciones numeradas cacheadas
+    // Matriz v1.3 (#7a) · projectId: en "se usa hoy" el destino se pregunta ANTES que el
+    // proyecto, así que el proyecto se DERIVA de la activación elegida. Cada opción carga
+    // su proyecto para fijar mi.proyectoId al seleccionarla.
+    activaciones?: { id: string; label: string; projectId?: string }[];  // opciones numeradas cacheadas
     cantidad?: number;
     projects?: { id: string; name: string }[];  // opciones cacheadas para parsear el número
     bodegas?: { id: string; name: string }[];

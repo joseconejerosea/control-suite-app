@@ -56,7 +56,7 @@ export class DashboardService {
       `
       SELECT
         (SELECT COUNT(*)::int FROM projects
-          WHERE client_id = $1)                                             AS total_projects,
+          WHERE client_id = $1 AND status <> 'archived')                    AS total_projects,
         (SELECT COUNT(*)::int FROM campaigns
           WHERE client_id = $1 AND status = 'active'
             AND ($4::uuid IS NULL OR project_id = $4))                      AS active_campaigns,
