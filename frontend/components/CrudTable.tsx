@@ -173,6 +173,7 @@ function Modal({
   fields,
   form,
   setForm,
+  error,
 }: {
   title: string;
   onClose: () => void;
@@ -181,6 +182,7 @@ function Modal({
   fields: FieldDef[];
   form: Record<string, string>;
   setForm: (f: Record<string, string>) => void;
+  error?: string | null;
 }) {
   const set = (key: string, val: string) => setForm({ ...form, [key]: val });
   return (
@@ -211,6 +213,19 @@ function Modal({
           </button>
         </div>
         <div className="flex flex-col gap-4 px-6 py-4">
+          {error && (
+            <div
+              role="alert"
+              className="rounded-lg px-3 py-2 text-xs font-medium"
+              style={{
+                background: "var(--secondary)",
+                border: "1px solid var(--danger)",
+                color: "var(--danger)",
+              }}
+            >
+              {error}
+            </div>
+          )}
           {fields.map((f) => (
             <div key={f.key} className="flex flex-col gap-1.5">
               <label
@@ -348,6 +363,11 @@ export default function CrudTable({
   });
   const [editId, setEditId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  // T6 (Matriz v1.3) · el error de guardado se muestra DENTRO del modal. El toast queda
+  // detrás del overlay del modal (mismo z-50 + backdrop), así que un 400 —p.ej. el
+  // anti-choque de promotor— se veía como "no pasó nada". Se limpia al abrir, cerrar
+  // y reintentar.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Mirror of `form` so async dependent-fetch callbacks can read the latest child
   // value without nesting state setters. Kept in sync on every render.
@@ -547,6 +567,7 @@ export default function CrudTable({
     prevDependentUrl.current = {};
     setForm(f);
     setEditId(null);
+    setSaveError(null);
     setModal("create");
   };
 
@@ -571,11 +592,13 @@ export default function CrudTable({
     prevDependentUrl.current = {};
     setForm(f);
     setEditId(String(item.id));
+    setSaveError(null);
     setModal("edit");
   };
 
   const handleSave = async () => {
     setSave(true);
+    setSaveError(null);
     const wasCreate = modal === "create";
     try {
       const payload: Record<string, unknown> = { ...form };
@@ -605,7 +628,9 @@ export default function CrudTable({
       // (e.g. mark a pending_staff row 'agregado') so canceling loses nothing.
       if (wasCreate) onCreated?.();
     } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : "Operation failed", false);
+      // Modal-context error (save is only triggered from the modal): render it inside
+      // the modal, which stays open, instead of a toast hidden behind the overlay.
+      setSaveError(e instanceof Error ? e.message : "No se pudo guardar. Intentá de nuevo.");
     } finally {
       setSave(false);
     }
@@ -830,12 +855,16 @@ export default function CrudTable({
               ? `New ${title.replace(/s$/, "")}`
               : `Edit ${title.replace(/s$/, "")}`
           }
-          onClose={() => setModal(null)}
+          onClose={() => {
+            setModal(null);
+            setSaveError(null);
+          }}
           onSave={handleSave}
           loading={saving}
           fields={resolvedFields}
           form={form}
           setForm={setForm}
+          error={saveError}
         />
       )}
     </div>
