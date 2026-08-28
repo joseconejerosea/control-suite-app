@@ -6,6 +6,7 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { AuditService } from '../audit/audit.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { runWithTenant } from '../../common/tenant/tenant-context';
+import { parseCantidadCL } from '../../common/utils/parse-cantidad';
 
 @Injectable()
 export class StockReturnsService {
@@ -174,7 +175,7 @@ export class StockReturnsService {
             tipo, cantidad, estado, foto_key, observacion, fecha_retorno_real)
          VALUES ($1,$2,$3,$4,$5,'devolucion',$6,'devuelto_completo',$7,'Devolución confirmada por operador',NOW())`,
         [clientId, item.sku_id, req.persona_id, bodegaId, req.project_id,
-         parseInt(item.pendiente), req.photo_key ?? null],
+         (parseCantidadCL(item.pendiente) ?? 0), req.photo_key ?? null],
       );
 
       // Actualiza inventario en la misma bodega referenciada en el movimiento
@@ -184,7 +185,7 @@ export class StockReturnsService {
            VALUES ($1,$2,$3,$4,NOW())
            ON CONFLICT (client_id, sku_id, bodega_id)
            DO UPDATE SET cantidad = inventario.cantidad + $4, ultimo_movimiento_at = NOW()`,
-          [clientId, item.sku_id, bodegaId, parseInt(item.pendiente)],
+          [clientId, item.sku_id, bodegaId, (parseCantidadCL(item.pendiente) ?? 0)],
         );
       }
     }

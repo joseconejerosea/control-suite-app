@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { CreateSkuDto, UpdateSkuDto } from './dto/sku.dto';
+import { parseCantidadCL } from '../../common/utils/parse-cantidad';
 
 @Injectable()
 export class SkusService {
@@ -49,7 +50,9 @@ export class SkusService {
       const cliente_final = pick(rows[i], ['cliente_final', 'cliente final', 'cliente']) || null;
       const tipo = pick(rows[i], ['tipo']).toLowerCase() === 'consumible' ? 'consumible' : 'reusable';
       const minRaw = pick(rows[i], ['min_stock', 'stock minimo', 'stock mínimo', 'stock']);
-      const min_stock = minRaw && !isNaN(Number(minRaw)) ? parseInt(minRaw, 10) : 5;
+      // Truncamiento chileno: "4.800" con parseInt daría 4 → falsas alertas de stock bajo.
+      // parseCantidadCL quita los separadores de miles antes de parsear. Default 5 si vacío.
+      const min_stock = parseCantidadCL(minRaw) ?? 5;
 
       const res = await this.ds.query(
         `INSERT INTO skus (client_id, codigo, nombre, cliente_final, tipo, min_stock)
