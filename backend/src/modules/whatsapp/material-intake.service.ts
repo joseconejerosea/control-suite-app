@@ -303,6 +303,11 @@ export class MaterialIntakeService {
           WHERE a.client_id=$1
             AND a.status IN ('scheduled','in_progress')
             AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · "activaciones vencidas": la destino debe ser vigente — hoy
+            -- (hora Chile) en adelante, o sin fecha. now() AT TIME ZONE 'America/Santiago'
+            -- y no CURRENT_DATE: éste usa el UTC del contenedor y cerca de la medianoche
+            -- chilena saltaría de día. NULL se conserva (fecha desconocida ≠ vencida).
+            AND (a.activation_date IS NULL OR a.activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
             AND ($2::uuid IS NULL
                  OR a.project_id = $2
                  OR a.campaign_id IN (SELECT id FROM campaigns WHERE project_id = $2 AND client_id = $1))
@@ -884,6 +889,8 @@ export class MaterialIntakeService {
           WHERE client_id=$1
             AND status IN ('scheduled','in_progress')
             AND estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · vigente: hoy (hora Chile) en adelante, o sin fecha (ver askActivacion).
+            AND (activation_date IS NULL OR activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
           LIMIT 1`,
         [clientId],
       ),
