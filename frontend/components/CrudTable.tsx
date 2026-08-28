@@ -128,13 +128,22 @@ export const StatusBadge = (v: unknown) => {
 
 // Anexo · "fecha un día antes": una fecha date-only 'YYYY-MM-DD' con new Date(s) se
 // interpreta como UTC-medianoche → toLocaleDateString la corre a hora local (Chile, UTC-3/4)
-// → muestra el día ANTERIOR. Si es date-only, la parseamos como fecha LOCAL (sin drift). Un
-// timestamp con hora ('...T...') es un instante y se muestra tal cual.
+// → muestra el día ANTERIOR.
+//
+// El backend serializa una columna `date` (activation_date, start_date, end_date) como un
+// instante a medianoche UTC ('YYYY-MM-DDT00:00:00.000Z') porque el contenedor corre en UTC.
+// Ese caso NO lo cubría el regex date-only y volvía a driftear. Tratamos como fecha de
+// calendario LOCAL tanto el date-only puro como el instante a medianoche UTC — ambos
+// representan un día sin hora real. Un timestamp genuino con hora (p.ej. created_at) NO
+// matchea y se muestra como instante local, sin cambios.
 export function toLocalDate(v: unknown): Date {
   const s = String(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [y, m, d] = s.split("-").map(Number);
-    return new Date(y, m - 1, d);
+  const dateOnly = s.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.000)?(?:Z|\+00:?00))?$/,
+  );
+  if (dateOnly) {
+    const [, y, m, d] = dateOnly;
+    return new Date(Number(y), Number(m) - 1, Number(d));
   }
   return new Date(s);
 }
