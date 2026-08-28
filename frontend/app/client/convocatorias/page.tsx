@@ -22,8 +22,18 @@ const promoterName = (p: any) =>
 // ─── ASIGNAR TURNO MODAL ────────────────────────────────────────────────────
 function TurnoModal({ projectId, promoters, onClose, onDone }: { projectId: string; promoters: any[]; onClose: () => void; onDone: () => void }) {
   const [form, setForm] = useState({ persona_id: "", dia: "", local_nombre: "", local_direccion: "" });
+  const [locations, setLocations] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // B4 (Matriz v1.3) · el "Local" se elige de los PDVs del proyecto, no texto libre (que
+  // ensuciaba los datos). Elegir un PDV autocompleta también la dirección. Si el proyecto
+  // no tiene PDVs cargados, el campo cae a texto libre (mismo fallback que la página Convocar).
+  useEffect(() => {
+    api.get<any>(`/projects/${projectId}/locations`)
+      .then((r) => { const d = r?.data ?? r; setLocations(Array.isArray(d) ? d : []); })
+      .catch(() => setLocations([]));
+  }, [projectId]);
 
   const canSave = !!form.persona_id && !!form.dia;
 
@@ -62,11 +72,31 @@ function TurnoModal({ projectId, promoters, onClose, onDone }: { projectId: stri
           </div>
           <div>
             <label style={labelStyle}>Local</label>
-            <input value={form.local_nombre} onChange={e => setForm(f => ({ ...f, local_nombre: e.target.value }))} placeholder="Sucursal Centro" style={fieldStyle} />
+            {locations.length > 0 ? (
+              <select
+                value={form.local_nombre}
+                onChange={e => {
+                  const loc = locations.find((l) => l.name === e.target.value);
+                  setForm(f => ({ ...f, local_nombre: loc ? loc.name : "", local_direccion: loc?.address ?? "" }));
+                }}
+                style={fieldStyle}
+              >
+                <option value="">— Local —</option>
+                {locations.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+              </select>
+            ) : (
+              <input value={form.local_nombre} onChange={e => setForm(f => ({ ...f, local_nombre: e.target.value }))} placeholder="Sucursal Centro" style={fieldStyle} />
+            )}
           </div>
           <div>
             <label style={labelStyle}>Dirección</label>
-            <input value={form.local_direccion} onChange={e => setForm(f => ({ ...f, local_direccion: e.target.value }))} placeholder="Av. Ejemplo 123" style={fieldStyle} />
+            <input
+              value={form.local_direccion}
+              onChange={e => setForm(f => ({ ...f, local_direccion: e.target.value }))}
+              placeholder="Av. Ejemplo 123"
+              readOnly={locations.length > 0}
+              style={{ ...fieldStyle, ...(locations.length > 0 ? { opacity: 0.7, cursor: "default" } : {}) }}
+            />
           </div>
           {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
