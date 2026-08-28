@@ -20,7 +20,9 @@ const STATE = 'awaiting_material';
  * a este servicio, que conduce la conversación multi-paso y, al final, crea el
  * ítem y su movimiento de inventario reusando los servicios de dominio:
  *
- *   nombre → proyecto → destino → bodega/activación → cantidad → registrar
+ *   nombre → destino → (bodega: proyecto → bodega | consumo: activación⇒proyecto) → cantidad → registrar
+ *   (#7a · el destino se pregunta ANTES que el proyecto; en "se usa hoy" el proyecto se
+ *    DERIVA de la activación elegida, no se pregunta.)
  *
  * El evento crudo ya está persistido en eventos_crudos antes de llegar acá.
  *
@@ -352,10 +354,9 @@ export class MaterialIntakeService {
     });
 
     if (opciones.length === 1) {
-      mi.activacionId = opciones[0].id;
-      // #7a · una sola activación vigente → auto-selección; el proyecto sale de ella.
-      if (opciones[0].projectId) mi.proyectoId = opciones[0].projectId;
-      return this.proceedToCantidad(phone, session);
+      // #7a · una sola activación vigente → auto-selección; el proyecto sale de ella (o se
+      // deriva a operador si esa activación no tiene proyecto — JD-001).
+      return this.setActivacionYProyecto(phone, session, opciones[0].id, opciones[0].projectId);
     }
 
     mi.activaciones = opciones;
@@ -378,11 +379,9 @@ export class MaterialIntakeService {
       }
       return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
     }
-    mi.activacionId = opts[num - 1].id;
-    // #7a · el proyecto se deriva de la activación elegida (destino "se usa hoy").
-    if (opts[num - 1].projectId) mi.proyectoId = opts[num - 1].projectId;
-    mi.attempts = 0;
-    return this.proceedToCantidad(phone, session);
+    // #7a · el proyecto se deriva de la activación elegida (destino "se usa hoy"), o se deriva
+    // a operador si esa activación no tiene proyecto (JD-001).
+    return this.setActivacionYProyecto(phone, session, opts[num - 1].id, opts[num - 1].projectId);
   }
 
   private async askBodega(phone: string, session: WhatsAppSession): Promise<boolean> {
@@ -504,11 +503,10 @@ export class MaterialIntakeService {
           mi.bodegaId = pending.optionId;
           return this.proceedToCantidad(phone, session);
         case 'activacion': {
-          mi.activacionId = pending.optionId;
-          // #7a · derivar el proyecto de la activación confirmada (destino "se usa hoy").
+          // #7a · derivar el proyecto de la activación confirmada (o derivar a operador si no
+          // tiene proyecto — JD-001).
           const act = (mi.activaciones ?? []).find((a) => a.id === pending.optionId);
-          if (act?.projectId) mi.proyectoId = act.projectId;
-          return this.proceedToCantidad(phone, session);
+          return this.setActivacionYProyecto(phone, session, pending.optionId, act?.projectId);
         }
         // R3-001: compile-exhaustive fallback. All three real cases return above; this only
         // closes an impossible fall-through so a future widening of pendingConfirm.forStep
@@ -623,6 +621,19 @@ export class MaterialIntakeService {
     const mi = session.materialIntake!;
     const clientId = session.clientId!;
     const esConsumo = mi.destino === 'consumo';
+
+    // #7a / JD-001 · defensa en profundidad: un consumo NUNCA debe registrarse sin proyecto
+    // (proyecto_destino_id NULL = "material sin proyecto", la regresión A2). Los sitios de
+    // derivación (setActivacionYProyecto) ya lo garantizan; este guard evita la escritura
+    // irreversible de inventario si algún camino futuro se saltara ese chequeo.
+    if (esConsumo && !mi.proyectoId) {
+      this.logger.warn(`[Material] register() abortado: consumo sin proyecto derivado (evento ${mi.eventoCrudoId})`);
+      await this.notifyNoActivation(mi.eventoCrudoId, phone, clientId, {
+        reason: 'material_consumo_without_project',
+        message: 'No pude asociar el material a un proyecto. Avisale a tu coordinador para revisar la activación. 🙌',
+      });
+      return true;
+    }
 
     // JD-003 · Guard de idempotencia ATÓMICO. El alta crea SKUs + movimientos de
     // inventario (escrituras IRREVERSIBLES). Dos pins de ubicación concurrentes
@@ -934,21 +945,55 @@ export class MaterialIntakeService {
    * (solo auditoría, NO entra en la cola de escalados). No deja sesión: no hay
    * conversación que continuar.
    */
-  private async notifyNoActivation(eventoCrudoId: string, phone: string, clientId: string): Promise<void> {
+  private async notifyNoActivation(
+    eventoCrudoId: string,
+    phone: string,
+    clientId: string,
+    opts?: { message?: string; reason?: string },
+  ): Promise<void> {
     // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
     // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
     await runWithTenant(this.ds, clientId, () =>
       this.ds.query(
         `UPDATE eventos_crudos SET status='no_activation',
            parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-        [eventoCrudoId, JSON.stringify({ escalation_reason: 'material_no_active_activation', at: new Date().toISOString() })],
+        [eventoCrudoId, JSON.stringify({ escalation_reason: opts?.reason ?? 'material_no_active_activation', at: new Date().toISOString() })],
       ),
     ).catch(() => {});
     await this.sessions.delete(phone);
     await this.wa.sendText(
       phone,
-      'No veo una activación activa hoy para asociar este material. Pedile a tu coordinador que cargue la activación y volvé a enviármelo. 🙌',
+      opts?.message ??
+        'No veo una activación activa hoy para asociar este material. Pedile a tu coordinador que cargue la activación y volvé a enviármelo. 🙌',
     );
+  }
+
+  /**
+   * #7a · Fija la activación destino y DERIVA su proyecto. Si la activación no tiene proyecto
+   * asociado (COALESCE(a.project_id, c.project_id) = null: ambos vínculos nulos — p.ej. campaña
+   * sin proyecto, o proyecto borrado con ON DELETE SET NULL), NO registra: un consumo "sin
+   * proyecto" es la regresión A2 que este flujo debe evitar (JD-001). Avisa al remitente, marca
+   * el evento y NO escribe inventario.
+   */
+  private async setActivacionYProyecto(
+    phone: string,
+    session: WhatsAppSession,
+    activacionId: string,
+    projectId: string | undefined,
+  ): Promise<boolean> {
+    const mi = session.materialIntake!;
+    mi.activacionId = activacionId;
+    if (!projectId) {
+      await this.notifyNoActivation(mi.eventoCrudoId, phone, session.clientId!, {
+        reason: 'material_activation_without_project',
+        message:
+          'Esa activación no tiene un proyecto asociado, así que no puedo registrar el material. Avisale a tu coordinador para que la vincule a un proyecto. 🙌',
+      });
+      return true;
+    }
+    mi.proyectoId = projectId;
+    mi.attempts = 0;
+    return this.proceedToCantidad(phone, session);
   }
 
   private async retryOrEscalate(phone: string, session: WhatsAppSession, retryMsg: string): Promise<boolean> {

@@ -43,7 +43,8 @@ describe('MaterialIntakeService', () => {
       }
       if (sql.includes('SELECT name FROM projects')) return Promise.resolve([{ name: 'Proyecto Uno' }]);
       if (sql.includes('SELECT nombre FROM bodegas')) return Promise.resolve([{ nombre: 'Bodega Central' }]);
-      if (sql.includes('FROM activations')) return Promise.resolve([{ id: 'act-1' }]);
+      // #7a · la activación trae su proyecto (askActivacion deriva project vía COALESCE).
+      if (sql.includes('FROM activations')) return Promise.resolve([{ id: 'act-1', project_id: 'proj-1' }]);
       return Promise.resolve([]);
     });
 
@@ -275,6 +276,36 @@ describe('MaterialIntakeService', () => {
     const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
     expect(msg).toMatch(/activaci[oó]n/i);
     expect(store[PHONE]).toBeUndefined();
+  });
+
+  it('#7a/JD-001 · "se usa hoy" con una activación SIN proyecto (COALESCE null) NO registra: avisa y no crea movimiento', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes("status='active'")) return Promise.resolve([{ id: 'proj-1', name: 'Proyecto Uno' }]);
+      if (sql.includes('FROM activations') && sql.includes('estado_f5')) {
+        // Activación vigente pero SIN proyecto derivable (a.project_id y c.project_id nulos).
+        return Promise.resolve([{ id: 'act-1', activation_date: null, location_name: null, project_id: null }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await svc.start({ eventoCrudoId: 'evt-noproj', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    expect(await svc.handleResponse(PHONE, 'Silla ACME')).toBe(true); // nombre → destino
+    expect(await svc.handleResponse(PHONE, '2')).toBe(true);          // se usa hoy → activación sin proyecto → aviso
+
+    // NO registró inventario (evita la regresión A2 "material sin proyecto").
+    expect(skus.create).not.toHaveBeenCalled();
+    expect(movimientos.create).not.toHaveBeenCalled();
+    // Evento marcado con la razón específica y sesión limpia.
+    const noact = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE eventos_crudos') && sql.includes("status='no_activation'"),
+    );
+    expect(noact).toBeDefined();
+    expect(noact[1][1]).toContain('material_activation_without_project');
+    expect(store[PHONE]).toBeUndefined();
+    // Mensaje claro sobre el proyecto faltante.
+    const msg = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+    expect(msg).toMatch(/proyecto/i);
   });
 
   it('"se usa hoy" with multiple active activations asks which one, then records consumo for the chosen activation', async () => {
@@ -1173,8 +1204,8 @@ describe('MaterialIntakeService', () => {
       seedStep('activacion', {
         proyectoId: 'proj-1', destino: 'consumo',
         activaciones: [
-          { id: 'act-1', label: 'Jumbo Maipú · 12-08-2026' },
-          { id: 'act-2', label: 'Líder Centro · 11-08-2026' },
+          { id: 'act-1', label: 'Jumbo Maipú · 12-08-2026', projectId: 'proj-1' },
+          { id: 'act-2', label: 'Líder Centro · 11-08-2026', projectId: 'proj-2' },
         ],
         items: [{ nombre: 'Silla', cantidad: null }],
       });
@@ -1227,8 +1258,8 @@ describe('MaterialIntakeService', () => {
       seedStep('activacion', {
         proyectoId: 'proj-1', destino: 'consumo',
         activaciones: [
-          { id: 'act-1', label: 'Jumbo Maipú · 12-08-2026' },
-          { id: 'act-2', label: 'Líder Centro · 11-08-2026' },
+          { id: 'act-1', label: 'Jumbo Maipú · 12-08-2026', projectId: 'proj-1' },
+          { id: 'act-2', label: 'Líder Centro · 11-08-2026', projectId: 'proj-2' },
         ],
         items: [{ nombre: 'Silla', cantidad: null }],
       });
