@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { isISO8601 } from 'class-validator';
-import { DataSource } from 'typeorm';
+import { DataSource, Not, FindOptionsWhere } from 'typeorm';
 import { TenantRepository } from '../../common/repositories/tenant.repository';
 import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -201,8 +201,25 @@ export class ProjectsService {
     return project;
   }
 
-  async findAll(clientId: string): Promise<Project[]> {
-    return this.repo.findAll(clientId, { order: { created_at: 'DESC' } });
+  // Matriz v1.3 · "eliminar proyecto" (soft-delete): la lista excluye los archivados por
+  // defecto; con { archived: true } devuelve SOLO los archivados (para la vista "Ver
+  // archivados" y restaurarlos). El historial se conserva — archivar solo cambia el status.
+  async findAll(clientId: string, opts?: { archived?: boolean }): Promise<Project[]> {
+    return this.repo.findAll(clientId, {
+      where: { status: opts?.archived ? 'archived' : Not('archived') } as FindOptionsWhere<Project>,
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  /**
+   * Matriz v1.3 · archiva/desarchiva un proyecto (soft-delete reversible). NO usa el update()
+   * general para evitar sus efectos colaterales (invalidación de aprobación, sync de locales):
+   * archivar solo cambia el status. findOne valida existencia + tenant (404 si no corresponde).
+   * Restaurar vuelve a 'active'.
+   */
+  async setArchived(clientId: string, id: string, archived: boolean): Promise<Project> {
+    await this.findOne(clientId, id);
+    return this.repo.update(clientId, id, { status: archived ? 'archived' : 'active' });
   }
 
   async findOne(clientId: string, id: string): Promise<Project> {

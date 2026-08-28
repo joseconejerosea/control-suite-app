@@ -93,8 +93,28 @@ export class ProjectsController {
 
   @Get()
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
-  findAll(@Req() req: AuthedRequest) {
-    return this.service.findAll(req.user.client_id);
+  findAll(@Req() req: AuthedRequest, @Query('archived') archived?: string) {
+    // ?archived=1|true → solo archivados (vista "Ver archivados"); por defecto, solo activos.
+    return this.service.findAll(req.user.client_id, { archived: archived === '1' || archived === 'true' });
+  }
+
+  // ── Matriz v1.3: archivar / restaurar proyecto (soft-delete reversible) ──────
+  //   PATCH /projects/:id/archive   → status='archived' (sale de las listas activas)
+  //   PATCH /projects/:id/unarchive → status='active'   (lo restaura)
+  //   Declarados ANTES de PATCH :id no hace falta (rutas distintas), pero se agrupan acá.
+
+  @Patch(':id/archive')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'ARCHIVE_PROJECT', entity: 'Project' })
+  archive(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.setArchived(req.user.client_id, id, true);
+  }
+
+  @Patch(':id/unarchive')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'UNARCHIVE_PROJECT', entity: 'Project' })
+  unarchive(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.setArchived(req.user.client_id, id, false);
   }
 
   // ── T9: Calendario global (read-only) ──────────────────────────────────────

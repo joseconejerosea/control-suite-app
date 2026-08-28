@@ -30,19 +30,34 @@ const fmtMoney = (v?: number) => v != null ? `$${Number(v).toLocaleString("es-CL
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [search, setSearch]     = useState("");
+  const [projects, setProjects]         = useState<Project[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [search, setSearch]             = useState("");
+  // Matriz v1.3 · "eliminar proyecto" = archivar (soft-delete). La lista muestra los activos;
+  // el toggle "Ver archivados" pide ?archived=1 para poder restaurarlos.
+  const [showArchived, setShowArchived] = useState(false);
 
   const fetchProjects = () => {
     setLoading(true);
-    api.get<any>("/projects")
+    api.get<any>(showArchived ? "/projects?archived=1" : "/projects")
       .then(r => setProjects(Array.isArray(r) ? r : (r?.data ?? [])))
       .catch(console.error)
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchProjects(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchProjects(); }, [showArchived]);
+
+  const archiveProject = async (p: Project) => {
+    if (!window.confirm(`¿Archivar el proyecto "${p.name}"?\n\nSale de las listas activas y del selector de convocatorias, pero se conserva todo su historial. Podés restaurarlo después desde "Ver archivados".`)) return;
+    try { await api.patch(`/projects/${p.id}/archive`, {}); fetchProjects(); }
+    catch (e) { console.error(e); }
+  };
+
+  const unarchiveProject = async (p: Project) => {
+    try { await api.patch(`/projects/${p.id}/unarchive`, {}); fetchProjects(); }
+    catch (e) { console.error(e); }
+  };
 
   const filtered = projects.filter(p =>
     !search || p.name?.toLowerCase().includes(search.toLowerCase())
@@ -59,6 +74,10 @@ export default function ProjectsPage() {
           <div className="flex gap-2">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar proyectos..."
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", width: 200 }} />
+            <button onClick={() => setShowArchived(v => !v)}
+              style={{ padding: "9px 14px", borderRadius: 10, border: "1px solid var(--border)", background: showArchived ? "var(--primary)" : "var(--secondary)", color: showArchived ? "#fff" : "var(--foreground)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              {showArchived ? "Ver activos" : "Ver archivados"}
+            </button>
             <button onClick={() => router.push("/client/projects/nuevo")}
               style={{ padding: "9px 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
               + Nuevo proyecto
@@ -109,6 +128,13 @@ export default function ProjectsPage() {
                             style={{ background: "rgba(79,70,229,0.10)", color: "var(--primary)", border: "none", cursor: terminal ? "default" : "pointer", opacity: terminal ? 0.4 : 1 }}>Convocar</button>
                         );
                       })()}
+                      {p.status === "archived" ? (
+                        <button onClick={() => unarchiveProject(p)} className="text-xs px-2 py-1 rounded"
+                          style={{ background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", border: "none", cursor: "pointer" }}>Restaurar</button>
+                      ) : (
+                        <button onClick={() => archiveProject(p)} className="text-xs px-2 py-1 rounded"
+                          style={{ background: "rgba(100,116,139,0.15)", color: "#94a3b8", border: "none", cursor: "pointer" }}>Archivar</button>
+                      )}
                     </div>
                   </td>
                 </tr>
