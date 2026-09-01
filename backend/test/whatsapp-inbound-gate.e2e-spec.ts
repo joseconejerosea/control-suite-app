@@ -112,6 +112,8 @@ function buildController(opts: {
     affiliationCode,                                                                               // affiliationCode
     affiliation,                                                                                   // affiliation
     { f1EventsTotal: { inc: jest.fn() } } as any,                                                  // metrics
+    { route: jest.fn(async () => undefined) } as any,                                              // photoRouter (A3)
+    { add: jest.fn() } as any,                                                                     // photoTriageQueue (A3)
   );
 
   return { ctrl, ds, sendText, sessions, senderResolver, affiliationCode, affiliation };
