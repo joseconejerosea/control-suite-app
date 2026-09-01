@@ -837,6 +837,10 @@ export class WhatsAppWebhookController {
          WHERE a.client_id = $1
            AND a.status IN ('scheduled','in_progress')
            AND a.location IS NOT NULL
+           -- Matriz v1.3/v1.4 · "activaciones vencidas": un pin tardío no debe crear un
+           -- check-in en una activación ya pasada. Sólo vigentes — hoy (hora Chile) en
+           -- adelante, o sin fecha (mismo criterio que askActivacion/hasActiveActivation).
+           AND (a.activation_date IS NULL OR a.activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
          ORDER BY a.activation_date DESC`,
         [clientId],
       ).catch(() => []);
