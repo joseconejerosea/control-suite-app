@@ -29,16 +29,19 @@ const PERIODS = [
   { label: "Este año",    value: "year" },
 ];
 
-// KPI metadata — formula + source tables for modal
+// KPI metadata — `formula` es SOLO el predicado extra (además del filtro por tenant), y el
+// modal arma el SQL válido: SELECT COUNT(*) FROM <tabla> WHERE client_id = :client_id [AND …].
+// Antes la fórmula traía su propio "COUNT(*) WHERE …" y el template le agregaba FROM + otro
+// WHERE → SQL inválido (WHERE antes del FROM, WHERE duplicado, :cid vs :client_id).
 const KPI_META: Record<string, { formula: string; source_tables: string[]; description: string }> = {
-  total_projects:        { formula: "COUNT(*) WHERE client_id = :cid", source_tables: ["projects"], description: "Total de proyectos del cliente en todos los estados." },
-  active_campaigns:      { formula: "COUNT(*) WHERE client_id = :cid AND status = 'active'", source_tables: ["campaigns"], description: "Campañas activas en el período seleccionado." },
-  total_activations:     { formula: "COUNT(*) WHERE client_id = :cid", source_tables: ["activations"], description: "Total de activaciones registradas." },
-  activations_completed: { formula: "COUNT(*) WHERE client_id = :cid AND status = 'completed'", source_tables: ["activations"], description: "Activaciones cerradas exitosamente." },
-  active_promoters:      { formula: "COUNT(*) WHERE client_id = :cid AND active = true", source_tables: ["promoters"], description: "Promotores activos asignados al cliente." },
-  total_locations:       { formula: "COUNT(*) WHERE client_id = :cid", source_tables: ["locations"], description: "Ubicaciones registradas para el cliente." },
-  events_received_24h:   { formula: "COUNT(*) WHERE client_id = :cid AND created_at >= NOW() - INTERVAL '24h'", source_tables: ["eventos_crudos"], description: "Eventos recibidos en las últimas 24 horas." },
-  documents_populated:   { formula: "COUNT(*) WHERE client_id = :cid AND status = 'populated'", source_tables: ["invoices", "eventos_crudos"], description: "Documentos procesados y persistidos exitosamente." },
+  total_projects:        { formula: "status <> 'archived'", source_tables: ["projects"], description: "Total de proyectos del cliente (excluye archivados)." },
+  active_campaigns:      { formula: "status = 'active'", source_tables: ["campaigns"], description: "Campañas activas en el período seleccionado." },
+  total_activations:     { formula: "", source_tables: ["activations"], description: "Total de activaciones registradas." },
+  activations_completed: { formula: "status = 'completed'", source_tables: ["activations"], description: "Activaciones cerradas exitosamente." },
+  active_promoters:      { formula: "status = 'active'", source_tables: ["promoters"], description: "Promotores activos de la agencia (independiente de si tienen activación asignada)." },
+  total_locations:       { formula: "", source_tables: ["locations"], description: "Ubicaciones registradas para el cliente." },
+  events_received_24h:   { formula: "created_at > NOW() - INTERVAL '24 hours'", source_tables: ["eventos_crudos"], description: "Eventos recibidos en las últimas 24 horas." },
+  documents_populated:   { formula: "status = 'populated'", source_tables: ["document_uploads"], description: "Documentos procesados y persistidos exitosamente." },
 };
 
 function KPIModal({ kpi, onClose }: { kpi: KPI; onClose: () => void }) {
@@ -91,11 +94,9 @@ function KPIModal({ kpi, onClose }: { kpi: KPI; onClose: () => void }) {
           {/* Formula / Query */}
           <div>
             <div className="text-xs font-semibold mb-2 uppercase tracking-wide" style={{ color: "var(--muted-foreground)" }}>Fórmula</div>
-            <div className="rounded-lg p-3 font-mono text-xs overflow-x-auto"
+            <div className="rounded-lg p-3 font-mono text-xs overflow-x-auto whitespace-pre"
               style={{ background: "var(--secondary)", color: "var(--foreground)", border: "1px solid var(--border)" }}>
-              SELECT {kpi.formula}
-              {"\n"}FROM {kpi.source_tables[0]}
-              {"\n"}WHERE client_id = :client_id
+              {`SELECT COUNT(*)\nFROM ${kpi.source_tables[0]}\nWHERE client_id = :client_id${kpi.formula ? `\n  AND ${kpi.formula}` : ""}`}
             </div>
           </div>
 
