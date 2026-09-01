@@ -21,6 +21,10 @@ import {
   StockReturnPhotoProcessor,
   QUEUE_STOCK_RETURN_PHOTO,
 } from './processors/stock-return-photo.processor';
+import {
+  PhotoTriageProcessor,
+  QUEUE_PHOTO_TRIAGE,
+} from './processors/photo-triage.processor';
 import { MetricsModule } from '../metrics/metrics.module';
 import { SheetsModule } from '../sheets/sheets.module';
 import { MindModule } from '../mind/mind.module';
@@ -57,6 +61,7 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
       { name: QUEUE_CONVOCATORIA_CLASSIFY },
       { name: QUEUE_PROJECT_INBOX_EXTRACT },
       { name: QUEUE_STOCK_RETURN_PHOTO },
+      { name: QUEUE_PHOTO_TRIAGE },
       { name: 'report-gen' },
     ),
     MetricsModule,
@@ -80,6 +85,7 @@ export const QUEUE_MIND_PROACTIVE = 'mind-proactive';
     ConvocatoriaClassifyProcessor,
     ProjectInboxExtractProcessor,
     StockReturnPhotoProcessor,
+    PhotoTriageProcessor,
   ],
   exports: [BullModule, EventProducer],
 })

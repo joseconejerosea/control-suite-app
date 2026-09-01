@@ -2,6 +2,7 @@
 import { DataSource, QueryRunner } from 'typeorm';
 import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
 import { WhatsAppActionMenuService } from './action-menu.service';
+import { PhotoRouterService } from './photo-router.service';
 import { WhatsAppSession } from './whatsapp-session.service';
 
 /**
@@ -46,12 +47,18 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
   let affiliationCode: any;
   let affiliation: any;
   let metrics: any;
+  let photoRouter: PhotoRouterService;
+  let photoTriageQueue: any;
 
   // ds.query router. persistEvent INSERT → fake id; convocatoria SELECT → open-flag;
   // everything else (UPDATE flow, devolucion check, set_config) → [].
   let queryMock: jest.Mock;
   let hasOpenConvocatoria: boolean;
   let nextEventId: number;
+  // A3 · el CLAIM atómico de photo-router es un `UPDATE ... RETURNING id`: la 1ª foto gana
+  // (RETURNING trae la fila), la 2ª ve 0 filas (evento ya ruteado/superseded). Flag para que
+  // los tests de happy-path devuelvan la fila y el test de no-op devuelva [].
+  let claimSucceeds: boolean;
 
   const menu = new WhatsAppActionMenuService();
 
@@ -59,6 +66,7 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     sessionStore = {};
     hasOpenConvocatoria = false;
     nextEventId = 1;
+    claimSucceeds = true;
 
     queryMock = jest.fn((sql: string) => {
       if (sql.includes('set_config')) return Promise.resolve([]);
@@ -68,8 +76,11 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       }
       // isDuplicate guard
       if (sql.includes('SELECT id FROM eventos_crudos')) return Promise.resolve([]);
-      // routeByType UPDATE flow
-      if (sql.includes('UPDATE eventos_crudos SET flow')) return Promise.resolve([]);
+      // A3 · CLAIM atómico del router: `UPDATE eventos_crudos SET flow ... RETURNING id`.
+      // Happy-path (claimSucceeds) → devuelve la fila reclamada; no-op → [].
+      if (sql.includes('UPDATE eventos_crudos SET flow')) {
+        return Promise.resolve(claimSucceeds ? [{ id: 'evt-claimed' }] : []);
+      }
       // tieneConvocatoriaAbierta
       if (sql.includes('FROM convocatorias')) {
         return Promise.resolve(hasOpenConvocatoria ? [{ '?column?': 1 }] : []);
@@ -137,6 +148,19 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     affiliationCode = {};
     affiliation = {};
     metrics = { f1EventsTotal: { inc: jest.fn() } };
+    photoTriageQueue = { add: jest.fn().mockResolvedValue(undefined) };
+
+    // PhotoRouterService REAL (como el action-menu service): lógica genuina de ruteo
+    // sobre los MISMOS mocks, para que los tests de ruteo (handleImage/handleText/route)
+    // ejerciten el comportamiento real y no un mock vacío.
+    photoRouter = new PhotoRouterService(
+      ds,
+      ocrQueue as any,
+      materialIntake as any,
+      evidenceIntake as any,
+      wa as any,
+      metrics as any,
+    );
 
     controller = new WhatsAppWebhookController(
       wa,
@@ -157,6 +181,8 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       affiliationCode,
       affiliation,
       metrics,
+      photoRouter,
+      photoTriageQueue,
     );
     ctrl = controller as any;
   });
@@ -164,9 +190,9 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
   const imageMsg = (caption = '') => ({ type: 'image', image: { id: 'media-1', caption } });
   const textMsg = (body: string) => ({ type: 'text', text: { body } });
 
-  // ── 1. handleImage media-first: buffer + type menu, no OCR / no intake ───────
+  // ── 1. handleImage media-first: buffer + encola triage IA, NO menú inline (A3) ─
   describe('handleImage · media-first (no active flow)', () => {
-    it('persists the photo with flow=null, buffers via setAwaitingType, and sends the type menu', async () => {
+    it('persists the photo with flow=null, buffers via setAwaitingType, enqueues the photo-triage job and acks — NO inline type menu', async () => {
       await ctrl.handleImage(FROM, imageMsg('una foto'), CLIENT, CANAL, MSG_ID, null);
 
       // Persisted a fresh event with flow=null (media-first buffering, A-002).
@@ -181,10 +207,19 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(buffered.eventId).toBe('evt-1');
       expect(clientId).toBe(CLIENT);
 
-      // Sent the type menu.
-      expect(wa.sendText).toHaveBeenCalledWith(FROM, menu.buildTypeMenu());
+      // A3 · Encoló el triage por visión IA con el evento buffereado + su storage/mime.
+      expect(photoTriageQueue.add).toHaveBeenCalledTimes(1);
+      const triagePayload = photoTriageQueue.add.mock.calls[0][1];
+      expect(triagePayload.evento_crudo_id).toBe('evt-1');
+      expect(triagePayload.client_id).toBe(CLIENT);
+      expect(triagePayload.storage_path).toBe(STORAGE);
+      expect(triagePayload.mime_type).toBe(MIME);
 
-      // Did NOT enqueue OCR and did NOT start any intake.
+      // Ack "recibí tu foto", NO el menú inline (lo manda el processor si hace falta).
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, expect.stringContaining('Recibí tu foto'));
+      expect(wa.sendText).not.toHaveBeenCalledWith(FROM, menu.buildTypeMenu());
+
+      // Did NOT enqueue OCR and did NOT start any intake (el ruteo lo decide el triage).
       expect(ocrQueue.add).not.toHaveBeenCalled();
       expect(materialIntake.start).not.toHaveBeenCalled();
       expect(evidenceIntake.start).not.toHaveBeenCalled();
@@ -479,12 +514,12 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
   });
 
-  // ── 7. routeByType directly: existing vs fresh, per type ─────────────────────
-  describe('routeByType · existing event UPDATE vs fresh persist, per type', () => {
+  // ── 7. PhotoRouterService.route directly: existing vs fresh, per type ────────
+  describe('PhotoRouterService.route · existing event UPDATE vs fresh persist, per type', () => {
     const mediaArg = { storagePath: STORAGE, mimeType: MIME, caption: 'c' };
 
     it('with existingEventId → UPDATEs the flow (no fresh INSERT) then routes material', async () => {
-      await ctrl.routeByType(FROM, CLIENT, CANAL, MSG_ID, 'material', mediaArg, 'evt-existing');
+      await photoRouter.route(FROM, CLIENT, CANAL, MSG_ID, 'material', mediaArg, 'evt-existing');
 
       expect(queryMock.mock.calls.some((c) => String(c[0]).includes('UPDATE eventos_crudos SET flow'))).toBe(true);
       expect(queryMock.mock.calls.some((c) => String(c[0]).includes('INSERT INTO eventos_crudos'))).toBe(false);
@@ -495,7 +530,7 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
 
     it('without existingEventId → fresh persist then routes factura to OCR', async () => {
-      await ctrl.routeByType(FROM, CLIENT, CANAL, MSG_ID, 'factura', mediaArg);
+      await photoRouter.route(FROM, CLIENT, CANAL, MSG_ID, 'factura', mediaArg);
 
       expect(queryMock.mock.calls.some((c) => String(c[0]).includes('INSERT INTO eventos_crudos'))).toBe(true);
       expect(queryMock.mock.calls.some((c) => String(c[0]).includes('UPDATE eventos_crudos SET flow'))).toBe(false);
@@ -507,7 +542,7 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
     });
 
     it('without existingEventId → fresh persist then routes evidencia to evidenceIntake', async () => {
-      await ctrl.routeByType(FROM, CLIENT, CANAL, MSG_ID, 'evidencia', mediaArg);
+      await photoRouter.route(FROM, CLIENT, CANAL, MSG_ID, 'evidencia', mediaArg);
 
       expect(evidenceIntake.start).toHaveBeenCalledTimes(1);
       expect(evidenceIntake.start.mock.calls[0][0].eventoCrudoId).toBe('evt-1');
@@ -515,6 +550,22 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(ocrQueue.add).not.toHaveBeenCalled();
       // Routing observability: evidence_intake counter.
       expect(metrics.f1EventsTotal.inc).toHaveBeenCalledWith({ client_id: CLIENT, canal: 'whatsapp', status: 'evidence_intake' });
+    });
+
+    // A3 · Race menu-tap vs triage: si el CLAIM devuelve [] (evento YA ruteado por el otro
+    // camino, o superseded), route() es un no-op TOTAL: sin intake, sin OCR, sin mensaje.
+    it('with existingEventId but claim returns [] (already routed/superseded) → no-op: no intake, no OCR, no message', async () => {
+      claimSucceeds = false;
+
+      await photoRouter.route(FROM, CLIENT, CANAL, MSG_ID, 'material', mediaArg, 'evt-existing');
+
+      // El CLAIM sí se intentó...
+      expect(queryMock.mock.calls.some((c) => String(c[0]).includes('UPDATE eventos_crudos SET flow'))).toBe(true);
+      // ...pero ganó el otro camino → cero efectos.
+      expect(materialIntake.start).not.toHaveBeenCalled();
+      expect(ocrQueue.add).not.toHaveBeenCalled();
+      expect(wa.sendText).not.toHaveBeenCalled();
+      expect(metrics.f1EventsTotal.inc).not.toHaveBeenCalled();
     });
   });
 
@@ -793,7 +844,13 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       const [, buffered] = sessions.setAwaitingType.mock.calls[0];
       expect(buffered.eventId).toBe('evt-1');
       expect(buffered.storagePath).toBe(STORAGE);
-      expect(wa.sendText).toHaveBeenCalledWith(FROM, menu.buildTypeMenu());
+
+      // A3 · La rama media-first ahora encola el triage por visión IA + acka; ya NO manda el
+      // menú inline (lo manda el processor si duda). El cleanup de la foto previa se mantiene.
+      expect(photoTriageQueue.add).toHaveBeenCalledTimes(1);
+      expect(photoTriageQueue.add.mock.calls[0][1].evento_crudo_id).toBe('evt-1');
+      expect(wa.sendText).toHaveBeenCalledWith(FROM, expect.stringContaining('Recibí tu foto'));
+      expect(wa.sendText).not.toHaveBeenCalledWith(FROM, menu.buildTypeMenu());
     });
   });
 

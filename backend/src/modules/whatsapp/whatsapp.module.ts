@@ -9,6 +9,7 @@ import { WhatsAppWebhookController } from './whatsapp.webhook.controller';
 import { SenderTenantResolverService } from './sender-tenant-resolver.service';
 import { WhatsAppTenantSelectionService } from './tenant-selection.service';
 import { WhatsAppActionMenuService } from './action-menu.service';
+import { PhotoRouterService } from './photo-router.service';
 import { PromptShieldService } from '../../common/ai/prompt-shield.service';
 import { ClientsModule } from '../clients/clients.module';
 import { MetricsModule } from '../metrics/metrics.module';
@@ -16,6 +17,7 @@ import { MetricsModule } from '../metrics/metrics.module';
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
 const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
+const QUEUE_PHOTO_TRIAGE = 'photo-triage';
 
 @Module({
   imports: [
@@ -23,6 +25,7 @@ const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
       { name: QUEUE_OCR },
       { name: QUEUE_CONVOCATORIA_CLASSIFY },
       { name: QUEUE_STOCK_RETURN_PHOTO },
+      { name: QUEUE_PHOTO_TRIAGE },
     ),
     // Provides AffiliationCodeService + AffiliationService for single-number routing.
     ClientsModule,
@@ -30,7 +33,7 @@ const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
     MetricsModule,
   ],
   controllers: [WhatsAppWebhookController],
-  providers:   [WhatsAppService, WhatsAppSessionService, WhatsAppMediaService, WhatsappOutputService, OperatorNotifierService, PromptShieldService, SenderTenantResolverService, WhatsAppTenantSelectionService, WhatsAppActionMenuService],
-  exports:     [WhatsAppService, WhatsAppSessionService, WhatsappOutputService, OperatorNotifierService, WhatsAppActionMenuService],
+  providers:   [WhatsAppService, WhatsAppSessionService, WhatsAppMediaService, WhatsappOutputService, OperatorNotifierService, PromptShieldService, SenderTenantResolverService, WhatsAppTenantSelectionService, WhatsAppActionMenuService, PhotoRouterService],
+  exports:     [WhatsAppService, WhatsAppSessionService, WhatsappOutputService, OperatorNotifierService, WhatsAppActionMenuService, PhotoRouterService],
 })
 export class WhatsAppModule {}

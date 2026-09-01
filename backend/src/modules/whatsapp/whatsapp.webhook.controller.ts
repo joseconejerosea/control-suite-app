@@ -21,6 +21,7 @@ import { runWithTenant } from '../../common/tenant/tenant-context';
 import { SenderTenantResolverService } from './sender-tenant-resolver.service';
 import { WhatsAppTenantSelectionService } from './tenant-selection.service';
 import { WhatsAppActionMenuService } from './action-menu.service';
+import { PhotoRouterService } from './photo-router.service';
 import { AffiliationCodeService } from '../clients/affiliation-code.service';
 import { AffiliationService } from '../clients/affiliation.service';
 import { MetricsService } from '../metrics/metrics.service';
@@ -28,6 +29,7 @@ import { MetricsService } from '../metrics/metrics.service';
 const QUEUE_OCR = 'ocr';
 const QUEUE_CONVOCATORIA_CLASSIFY = 'convocatoria-classify';
 const QUEUE_STOCK_RETURN_PHOTO = 'stock-return-photo';
+const QUEUE_PHOTO_TRIAGE = 'photo-triage';
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppWebhookController {
@@ -52,6 +54,8 @@ export class WhatsAppWebhookController {
     private readonly affiliationCode: AffiliationCodeService,
     private readonly affiliation: AffiliationService,
     private readonly metrics: MetricsService,
+    private readonly photoRouter: PhotoRouterService,
+    @InjectQueue(QUEUE_PHOTO_TRIAGE) private readonly photoTriageQueue: Queue,
   ) {}
 
   // ── Webhook verification (Meta challenge) ─────────────────────────────────
@@ -542,78 +546,10 @@ export class WhatsAppWebhookController {
     return this.media.downloadAndStore(mediaId, clientId, folder);
   }
 
-  // ── T3 · Router determinístico de la foto por tipo (menú, no visión) ────────
-
-  /**
-   * Rutea una foto ya subida a storage según el tipo elegido por el remitente en el
-   * menú. Invoca el mismo destino que corría el triage post-OCR — sólo cambia QUIÉN decide
-   * el tipo. El `flow` se fija por tipo para que material/evidencia NO caigan en
-   * la cola F1 "Documentos por revisar" (que filtra flow='F1'); el intake luego reescribe
-   * el flow (F3_INTAKE / F5_EVID) al registrar, o queda en F3/F5 si no hay activación:
-   *   factura   → flow:'F1' — OCR-read: el OcrProcessor sólo lee el texto, ya no triagea.
-   *   material  → flow:'F3' — materialIntake.start.
-   *   evidencia → flow:'F5' — evidenceIntake.start.
-   *
-   * A-002 · Si `existingEventId` viene seteado (rama media-first: la foto ya se persistió
-   * con flow=null al llegar y quedó buffereada), NO inserta un evento nuevo: sólo ACTUALIZA
-   * el flow de esa fila. Si no viene (rama tipo-primero: la foto llegó después de elegir el
-   * tipo), persiste una fila fresca como hasta ahora. Así cada foto media-first tiene una
-   * fila eventos_crudos durable desde su llegada, sin blobs huérfanos si se abandona.
-   */
-  private async routeByType(
-    from: string,
-    clientId: string,
-    canalId: string | null,
-    messageId: string,
-    type: 'factura' | 'material' | 'evidencia',
-    media: { storagePath: string; mimeType: string; caption: string },
-    existingEventId?: string,
-  ): Promise<void> {
-    const flow = type === 'factura' ? 'F1' : type === 'material' ? 'F3' : 'F5';
-    let eventId: string;
-    if (existingEventId) {
-      // La foto ya se persistió con flow=null al llegar (A-002). Sólo fijamos su flow por
-      // tipo (RLS: el webhook es @Public → runWithTenant para que el UPDATE vea la fila).
-      await runWithTenant(this.ds, clientId, () =>
-        this.ds.query(`UPDATE eventos_crudos SET flow=$2, updated_at=NOW() WHERE id=$1`, [existingEventId, flow]),
-      );
-      eventId = existingEventId;
-    } else {
-      eventId = await this.persistEvent({
-        clientId, canalId, messageId, from, type: 'image', flow,
-        payload: {
-          storage_path: media.storagePath,
-          mime_type: media.mimeType,
-          caption: media.caption,
-        },
-      });
-    }
-
-    if (type === 'factura') {
-      // Routing observability: one f1_events_total per routed photo (restores the signal
-      // the removed OCR-vision triage used to emit; 'factura_intake' is new to the menu router).
-      this.metrics.f1EventsTotal.inc({ client_id: clientId, canal: 'whatsapp', status: 'factura_intake' });
-      await this.ocrQueue.add('ocr', {
-        evento_crudo_id: eventId, client_id: clientId, canal: 'whatsapp',
-      }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
-      await this.wa.sendText(from, '📎 Recibí tu foto, la estoy revisando...');
-      return;
-    }
-
-    if (type === 'material') {
-      this.metrics.f1EventsTotal.inc({ client_id: clientId, canal: 'whatsapp', status: 'material_intake' });
-      await this.materialIntake.start({
-        eventoCrudoId: eventId, phoneNumber: from, clientId, storagePath: media.storagePath,
-      });
-      return;
-    }
-
-    // evidencia
-    this.metrics.f1EventsTotal.inc({ client_id: clientId, canal: 'whatsapp', status: 'evidence_intake' });
-    await this.evidenceIntake.start({
-      eventoCrudoId: eventId, phoneNumber: from, clientId, storagePath: media.storagePath,
-    });
-  }
+  // ── A3 · Ruteo de la foto por tipo ──────────────────────────────────────────
+  // La lógica de ruteo post-tipo vive ahora en PhotoRouterService.route(...), compartida
+  // entre este controller (usuario elige el tipo por menú) y el PhotoTriageProcessor (la
+  // visión IA auto-detecta el tipo). Ver photo-router.service.ts.
 
   /**
    * T3/N08 · ¿Hay un intake de material/evidencia en curso? Si sí, un archivo NUEVO
@@ -689,7 +625,7 @@ export class WhatsAppWebhookController {
       // después en su propio pipeline (OCR de F1).
       const session = await this.sessions.get(from);
       if (session?.state === 'awaiting_media' && session.pendingType) {
-        await this.routeByType(from, clientId, canalId, messageId, session.pendingType, media);
+        await this.photoRouter.route(from, clientId, canalId, messageId, session.pendingType, media);
         await this.sessions.clearMediaFlow(from);
         return;
       }
@@ -726,7 +662,27 @@ export class WhatsAppWebhookController {
         },
       });
       await this.sessions.setAwaitingType(from, { ...media, eventId: bufferedEventId }, clientId, canalId);
-      await this.wa.sendText(from, this.actionMenu.buildTypeMenu());
+
+      // A3 · En vez de mandar el menú inline, encolamos el triage por visión IA. Si la IA está
+      // MUY confiada del tipo (confidence >= 0.85) auto-rutea salteando el menú; si duda, el
+      // processor manda buildTypeMenu() (red de seguridad) y el tap del usuario rutea normal.
+      // Reintroduce la visión que T3 sacó por misclasificación, de forma segura (umbral alto +
+      // fallback al menú). La foto ya quedó buffereada + persistida (flow=null): el processor
+      // reusa ese evento (existingEventId) al auto-rutear.
+      // attempts:1 — este job re-cobra IA (visión Claude) y su ruteo NO es idempotente
+      // (materialIntake.start re-pregunta, doble ai_costs_log). Un reintento duplicaría el
+      // cargo y los efectos; el fallback correcto ante fallo es el menú (lo emite el propio
+      // processor en su catch), no reintentar el job.
+      await this.photoTriageQueue.add('photo-triage', {
+        evento_crudo_id: bufferedEventId,
+        client_id: clientId,
+        canal: 'whatsapp',
+        from,
+        storage_path: media.storagePath,
+        mime_type: media.mimeType,
+        canal_id: canalId,
+      }, { attempts: 1 });
+      await this.wa.sendText(from, '📎 Recibí tu foto, la reviso…');
     } catch (err: any) {
       this.logger.error(`[WhatsApp] Image handling error: ${err.message}`);
       await this.wa.sendText(from, 'No pude procesar la imagen. Intenta de nuevo.');
@@ -1089,7 +1045,7 @@ export class WhatsAppWebhookController {
         await this.wa.sendText(from, `No entendí 🤔\n${this.actionMenu.buildTypeMenu()}`);
         return;
       }
-      await this.routeByType(
+      await this.photoRouter.route(
         from, session.clientId ?? clientId, session.canalId ?? canalId, messageId,
         kind, session.bufferedMedia, session.bufferedMedia.eventId,
       );
