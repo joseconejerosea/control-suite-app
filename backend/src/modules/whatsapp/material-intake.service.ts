@@ -572,10 +572,16 @@ export class MaterialIntakeService {
   }
 
   private async handleCantidad(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
-    const digits = (text ?? '').replace(/[^\d]/g, '');
+    const raw = (text ?? '').trim();
+    // T11 · Rechazar cantidad NEGATIVA. El replace(/[^\d]/g,'') de abajo borra el signo, así
+    // que "-5" / "−5" se colaba como +5 (registro fantasma). Detectamos el signo negativo
+    // (guion ASCII o menos unicode U+2212, con espacios opcionales) ANTES de limpiar. El "0"
+    // ya se bloqueaba por `cantidad < 1`; esto cierra el hueco del signo.
+    const esNegativa = /[-−]\s*\d/.test(raw);
+    const digits = raw.replace(/[^\d]/g, '');
     const cantidad = parseInt(digits, 10);
-    if (isNaN(cantidad) || cantidad < 1) {
-      return this.retryOrEscalate(phone, session, 'Respondé con un número de unidades (ej: 1, 10).');
+    if (esNegativa || isNaN(cantidad) || cantidad < 1) {
+      return this.retryOrEscalate(phone, session, 'Respondé con un número POSITIVO de unidades (ej: 1, 10).');
     }
     const mi = session.materialIntake!;
     if (mi.items?.length) mi.items[0].cantidad = cantidad;

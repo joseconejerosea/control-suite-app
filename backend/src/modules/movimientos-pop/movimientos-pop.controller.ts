@@ -35,6 +35,11 @@ export class MovimientosPopController {
   @Post('manual')
   @AuditAction({ action: 'CREATE_STOCK_MOVEMENT', entity: 'MovimientoPop' })
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateMovimientoDto) {
-    return this.svc.create(user.client_id, dto);
+    // F3 · "responsable = null": los movimientos del panel no registraban quién los hizo.
+    // AUDITORÍA (quién lo registró) va en created_by_user_id = usuario autenticado (H5: nunca
+    // del body). Se mantiene SEPARADO de persona_id (el field-person que sostiene el material),
+    // que alimenta las devoluciones de stock — así una salida de bodega del manager NO le
+    // dispara a él un pedido de devolución.
+    return this.svc.create(user.client_id, { ...dto, created_by_user_id: user.sub });
   }
 }

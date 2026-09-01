@@ -22,4 +22,7 @@ export class MovimientoPop extends TenantBaseEntity {
   @Column({ type: 'text', nullable: true }) observacion: string | null;
   @Column({ type: 'uuid', nullable: true }) raw_event_id: string | null;
   @Column({ type: 'uuid', nullable: true }) activacion_id: string | null;
+  // F3 · Auditoría: usuario que REGISTRÓ el movimiento (panel = user.sub). Separado de
+  // persona_id (el field-person que alimenta las devoluciones de stock).
+  @Column({ type: 'uuid', nullable: true }) created_by_user_id: string | null;
 }

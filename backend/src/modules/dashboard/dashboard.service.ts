@@ -66,10 +66,12 @@ export class DashboardService {
         (SELECT COUNT(*)::int FROM activations
           WHERE client_id = $1 AND status = 'completed'
             AND ($4::uuid IS NULL OR project_id = $4))                      AS activations_completed,
-        (SELECT COUNT(DISTINCT p.id)::int FROM promoters p
-           JOIN activations a ON a.promoter_id = p.id
-          WHERE p.client_id = $1
-            AND ($4::uuid IS NULL OR a.project_id = $4))                    AS active_promoters,
+        -- KPI "Staff activo": promotores ACTIVOS de la agencia (status='active'), NO los que
+        -- tienen una activación asignada. El JOIN a activations subcontaba (decía 2 cuando había
+        -- 6 activos) porque solo veía a quienes ya estaban agendados. Staff es a nivel agencia,
+        -- no por proyecto → no se filtra por $4.
+        (SELECT COUNT(*)::int FROM promoters
+          WHERE client_id = $1 AND status = 'active')                       AS active_promoters,
         (SELECT COUNT(*)::int FROM locations
           WHERE client_id = $1)                                             AS total_locations,
         (SELECT COUNT(*)::int FROM eventos_crudos

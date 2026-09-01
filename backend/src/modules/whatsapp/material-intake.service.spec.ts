@@ -134,6 +134,41 @@ describe('MaterialIntakeService', () => {
     expect(store[PHONE]).toBeUndefined();
   });
 
+  it('T11 · rechaza cantidad negativa "-5" (no registra el fantasma) y luego acepta un positivo', async () => {
+    await svc.start({ eventoCrudoId: 'evt-neg', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    expect(await svc.handleResponse(PHONE, 'Pintura spray')).toBe(true); // nombre → destino
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);             // bodega → proyecto
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);             // proyecto → bodega
+    expect(await svc.handleResponse(PHONE, '1')).toBe(true);             // bodega → cantidad
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+
+    // "-5" NO se registra y sigue esperando la cantidad (retry, no escalación al 1er intento).
+    expect(await svc.handleResponse(PHONE, '-5')).toBe(true);
+    expect(movimientos.create).not.toHaveBeenCalled();
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+    // El re-prompt pide un número POSITIVO.
+    const lastMsg = wa.sendText.mock.calls.at(-1)?.[1] ?? '';
+    expect(lastMsg).toMatch(/POSITIVO/i);
+
+    // Un número positivo SÍ registra (cantidad 7, no 5 "sin signo").
+    expect(await svc.handleResponse(PHONE, '7')).toBe(true);
+    expect(movimientos.create).toHaveBeenCalledTimes(1);
+    expect(movimientos.create.mock.calls[0][1]).toMatchObject({ tipo: 'entrada', cantidad: 7 });
+  });
+
+  it('T11 · rechaza el menos unicode "−5" (U+2212) igual que el guion ASCII', async () => {
+    await svc.start({ eventoCrudoId: 'evt-neg-u', phoneNumber: PHONE, clientId: CLIENT, storagePath: 'materials/x.jpg' });
+    await svc.handleResponse(PHONE, 'Pintura spray'); // → destino
+    await svc.handleResponse(PHONE, '1');             // → proyecto
+    await svc.handleResponse(PHONE, '1');             // → bodega
+    await svc.handleResponse(PHONE, '1');             // → cantidad
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+
+    expect(await svc.handleResponse(PHONE, '−5')).toBe(true); // menos unicode
+    expect(movimientos.create).not.toHaveBeenCalled();
+    expect(store[PHONE].materialIntake?.step).toBe('cantidad');
+  });
+
   it('parses a multi-item reply (qty + name per line) and registers N SKUs, skipping the cantidad question', async () => {
     // Usa el mock por defecto (2 proyectos + 2 bodegas) para pausar en cada paso.
     // skus.create devuelve un id distinto por llamada para diferenciar los movimientos.
