@@ -35,6 +35,9 @@ export class MovimientosPopController {
   @Post('manual')
   @AuditAction({ action: 'CREATE_STOCK_MOVEMENT', entity: 'MovimientoPop' })
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateMovimientoDto) {
-    return this.svc.create(user.client_id, dto);
+    // F3 · "responsable = null": los movimientos del panel no registraban quién los hizo.
+    // Convención H5 (igual que checkins/incidencias/reportes en f5.controller): persona_id
+    // es SIEMPRE el usuario autenticado que lo registra, NUNCA se acepta del body.
+    return this.svc.create(user.client_id, { ...dto, persona_id: user.sub });
   }
 }
