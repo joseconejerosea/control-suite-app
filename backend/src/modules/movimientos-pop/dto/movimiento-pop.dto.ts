@@ -16,6 +16,9 @@ export class CreateMovimientoDto {
   @IsOptional() @IsInt() tiempo_uso_dias?: number;
   @IsOptional() @IsDateString() fecha_retorno_esperada?: string;
   @IsOptional() @IsString() observacion?: string;
+  /** F3 · Auditoría: usuario que REGISTRÓ el movimiento (lo setea el controller = user.sub,
+   * H5: nunca se confía del body). Separado de persona_id (el field-person para devoluciones). */
+  @IsOptional() @IsUUID() created_by_user_id?: string;
 }
 
 export class MovimientoFiltersDto {

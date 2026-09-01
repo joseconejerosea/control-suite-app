@@ -78,14 +78,14 @@ export class MovimientosPopService {
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
          (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo, activacion_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo, activacion_id, created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [
         clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id ?? null,
         dto.proyecto_destino_id ?? null, dto.tipo, dto.cantidad,
         dto.foto_key ?? null, dto.tiempo_uso_dias ?? null,
         dto.fecha_retorno_esperada ?? null, estado, dto.observacion ?? null, correlativo,
-        dto.activacion_id ?? null,
+        dto.activacion_id ?? null, dto.created_by_user_id ?? null,
       ],
     );
 
@@ -128,24 +128,24 @@ export class MovimientosPopService {
       const outRes = await queryRunner.query(
         `INSERT INTO movimientos_pop
            (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-            tipo, cantidad, estado, observacion, correlativo)
-         VALUES ($1,$2,$3,$4,$5,'salida',$6,'transfer_out',$7,$8) RETURNING id`,
+            tipo, cantidad, estado, observacion, correlativo, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,'salida',$6,'transfer_out',$7,$8,$9) RETURNING id`,
         [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id,
          dto.proyecto_destino_id ?? null, dto.cantidad,
          `Transfer a bodega ${dto.bodega_destino_id}. ${dto.observacion ?? ''}`,
-         corrOut],
+         corrOut, dto.created_by_user_id ?? null],
       );
 
       // IN to destination
       const inRes = await queryRunner.query(
         `INSERT INTO movimientos_pop
            (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-            tipo, cantidad, estado, observacion, correlativo)
-         VALUES ($1,$2,$3,$4,$5,'entrada',$6,'transfer_in',$7,$8) RETURNING id`,
+            tipo, cantidad, estado, observacion, correlativo, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,'entrada',$6,'transfer_in',$7,$8,$9) RETURNING id`,
         [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_destino_id,
          dto.proyecto_destino_id ?? null, dto.cantidad,
          `Transfer desde bodega ${dto.bodega_origen_id}. ${dto.observacion ?? ''}`,
-         corrIn],
+         corrIn, dto.created_by_user_id ?? null],
       );
 
       // Update inventory: subtract from origin
@@ -200,10 +200,10 @@ export class MovimientosPopService {
 
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
-         (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion, correlativo)
-       VALUES ($1,$2,$3,$4,'adjustment',$5,'adjustment',$6,$7) RETURNING *`,
+         (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion, correlativo, created_by_user_id)
+       VALUES ($1,$2,$3,$4,'adjustment',$5,'adjustment',$6,$7,$8) RETURNING *`,
       [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id, Math.abs(diff),
-       `Ajuste: ${currentQty} → ${dto.cantidad}. ${dto.observacion ?? ''}`, correlativo],
+       `Ajuste: ${currentQty} → ${dto.cantidad}. ${dto.observacion ?? ''}`, correlativo, dto.created_by_user_id ?? null],
     );
 
     // Set inventory to exact quantity
