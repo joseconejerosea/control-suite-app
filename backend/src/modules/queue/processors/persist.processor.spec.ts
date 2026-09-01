@@ -1171,6 +1171,155 @@ describe('PersistProcessor — duplicate notification', () => {
   });
 });
 
+// ─── Tarea 8 (Matriz v1.4) — FIX: marca posible duplicado sin borrar ─────────
+// El QA reportó doble-conteo de la MISMA boleta. La causa real (confirmada contra la
+// DB de dev, NO la hipótesis "por-alcance proyecto" del informe): las DOS capas de
+// dedup dependen de una llave que puede faltar —
+//   1) content-hash: exige eventos_crudos.doc_sha256 (el OCR lo backfillea; puede ser NULL).
+//   2) natural-key : sólo corre `if (datos.numero_documento && datos.rut_emisor)`.
+// Cuando faltan AMBAS (foto sin hash + OCR sin folio/RUT), NINGUNA capa la caza y un
+// reenvío crea una SEGUNDA factura. El FIX agrega una TERCERA capa SOFT: detecta un
+// probable duplicado por vendor_name + amount + invoice_date y MARCA la factura
+// (posible_duplicado=true) SIN borrarla — el humano revisa en el reporte. Estos tests
+// prueban que la factura se INSERTA con el flag correcto según el tercer check.
+//
+// El INSERT lleva posible_duplicado como ÚLTIMA columna ($13 / params[12]); project_id
+// sigue en $12 (params[11]) vía subquery, y RETURNING id, project_id no cambia.
+function invoiceInsertPosibleDuplicado(queryMock: jest.Mock): unknown {
+  const insertCall = queryMock.mock.calls.find(
+    ([sql]: [string]) => typeof sql === 'string' && /INSERT INTO invoices/.test(sql),
+  );
+  expect(insertCall).toBeDefined();
+  const [sql, params] = insertCall;
+  // Load-bearing: la columna nueva viaja como último parámetro, sin tocar el resto.
+  expect(sql).toContain('posible_duplicado');
+  expect(sql).toContain('$13');
+  expect(sql).toContain('RETURNING id, project_id');
+  return params[12];
+}
+
+describe('PersistProcessor — Tarea 8 (fix): marca posible duplicado sin borrar', () => {
+  function buildProcessor(softMatch: boolean) {
+    const queryMock = jest.fn((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' }, parsed_data: null },
+        ]);
+      }
+      // Content-hash: NO hay otro evento con el mismo hash (esta foto entró sin doc_sha256).
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([]);
+      // Tercera capa SOFT: se distingue por `vendor_name=` (el natural-key usa numero_documento).
+      if (sql.includes('FROM invoices WHERE') && sql.includes('vendor_name=')) {
+        return Promise.resolve(softMatch ? [{ id: 'existing' }] : []);
+      }
+      // Natural-key: no debería ni consultarse (guard salteado); si corriera, no matchea.
+      if (sql.includes('FROM invoices WHERE')) return Promise.resolve([]);
+      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-dup-t8', project_id: params?.[11] ?? null }]);
+      if (sql.includes('FROM promoters')) return Promise.resolve([{ id: 'persona-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const avisarDuplicado = jest.fn().mockResolvedValue(true);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: jest.fn() } as any,
+      { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+
+    return { processor, queryMock, avisarDuplicado, confirmarProcesado };
+  }
+
+  function makeJob(): Job<any> {
+    return {
+      data: {
+        evento_crudo_id: 'evt-t8',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          // Boleta de Valparaíso del QA: SIN numero_documento ni rut_emisor (el OCR no los sacó).
+          datos_extraidos: { monto_total: 3150, moneda: 'CLP', razon_social_emisor: 'I. MUNICIPALIDAD DE VALPARAÍSO', fecha_emision: '2026-08-25' },
+        },
+      },
+    } as unknown as Job<any>;
+  }
+
+  it('cuando el tercer check MATCHEA → inserta la factura con posible_duplicado=true (no la borra)', async () => {
+    const { processor, queryMock, avisarDuplicado } = buildProcessor(true);
+
+    await processor.process(makeJob());
+
+    // La factura SÍ se inserta (nada se pierde) pero MARCADA como posible duplicado.
+    expect(invoiceInsertPosibleDuplicado(queryMock)).toBe(true);
+    // No se descartó como duplicado duro (no markDuplicate): el evento queda 'processed'.
+    expect(avisarDuplicado).not.toHaveBeenCalled();
+    const dupUpdate = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes("processing_status_new='duplicate'"));
+    expect(dupUpdate).toBeUndefined();
+    const processedWrite = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes("status='processed'"));
+    expect(processedWrite).toBeDefined();
+  });
+
+  it('cuando el tercer check NO matchea (vendor/monto/fecha distintos) → inserta normal, posible_duplicado=false', async () => {
+    const { processor, queryMock, avisarDuplicado } = buildProcessor(false);
+
+    await processor.process(makeJob());
+
+    expect(invoiceInsertPosibleDuplicado(queryMock)).toBe(false);
+    expect(avisarDuplicado).not.toHaveBeenCalled();
+  });
+
+  it('R3-002 · vendor "Unknown" (OCR sin proveedor) NO dispara el soft-check → sin falso positivo', async () => {
+    // El mock MATCHEARÍA (softMatch=true), pero con vendor='Unknown' el soft-check ni se
+    // consulta → dos boletas sin proveedor con mismo monto+fecha no se marcan (no se excluye
+    // un gasto legítimo del total).
+    const { processor, queryMock } = buildProcessor(true);
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-t8-unknown',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          // SIN razon_social_emisor → vendorName cae a 'Unknown'.
+          datos_extraidos: { monto_total: 3150, moneda: 'CLP', fecha_emision: '2026-08-25' },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    // El soft-check (SELECT por vendor_name=) NUNCA se consultó (guard 'Unknown').
+    const softCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('vendor_name='));
+    expect(softCall).toBeUndefined();
+    // La factura entra sin marca.
+    expect(invoiceInsertPosibleDuplicado(queryMock)).toBe(false);
+  });
+});
+
 describe('PersistProcessor — content-hash duplicate (T10)', () => {
   it('marca duplicate + avisa cuando otro evento PROCESADO tiene el mismo doc_sha256, SIN natural-key', async () => {
     const queryMock = jest.fn((sql: string, _params?: any[]) => {

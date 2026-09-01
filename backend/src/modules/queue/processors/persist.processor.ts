@@ -291,6 +291,32 @@ export class PersistProcessor extends WorkerHost {
       }
     }
 
+    // Tarea 8 · Tercera capa (soft): cuando el hash y el natural-key no cazaron, un
+    // reenvío de la MISMA boleta con OCR débil (sin folio/RUT) igual duplica. Detectamos
+    // un probable duplicado por vendor_name + amount + invoice_date (tenant-scoped) y lo
+    // MARCAMOS (posible_duplicado=true) — NO lo descartamos, para no perder gastos legítimos
+    // repetidos (ej. 2 viajes iguales el mismo día). El humano revisa en el reporte.
+    // R3-002 · NO disparar el soft-check con el fallback 'Unknown' (vendor no extraído por el
+    // OCR): dos boletas de proveedores DISTINTOS sin nombre, con mismo monto+fecha, colisionarían
+    // en 'Unknown' → falso positivo que EXCLUIRÍA un gasto legítimo del total. Exigimos un
+    // proveedor real. El monto 0 (fallback) tampoco es señal: exigimos amount > 0.
+    let posibleDuplicado = false;
+    if (vendorName && vendorName !== 'Unknown' && amount != null && amount > 0) {
+      const dupSoft = await this.dataSource.query(
+        `SELECT id FROM invoices WHERE client_id=$1 AND vendor_name=$2 AND amount=$3 AND invoice_date=$4 LIMIT 1`,
+        [client_id, vendorName, amount, invoiceDate],
+      );
+      posibleDuplicado = dupSoft.length > 0;
+    }
+    if (posibleDuplicado) {
+      // Marca en DB + reporte son el entregable; la notificación es secundaria. No reusamos
+      // nuevoLine (semántica Slice C). Dejamos un log claro; la factura se inserta igual.
+      this.logger.warn(
+        `[F1Persist] posible duplicado (soft) para evento ${evento_crudo_id}: ` +
+          `vendor="${vendorName}" monto=${amount} fecha=${invoiceDate} — se MARCA, no se descarta`,
+      );
+    }
+
     // A2 — write the resolved project onto the invoice row so it is not left "sin asignar"
     // in the panel when the resolver DID identify a project. The prior ADR-12 work threaded
     // this project to the rendición and the WhatsApp confirmation but never to
@@ -326,16 +352,18 @@ export class PersistProcessor extends WorkerHost {
       `INSERT INTO invoices (
         client_id, source, vendor_name, amount, currency,
         invoice_date, category, description, status,
-        raw_payload, ai_extracted, project_id
+        raw_payload, ai_extracted, project_id, posible_duplicado
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-        (SELECT id FROM projects WHERE id = $12 AND client_id = $1 LIMIT 1)
+        (SELECT id FROM projects WHERE id = $12 AND client_id = $1 LIMIT 1),
+        $13
       )
       RETURNING id, project_id`,
       [
         client_id, channel, vendorName, amount, datos.moneda ?? 'CLP',
         invoiceDate, category, description, 'pending',
         JSON.stringify(classification), JSON.stringify(classification), projectId,
+        posibleDuplicado,
       ],
     );
 
