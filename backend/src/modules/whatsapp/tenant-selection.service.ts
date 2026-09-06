@@ -25,7 +25,13 @@ export class WhatsAppTenantSelectionService {
 
   /** Prompt shown when the sender must type an affiliation code. */
   buildCodePrompt(): string {
-    return 'Pasame el código de afiliación de la agencia para continuar.';
+    // P14 · anunciar la salida: sin esto, quien caía en el sub-estado del código por
+    // error sólo salía acertando un código válido o agotando los 5 intentos. El escape
+    // por "cancelar" ya existía (resolveInboundTenant), pero el bot nunca lo ofrecía.
+    return (
+      'Pasame el código de afiliación de la agencia para continuar.\n\n' +
+      'O escribí *cancelar* para salir.'
+    );
   }
 
   /**

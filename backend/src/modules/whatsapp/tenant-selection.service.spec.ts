@@ -28,6 +28,13 @@ describe('WhatsAppTenantSelectionService', () => {
     it('asks for the affiliation code', () => {
       expect(service.buildCodePrompt()).toMatch(/código de afiliación/i);
     });
+
+    // P14 — el sub-estado del código no tenía salida anunciada: quien caía acá por
+    // error sólo salía acertando un código o fallando 5 veces. El prompt debe ofrecer
+    // "cancelar" como salida explícita.
+    it('announces "cancelar" as an explicit way out', () => {
+      expect(service.buildCodePrompt()).toMatch(/cancelar/i);
+    });
   });
 
   describe('parseSelection', () => {
