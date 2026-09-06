@@ -288,7 +288,9 @@ export class WhatsAppWebhookController {
           from,
           session.tenantSelection,
           'awaiting_affiliation_code',
-          'Código inválido. Probá de nuevo o pedíselo a tu coordinador.',
+          // P14 · anunciar la salida en el error mismo: un "hola" (o cualquier no-código)
+          // tras un código malo repetía este mensaje sin ofrecer cómo salir.
+          'Código inválido. Probá de nuevo, pedíselo a tu coordinador, o escribí *cancelar* para salir.',
         );
       }
       await this.affiliation.affiliate(clientId, from);

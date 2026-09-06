@@ -44,3 +44,33 @@ describe('MovimientosPopService.create — T12 bodega obligatoria', () => {
     expect(inserted(queryMock)).toBe(true);
   });
 });
+
+describe('MovimientosPopService.calcularMermaProyecto — P19 correlativo en auto-merma', () => {
+  // La merma auto-generada tras una devolución era la ÚNICA INSERT que no calculaba
+  // correlativo → quedaba NULL, incumpliendo "Merma con correlativo". El QA no la cazó
+  // porque no pudo gatillar el escenario (salida + devolución parcial).
+  it('la merma auto-generada incluye la columna correlativo con un valor numérico', async () => {
+    const queryMock = jest.fn(async (sql: string) => {
+      const s = String(sql);
+      if (s.includes("tipo='salida'"))     return [{ total: '10' }];
+      if (s.includes("tipo='devolucion'")) return [{ total: '3' }];
+      if (s.includes("tipo='consumo'"))    return [{ total: '0' }];
+      if (s.includes('next_correlativo'))  return [{ next_correlativo: 7 }];
+      if (s.includes('INSERT INTO movimientos_pop')) return [{ id: 'merma-1' }];
+      return [];
+    });
+    const ds = { query: queryMock } as unknown as DataSource;
+    const svc = new MovimientosPopService(ds);
+
+    await svc.calcularMermaProyecto(CLIENT, 'sku-1', 'proj-1'); // merma = 10 - 3 - 0 = 7
+
+    const mermaInsert = queryMock.mock.calls.find(
+      ([s]: [string]) =>
+        String(s).includes('INSERT INTO movimientos_pop') && String(s).includes("'merma'"),
+    );
+    expect(mermaInsert).toBeDefined();
+    const [sql, params] = mermaInsert as unknown as [string, any[]];
+    expect(sql).toContain('correlativo');
+    expect(params).toContain(7);
+  });
+});

@@ -271,12 +271,21 @@ export class MovimientosPopService {
 
     const merma = parseInt(salidas[0].total) - parseInt(devoluciones[0].total) - parseInt(consumos[0].total);
     if (merma > 0) {
-      await this.ds.query(
-        `INSERT INTO movimientos_pop (client_id, sku_id, proyecto_destino_id, tipo, cantidad, estado, observacion)
-         VALUES ($1,$2,$3,'merma',$4,'merma','Merma calculada automáticamente')`,
-        [clientId, skuId, proyectoId, merma],
+      // P19 · La merma auto-generada era la ÚNICA INSERT que no calculaba correlativo →
+      // quedaba NULL. Se calcula igual que en create()/createTransfer: secuencial por
+      // (client_id, sku_id), para que "Merma con correlativo" también aplique a la auto-merma.
+      const corrRows = await this.ds.query(
+        `SELECT COALESCE(MAX(correlativo), 0) + 1 AS next_correlativo
+         FROM movimientos_pop WHERE client_id=$1 AND sku_id=$2`,
+        [clientId, skuId],
       );
-      this.logger.warn(`[F3] Merma calculada: ${merma} unidades SKU ${skuId} proyecto ${proyectoId}`);
+      const correlativo: number = corrRows[0]?.next_correlativo ?? 1;
+      await this.ds.query(
+        `INSERT INTO movimientos_pop (client_id, sku_id, proyecto_destino_id, tipo, cantidad, estado, observacion, correlativo)
+         VALUES ($1,$2,$3,'merma',$4,'merma','Merma calculada automáticamente',$5)`,
+        [clientId, skuId, proyectoId, merma, correlativo],
+      );
+      this.logger.warn(`[F3] Merma calculada: ${merma} unidades SKU ${skuId} proyecto ${proyectoId} (correlativo ${correlativo})`);
     }
   }
 

@@ -684,6 +684,23 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(wa.sendText).toHaveBeenCalledWith(FROM, CANCEL_MSG);
     });
 
+    it('P14 · un código inválido re-pregunta ANUNCIANDO "cancelar" como salida', async () => {
+      sessionStore[FROM] = {
+        state: 'awaiting_affiliation_code',
+        tenantSelection: { candidates: [], pendingMsg: textMsg('foto'), canalId: null, attempts: 0 },
+      } as unknown as WhatsAppSession;
+      // "hola" tras un código malo no es intención de cancelar → cae como código inválido.
+      affiliationCode.resolveClientByCode.mockResolvedValue(null);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(affiliationCode.resolveClientByCode).toHaveBeenCalledWith('hola');
+      // Antes repetía sólo "Código inválido…" sin ofrecer salida; ahora anuncia 'cancelar'.
+      const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(texts.toLowerCase()).toContain('cancelar');
+    });
+
     it('un código real (no-cancelar) sigue resolviendo la agencia (regression)', async () => {
       sessionStore[FROM] = {
         state: 'awaiting_affiliation_code',
