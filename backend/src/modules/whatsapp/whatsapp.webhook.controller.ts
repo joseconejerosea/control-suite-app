@@ -271,6 +271,14 @@ export class WhatsAppWebhookController {
         await this.wa.sendText(from, 'Listo, cancelé eso. Escribime cuando quieras retomar. 👍');
         return { status: 'stop' };
       }
+      // P14 · un saludo ("hola", "buenas", "menú"…) a mitad del código NO es un intento de
+      // código: antes caía en resolveClientByCode → null → repetía el MISMO "Código inválido"
+      // y encima gastaba un intento hacia el bloqueo de 5. Lo reconocemos y re-explicamos con
+      // el prompt canónico, sin contar intento (la selección/pendingMsg queda intacta).
+      if (this.actionMenu.isGreeting(text)) {
+        await this.wa.sendText(from, `¡Hola! 👋 ${this.selection.buildCodePrompt()}`);
+        return { status: 'stop' };
+      }
       // Non-text (media) or empty reply mid-selection: DON'T discard the intake — the
       // buffered pendingMsg stays intact. Re-prompt with a hint and count the attempt.
       if (!isUsableReply) {
@@ -278,7 +286,7 @@ export class WhatsAppWebhookController {
           from,
           session.tenantSelection,
           'awaiting_affiliation_code',
-          'Escribí el código de afiliación para continuar.',
+          'Escribí el código de afiliación para continuar, o *cancelar* para salir.',
         );
       }
 
@@ -308,13 +316,22 @@ export class WhatsAppWebhookController {
         await this.wa.sendText(from, 'Listo, cancelé eso. Escribime cuando quieras retomar. 👍');
         return { status: 'stop' };
       }
+      // P14 · igual que en el código: un saludo no es una elección de número inválida.
+      // Re-mostramos la lista de agencias sin contar intento, en vez de repetir el error.
+      if (this.actionMenu.isGreeting(text)) {
+        await this.wa.sendText(
+          from,
+          `¡Hola! 👋 ${this.selection.buildPrompt(session.tenantSelection.candidates)}`,
+        );
+        return { status: 'stop' };
+      }
       // Non-text (media) or empty reply mid-selection: re-prompt, keep the intake.
       if (!isUsableReply) {
         return this.rejectSelectionReply(
           from,
           session.tenantSelection,
           'awaiting_tenant',
-          'Respondé con el número de la agencia.',
+          'Respondé con el número de la agencia, o *cancelar* para salir.',
         );
       }
 

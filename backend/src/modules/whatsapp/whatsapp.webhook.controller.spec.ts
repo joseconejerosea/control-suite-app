@@ -649,6 +649,8 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       sessions.setTenantSelection = jest.fn().mockResolvedValue(undefined);
       affiliationCode.resolveClientByCode = jest.fn();
       selection.parseSelection = jest.fn();
+      selection.buildCodePrompt = jest.fn(() => 'Pasame el código de afiliación de la agencia para continuar.');
+      selection.buildPrompt = jest.fn(() => '¿Para qué agencia es esto?');
     });
 
     it('cancela desde awaiting_affiliation_code sin tratar el texto como código', async () => {
@@ -684,21 +686,63 @@ describe('WhatsAppWebhookController · T3 state machine', () => {
       expect(wa.sendText).toHaveBeenCalledWith(FROM, CANCEL_MSG);
     });
 
-    it('P14 · un código inválido re-pregunta ANUNCIANDO "cancelar" como salida', async () => {
+    it('P14 · un código inválido (no-saludo) re-pregunta ANUNCIANDO "cancelar" como salida', async () => {
       sessionStore[FROM] = {
         state: 'awaiting_affiliation_code',
         tenantSelection: { candidates: [], pendingMsg: textMsg('foto'), canalId: null, attempts: 0 },
       } as unknown as WhatsAppSession;
-      // "hola" tras un código malo no es intención de cancelar → cae como código inválido.
+      // Un código que NO es saludo ni cancelar → cae como código inválido de verdad.
       affiliationCode.resolveClientByCode.mockResolvedValue(null);
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('zzz999'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(affiliationCode.resolveClientByCode).toHaveBeenCalledWith('zzz999');
+      // Antes repetía sólo "Código inválido…" sin ofrecer salida; ahora anuncia 'cancelar'.
+      const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(texts.toLowerCase()).toContain('cancelar');
+    });
+
+    it('P14 · un saludo ("hola") en awaiting_affiliation_code NO se trata como código y NO gasta intento', async () => {
+      sessionStore[FROM] = {
+        state: 'awaiting_affiliation_code',
+        tenantSelection: { candidates: [], pendingMsg: textMsg('foto'), canalId: null, attempts: 0 },
+      } as unknown as WhatsAppSession;
 
       const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('hola'));
 
       expect(resolution).toEqual({ status: 'stop' });
-      expect(affiliationCode.resolveClientByCode).toHaveBeenCalledWith('hola');
-      // Antes repetía sólo "Código inválido…" sin ofrecer salida; ahora anuncia 'cancelar'.
+      // El saludo NO se resuelve como código (antes caía en "Código inválido" idéntico)...
+      expect(affiliationCode.resolveClientByCode).not.toHaveBeenCalled();
+      // ...ni cuenta como intento fallido hacia el bloqueo de 5.
+      expect(sessions.setTenantSelection).not.toHaveBeenCalled();
+      expect(sessions.clearTenantSelection).not.toHaveBeenCalled();
+      // Re-explica con el prompt del código, saludando.
       const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
-      expect(texts.toLowerCase()).toContain('cancelar');
+      expect(texts.toLowerCase()).toContain('hola');
+      expect(texts.toLowerCase()).toContain('código');
+    });
+
+    it('P14 · un saludo ("buenas") en awaiting_tenant NO se parsea como número y NO gasta intento', async () => {
+      sessionStore[FROM] = {
+        state: 'awaiting_tenant',
+        tenantSelection: {
+          candidates: [{ clientId: 'c1', clientName: 'Uno' }],
+          pendingMsg: textMsg('foto'),
+          canalId: null,
+          attempts: 0,
+        },
+      } as unknown as WhatsAppSession;
+
+      const resolution = await ctrl.resolveInboundTenant(FROM, textMsg('buenas'));
+
+      expect(resolution).toEqual({ status: 'stop' });
+      expect(selection.parseSelection).not.toHaveBeenCalled();
+      expect(sessions.setTenantSelection).not.toHaveBeenCalled();
+      expect(sessions.clearTenantSelection).not.toHaveBeenCalled();
+      const texts = wa.sendText.mock.calls.map((c: any[]) => c[1]).join('\n');
+      expect(texts.toLowerCase()).toContain('hola');
+      expect(texts).toContain('¿Para qué agencia es esto?');
     });
 
     it('un código real (no-cancelar) sigue resolviendo la agencia (regression)', async () => {
