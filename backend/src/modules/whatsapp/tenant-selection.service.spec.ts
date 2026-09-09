@@ -22,6 +22,12 @@ describe('WhatsAppTenantSelectionService', () => {
       // The extra option lets an already-affiliated sender operate for a NEW agency.
       expect(prompt).toContain('3) Otra agencia');
     });
+
+    // P14 (JB-002) — simétrico con buildCodePrompt: la selección numerada también debe
+    // anunciar "cancelar" como salida explícita (antes solo el prompt del código lo hacía).
+    it('announces "cancelar" as an explicit way out', () => {
+      expect(service.buildPrompt(candidates)).toMatch(/cancelar/i);
+    });
   });
 
   describe('buildCodePrompt', () => {

@@ -20,7 +20,14 @@ export class WhatsAppTenantSelectionService {
   buildPrompt(candidates: ClientCandidate[]): string {
     const options = candidates.map((c, i) => `${i + 1}) ${c.clientName}`);
     options.push(`${candidates.length + 1}) Otra agencia (tengo un código)`);
-    return `¿Para qué agencia es esto?\n${options.join('\n')}\n\nRespondé con el número.`;
+    // P14 (JB-002) · anunciar la salida también en la selección numerada, simétrico con
+    // buildCodePrompt: sin esto, el estado de elección de agencia nunca ofrecía cómo salir
+    // (ni inicial, ni re-prompt por número inválido, ni ante un saludo) mientras el del
+    // código sí — la asimetría dejaba al usuario sin escape visible.
+    return (
+      `¿Para qué agencia es esto?\n${options.join('\n')}\n\n` +
+      'Respondé con el número, o escribí *cancelar* para salir.'
+    );
   }
 
   /** Prompt shown when the sender must type an affiliation code. */
