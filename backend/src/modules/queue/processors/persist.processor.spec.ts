@@ -1389,3 +1389,145 @@ describe('PersistProcessor — content-hash duplicate (T10)', () => {
     expect(dupUpdate).toBeDefined();
   });
 });
+
+// ─── C1 (Informe v1.9) — hardening de la dedup natural-key ────────────────────
+// El informe v1.9 reportó que un reenvío RE-ENCODEADO (WhatsApp cambia los bytes → el hash
+// no lo caza) creaba una segunda factura. Causa raíz confirmada contra la BD dev: la capa
+// natural-key era CÓDIGO MUERTO — el INSERT nunca poblaba invoices.numero_documento /
+// rut_emisor (NULL en 47/47 facturas) y además exigía el rut_emisor, que el OCR varía
+// (69060900-2 vs 6906090-2). FIX: (1) el INSERT persiste esas columnas; (2) la natural-key
+// keyea por N° doc normalizado + monto, SIN exigir RUT. Estos tests fijan ambos.
+describe('PersistProcessor — C1 v1.9 (natural-key por N° doc + monto, persiste campos)', () => {
+  function buildProcessor(naturalKeyHit: boolean) {
+    const queryMock = jest.fn((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' }, parsed_data: null },
+        ]);
+      }
+      // Hash miss: el reenvío re-encodeado tiene otros bytes → otro doc_sha256.
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([]);
+      // Natural-key: el SELECT con regexp_replace(numero_documento) es exclusivo de esta capa.
+      if (sql.includes('regexp_replace') && sql.includes('numero_documento')) {
+        return Promise.resolve(naturalKeyHit ? [{ id: 'prior-inv' }] : []);
+      }
+      // Soft-check (vendor_name=) — no debe cazar en estos tests.
+      if (sql.includes('FROM invoices WHERE') && sql.includes('vendor_name=')) return Promise.resolve([]);
+      if (sql.includes('INSERT INTO invoices')) {
+        return Promise.resolve([{ id: 'inv-c1', project_id: params?.[11] ?? null }]);
+      }
+      if (sql.includes('FROM promoters')) return Promise.resolve([{ id: 'persona-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const avisarDuplicado = jest.fn().mockResolvedValue(true);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: jest.fn() } as any,
+      { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+    return { processor, queryMock, avisarDuplicado, confirmarProcesado };
+  }
+
+  // La boleta del caso: N° doc estable, RUT con formato distinto entre corridas.
+  function makeJob(over: Record<string, unknown> = {}): Job<any> {
+    return {
+      data: {
+        evento_crudo_id: 'evt-c1',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'boleta',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          datos_extraidos: {
+            numero_documento: '195647265',
+            rut_emisor: '6906090-2',
+            monto_total: 3150,
+            moneda: 'CLP',
+            razon_social_emisor: 'I. MUNICIPALIDAD DE VALPARAÍSO',
+            fecha_emision: '2026-08-25',
+            monto_neto: 2647,
+            monto_iva: 503,
+            ...over,
+          },
+        },
+      },
+    } as unknown as Job<any>;
+  }
+
+  it('reenvío re-encodeado (hash miss) → la natural-key lo caza por N° doc + monto, aunque el RUT varíe', async () => {
+    const { processor, queryMock, avisarDuplicado } = buildProcessor(true);
+
+    await processor.process(makeJob());
+
+    // Cazado como duplicado: avisa y NO inserta.
+    expect(avisarDuplicado).toHaveBeenCalledWith('5492216205665');
+    const insertCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'));
+    expect(insertCall).toBeUndefined();
+
+    // La natural-key se consultó con el folio NORMALIZADO y el monto — no con el RUT.
+    const nkCall = queryMock.mock.calls.find(
+      ([sql]: [string]) => String(sql).includes('regexp_replace') && String(sql).includes('numero_documento'),
+    );
+    expect(nkCall).toBeDefined();
+    const [, nkParams] = nkCall;
+    expect(nkParams[1]).toBe('195647265'); // normalizeDocKey del folio
+    expect(nkParams[2]).toBe(3150); // monto
+    expect(nkParams).not.toContain('6906090-2'); // el RUT NO participa de la llave
+  });
+
+  it('sin duplicado → el INSERT persiste numero_documento, rut_emisor, tipo, destino y montos', async () => {
+    const { processor, queryMock } = buildProcessor(false);
+
+    await processor.process(makeJob());
+
+    const insertCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'));
+    expect(insertCall).toBeDefined();
+    const [sql, params] = insertCall;
+    // Columnas nuevas presentes y el INSERT llega hasta $22 (sin correr project_id=$12 ni posible_duplicado=$13).
+    expect(sql).toContain('numero_documento');
+    expect(sql).toContain('rut_emisor');
+    expect(sql).toContain('$22');
+    expect(sql).toContain('RETURNING id, project_id');
+    // Valores mapeados (append después de posible_duplicado en params[12]).
+    expect(params[12]).toBe(false); // posible_duplicado intacto
+    expect(params[13]).toBe('195647265'); // numero_documento
+    expect(params[14]).toBe('6906090-2'); // rut_emisor (se persiste tal cual el OCR)
+    expect(params[15]).toBe('boleta'); // tipo
+    expect(params[16]).toBe('gastos'); // destino
+    expect(params[20]).toBe(3150); // monto_total
+  });
+
+  it('folio ausente → la natural-key NO corre (cae al soft-check), sin falso positivo', async () => {
+    const { processor, queryMock } = buildProcessor(true);
+
+    await processor.process(makeJob({ numero_documento: undefined }));
+
+    // Con numero_documento ausente la capa natural-key ni se consulta.
+    const nkCall = queryMock.mock.calls.find(
+      ([sql]: [string]) => String(sql).includes('regexp_replace') && String(sql).includes('numero_documento'),
+    );
+    expect(nkCall).toBeUndefined();
+  });
+});
