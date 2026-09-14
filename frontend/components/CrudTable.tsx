@@ -63,6 +63,10 @@ interface CrudTableProps {
   fields: FieldDef[];
   defaultForm: Record<string, unknown>;
   emptyText?: string;
+  // P.v1.9 (copy): singular en español para los títulos "Crear/Editar {singular}" y el botón.
+  // Necesario cuando la derivación title.replace(/s$/,"") no funciona (plurales en -es, ej.
+  // "Activaciones" → "Activacione"). Si se omite, cae a esa derivación.
+  singular?: string;
   dataKey?: string;
   // Open the create modal (pre-filled from defaultForm) automatically on mount.
   autoOpenCreate?: boolean;
@@ -75,9 +79,12 @@ interface CrudTableProps {
 function Badge({
   value,
   map,
+  label,
 }: {
   value: string;
   map: Record<string, { bg: string; color: string }>;
+  // P.v1.9 (copy): texto a mostrar; si se omite, se muestra el valor crudo (compat).
+  label?: string;
 }) {
   const style = map[value] ?? {
     bg: "var(--secondary)",
@@ -88,10 +95,23 @@ function Badge({
       className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide"
       style={{ background: style.bg, color: style.color }}
     >
-      {value}
+      {label ?? value}
     </span>
   );
 }
+
+// P.v1.9 (copy): etiquetas en español para los enums de estado — el badge los mostraba
+// crudos (IN_PROGRESS, SCHEDULED) por el uppercase del CSS. La key de color sigue siendo el
+// valor crudo; sólo cambia el texto visible.
+const STATUS_LABELS: Record<string, string> = {
+  active: "Activa", paused: "Pausada", archived: "Archivada", draft: "Borrador",
+  ended: "Finalizada", inactive: "Inactiva", uploaded: "Cargado", processing: "Procesando",
+  parsed: "Analizado", populated: "Poblado", error: "Error",
+  observer: "Observador", supervisor: "Supervisor", coordinator: "Coordinador",
+  brand_manager: "Brand manager",
+  scheduled: "Agendada", in_progress: "En curso", completed: "Completada",
+  cancelled: "Cancelada", pending: "Pendiente",
+};
 
 export const StatusBadge = (v: unknown) => {
   const val = String(v ?? "");
@@ -135,7 +155,7 @@ export const StatusBadge = (v: unknown) => {
     },
     pending: { bg: "var(--secondary)", color: "var(--muted-foreground)" },
   };
-  return <Badge value={val} map={map} />;
+  return <Badge value={val} map={map} label={STATUS_LABELS[val] ?? val.replace(/_/g, " ")} />;
 };
 
 // Anexo · "fecha un día antes": una fecha date-only 'YYYY-MM-DD' con new Date(s) se
@@ -409,7 +429,7 @@ function Modal({
                       color: "var(--foreground)",
                     }}
                   >
-                    <option value="">Select…</option>
+                    <option value="">Seleccioná…</option>
                     {f.options?.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
@@ -508,6 +528,7 @@ export default function CrudTable({
   fields,
   defaultForm,
   emptyText,
+  singular,
   dataKey,
   autoOpenCreate,
   onCreated,
@@ -896,7 +917,7 @@ export default function CrudTable({
             boxShadow: "0 4px 14px rgba(79,70,229,0.3)",
           }}
         >
-          <Plus size={14} /> New {title.replace(/s$/, "")}
+          <Plus size={14} /> Crear {singular ?? title.replace(/s$/, "")}
         </button>
       </div>
 
@@ -987,7 +1008,7 @@ export default function CrudTable({
                     className="px-4 py-14 text-center text-sm"
                     style={{ color: "var(--muted-foreground)" }}
                   >
-                    {emptyText ?? `No ${title.toLowerCase()} found.`}
+                    {emptyText ?? `No hay ${title.toLowerCase()}.`}
                   </td>
                 </tr>
               ) : (
@@ -1056,8 +1077,8 @@ export default function CrudTable({
         <Modal
           title={
             modal === "create"
-              ? `New ${title.replace(/s$/, "")}`
-              : `Edit ${title.replace(/s$/, "")}`
+              ? `Crear ${singular ?? title.replace(/s$/, "")}`
+              : `Editar ${singular ?? title.replace(/s$/, "")}`
           }
           onClose={() => {
             setModal(null);

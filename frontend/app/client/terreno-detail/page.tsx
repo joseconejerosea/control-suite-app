@@ -124,17 +124,33 @@ function TerrenoDetail() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold" style={{ color: "var(--primary)" }}>Último reporte generado</span>
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)" }}>
-                  {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.calificacion ?? "—"}
-                </span>
+                {(() => {
+                  // P.v1.9 (copy): el badge iba SIEMPRE en verde, así que "deficiente" (negativo)
+                  // se veía con color positivo. Coloreamos según la calificación.
+                  const cal = String((reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.calificacion ?? "—");
+                  const CAL_STYLE: Record<string, { bg: string; fg: string }> = {
+                    excelente: { bg: "color-mix(in srgb, var(--success) 15%, transparent)", fg: "var(--success)" },
+                    buena:     { bg: "color-mix(in srgb, var(--success) 15%, transparent)", fg: "var(--success)" },
+                    regular:   { bg: "rgba(245,158,11,0.15)", fg: "#f59e0b" },
+                    deficiente:{ bg: "color-mix(in srgb, var(--danger) 15%, transparent)", fg: "var(--danger)" },
+                  };
+                  const st = CAL_STYLE[cal.toLowerCase()] ?? { bg: "var(--secondary)", fg: "var(--muted-foreground)" };
+                  return (
+                    <span className="text-xs px-2 py-0.5 rounded-full capitalize" style={{ background: st.bg, color: st.fg }}>
+                      {cal}
+                    </span>
+                  );
+                })()}
               </div>
               <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
                 {reporte.aprobado_at ? new Date(reporte.aprobado_at).toLocaleString("es-CL") : "—"}
               </span>
             </div>
             {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.resumen_ejecutivo && (
-              <p className="text-sm mt-2" style={{ color: "var(--muted-foreground)" }}>
-                {((reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb).resumen_ejecutivo as string).slice(0, 200)}...
+              // P.v1.9 (copy): antes se cortaba a 200 chars con "..." SIEMPRE (aun si era más
+              // corto). Mostramos el resumen completo (son 2-3 párrafos) — sin truncar.
+              <p className="text-sm mt-2 whitespace-pre-line" style={{ color: "var(--muted-foreground)" }}>
+                {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb).resumen_ejecutivo as string}
               </p>
             )}
           </div>

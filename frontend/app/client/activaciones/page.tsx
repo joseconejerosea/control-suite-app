@@ -8,6 +8,7 @@ export default function ActivacionesPage() {
     <AppShell>
       <CrudTable
         title="Activaciones"
+        singular="activación"
         subtitle="Activaciones de terreno por campaña, ubicación y promotor"
         endpoint="/activations"
         defaultForm={{

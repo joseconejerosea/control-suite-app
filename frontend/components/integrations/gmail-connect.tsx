@@ -48,7 +48,13 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
     try {
       const r = await fetch(`${API}/auth/gmail/connect`, { headers: authHeader() });
       const d = await r.json();
-      if (!d?.url) { onToast?.("No se pudo iniciar la conexión"); setWorking(false); return; }
+      // C3 (v1.9): si el backend explica el motivo (p.ej. Gmail no configurado en el entorno),
+      // mostramos ESE mensaje en vez del genérico — así se distingue config de bug.
+      if (!d?.url) {
+        onToast?.(d?.error?.message ?? d?.message ?? "No se pudo iniciar la conexión");
+        setWorking(false);
+        return;
+      }
       const popup = window.open(d.url, "gmail-oauth", "width=520,height=660");
       // El callback del backend se muestra en el popup y guarda los tokens server-side.
       // Detectamos el cierre del popup y refrescamos el estado.

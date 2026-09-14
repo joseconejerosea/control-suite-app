@@ -1531,3 +1531,112 @@ describe('PersistProcessor — C1 v1.9 (natural-key por N° doc + monto, persist
     expect(nkCall).toBeUndefined();
   });
 });
+
+// ─── C2 (Informe v1.9) — inferir activation_id por promotor + fecha ───────────
+// Rompe el silo gasto↔terreno: el gasto WhatsApp se liga a la activación agendada del
+// promotor remitente para esa fecha, SOLO si hay exactamente una candidata. 0 o >1 → null
+// (queda por proyecto). Se persiste en invoices.activation_id ($23) y se pasa a la rendición.
+describe('PersistProcessor — C2 v1.9 (inferir activation_id)', () => {
+  function buildProcessor(activationRows: { id: string }[], promoterRows = [{ id: 'promoter-1' }]) {
+    const asignar = jest.fn();
+    const queryMock = jest.fn((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' }, parsed_data: null },
+        ]);
+      }
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([]);
+      if (sql.includes('regexp_replace') && sql.includes('numero_documento')) return Promise.resolve([]);
+      if (sql.includes('FROM invoices WHERE') && sql.includes('vendor_name=')) return Promise.resolve([]);
+      if (sql.includes('FROM activations')) return Promise.resolve(activationRows);
+      if (sql.includes('FROM promoters')) return Promise.resolve(promoterRows);
+      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-c2', project_id: 'proj-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: asignar } as any,
+      { avisarDuplicado: jest.fn(), confirmarProcesado: jest.fn() } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+    return { processor, queryMock, asignar };
+  }
+
+  function makeJob(): Job<any> {
+    return {
+      data: {
+        evento_crudo_id: 'evt-c2',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'boleta',
+          destino: 'gastos', // → category 'expense' → corre asignarFacturaARendicion
+          confidence_score: 0.9,
+          datos_extraidos: { monto_total: 5000, moneda: 'CLP', razon_social_emisor: 'Proveedor X', fecha_emision: '2026-09-14' },
+        },
+      },
+    } as unknown as Job<any>;
+  }
+
+  const insertParams = (queryMock: jest.Mock) =>
+    queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'))?.[1];
+
+  it('exactamente UNA activación del promotor esa fecha → liga activation_id (invoice + rendición)', async () => {
+    const { processor, queryMock, asignar } = buildProcessor([{ id: 'act-1' }]);
+
+    await processor.process(makeJob());
+
+    // Persistido en invoices.activation_id ($23 → params[22]).
+    const params = insertParams(queryMock);
+    expect(params?.[22]).toBe('act-1');
+    // Y pasado a la rendición como 7º argumento.
+    expect(asignar).toHaveBeenCalledWith('client-1', 'inv-c2', 'promoter-1', 'proj-1', 5000, '2026-09-14', 'act-1');
+  });
+
+  it('activación AMBIGUA (>1 candidata) → activation_id null (no adivina)', async () => {
+    const { processor, queryMock, asignar } = buildProcessor([{ id: 'act-1' }, { id: 'act-2' }]);
+
+    await processor.process(makeJob());
+
+    expect(insertParams(queryMock)?.[22]).toBeNull();
+    expect(asignar).toHaveBeenCalledWith('client-1', 'inv-c2', 'promoter-1', 'proj-1', 5000, '2026-09-14', null);
+  });
+
+  it('sin activación candidata → activation_id null', async () => {
+    const { processor, queryMock } = buildProcessor([]);
+
+    await processor.process(makeJob());
+
+    expect(insertParams(queryMock)?.[22]).toBeNull();
+  });
+
+  it('remitente sin promotor → no consulta activaciones, activation_id null', async () => {
+    const { processor, queryMock } = buildProcessor([{ id: 'act-1' }], []); // promoterRows vacío
+
+    await processor.process(makeJob());
+
+    // Sin promotor, la query de activaciones ni corre.
+    const actCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('FROM activations'));
+    expect(actCall).toBeUndefined();
+    expect(insertParams(queryMock)?.[22]).toBeNull();
+  });
+});
