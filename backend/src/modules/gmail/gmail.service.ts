@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -37,10 +37,26 @@ export class GmailService {
     );
   }
 
+  // C3 (v1.9): la integración Gmail requiere credenciales OAuth en el entorno. Si faltan,
+  // el connect fallaba con un error críptico ("No se pudo iniciar la conexión"). Devolvemos
+  // un mensaje claro que dice QUÉ falta, para no confundir un problema de config con un bug.
+  private assertOAuthConfigured(): void {
+    const missing = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REDIRECT_URI'].filter(
+      (k) => !this.config.get(k),
+    );
+    if (missing.length) {
+      throw new ServiceUnavailableException(
+        'La integración con Gmail no está configurada en este entorno. ' +
+          'Falta configurar las credenciales OAuth (client ID, secret y redirect URI).',
+      );
+    }
+  }
+
   getAuthUrl(clientId: string): string {
     if (!clientId) {
       throw new UnauthorizedException('No tenant context to start Gmail OAuth');
     }
+    this.assertOAuthConfigured();
     const client = this.getOAuthClient();
     return client.generateAuthUrl({
       access_type: 'offline',

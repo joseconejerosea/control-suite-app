@@ -8,6 +8,7 @@ export default function ActivacionesPage() {
     <AppShell>
       <CrudTable
         title="Activaciones"
+        singular="activación"
         subtitle="Activaciones de terreno por campaña, ubicación y promotor"
         endpoint="/activations"
         defaultForm={{
@@ -50,6 +51,23 @@ export default function ActivacionesPage() {
               return `/projects/${String(projectId)}/locations`;
             },
             optionsLabelKey: "name",
+            // P15 (v1.9): proyectos que nacieron sin PDVs dejaban el dropdown vacío y
+            // bloqueaban crear la activación. Permite dar de alta el PDV al vuelo (queda
+            // normalizado en el proyecto, reutilizable) sin salir del modal.
+            allowCreate: {
+              addLabel: "Agregar ubicación",
+              disabledHint: "Seleccioná primero la campaña.",
+              endpointFrom: (form, rows) => {
+                const campaignId = form.campaign_id;
+                if (!campaignId) return null;
+                const campaign = (rows.campaign_id ?? []).find(
+                  (r) => String(r.id) === campaignId,
+                );
+                const projectId = campaign?.project_id;
+                if (!projectId) return null;
+                return `/projects/${String(projectId)}/locations`;
+              },
+            },
           },
           {
             key: "promoter_id",

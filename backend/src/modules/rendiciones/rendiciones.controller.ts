@@ -14,6 +14,12 @@ import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
+import { IsOptional, IsUUID } from 'class-validator';
+
+// C2 (v1.9): reasignar la activación de un gasto. activation_id null = desligar.
+class ReasignarActivacionDto {
+  @IsOptional() @IsUUID() activation_id?: string | null;
+}
 
 @Controller('rendiciones')
 @UseGuards(AuthGuard, RolesGuard, ClientIsolationGuard, ClientActiveGuard)
@@ -44,6 +50,27 @@ export class RendicionesController {
       .header('Content-Type', mimeType)
       .header('Content-Length', buffer.length)
       .send(buffer);
+  }
+
+  // C2 (v1.9): activaciones candidatas para reasignar un gasto (las del proyecto del gasto).
+  @Get('boletas/:invoiceId/activaciones')
+  getActivacionesCandidatas(
+    @CurrentUser() user: JwtPayload,
+    @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
+  ) {
+    return this.svc.getActivacionesCandidatas(user.client_id, invoiceId);
+  }
+
+  // C2 (v1.9): reasignar (o desligar, con activation_id null) la activación de un gasto.
+  // Actualiza la factura y re-agrupa el ítem de rendición (si está en borrador).
+  @Patch('boletas/:invoiceId/activacion')
+  @AuditAction({ action: 'REASSIGN_ACTIVATION', entity: 'Invoice' })
+  reasignarActivacion(
+    @CurrentUser() user: JwtPayload,
+    @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
+    @Body() dto: ReasignarActivacionDto,
+  ) {
+    return this.svc.reasignarActivacion(user.client_id, invoiceId, dto.activation_id ?? null);
   }
 
   @Get(':id')

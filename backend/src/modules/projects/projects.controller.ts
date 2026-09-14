@@ -77,6 +77,14 @@ class ReportRecipientsDto {
   emails: string[];
 }
 
+// P15 (v1.9): alta inline de un PDV para un proyecto. Permite crear la ubicación desde el
+// form de activación cuando el proyecto todavía no tiene PDVs (nacía sin locales si el
+// documento de origen no los listaba), sin bloquear el flujo.
+class CreateProjectLocationDto {
+  @IsString() @IsNotEmpty() name: string;
+  @IsOptional() @IsString() address?: string;
+}
+
 // ── Controller ────────────────────────────────────────────────────────────────
 
 @Controller('projects')
@@ -165,6 +173,19 @@ export class ProjectsController {
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   getProjectLocations(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.getProjectLocations(req.user.client_id, id);
+  }
+
+  // P15 (v1.9): POST /projects/:id/locations → alta inline de un PDV. Devuelve la ubicación
+  // creada (id, name, address) para que el front la agregue al dropdown y la seleccione.
+  @Post(':id/locations')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @AuditAction({ action: 'CREATE_PROJECT_LOCATION', entity: 'Project' })
+  createProjectLocation(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateProjectLocationDto,
+  ) {
+    return this.service.createProjectLocation(req.user.client_id, id, dto.name, dto.address ?? null);
   }
 
   // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────

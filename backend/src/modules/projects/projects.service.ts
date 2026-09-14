@@ -352,6 +352,32 @@ export class ProjectsService {
     );
   }
 
+  // P15 (v1.9): alta inline de un PDV para un proyecto. Valida que el proyecto sea del
+  // tenant (findOne tira 404 si no), luego upsertea la ubicación con la MISMA llave que
+  // syncProjectLocations (client_id, project_id, lower(name)) para no duplicar si ya existe
+  // ni chocar con lo sembrado desde el documento. Reactiva una inactiva del mismo nombre.
+  async createProjectLocation(
+    clientId: string,
+    projectId: string,
+    name: string,
+    address: string | null,
+  ): Promise<{ id: string; name: string; address: string | null }> {
+    await this.findOne(clientId, projectId);
+    const rows = await this.dataSource.query(
+      `INSERT INTO locations (client_id, project_id, name, address, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       ON CONFLICT (client_id, project_id, lower(name))
+         WHERE project_id IS NOT NULL
+         DO UPDATE SET
+           address    = EXCLUDED.address,
+           status     = 'active',
+           updated_at = NOW()
+       RETURNING id, name, address`,
+      [clientId, projectId, name.trim(), address?.trim() || null],
+    );
+    return rows[0];
+  }
+
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
     const project  = await this.findOne(clientId, id);
     // Activation counting mirrors ActivationsService.findByProject: an activation

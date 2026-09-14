@@ -48,6 +48,17 @@ type PostCommitNotify =
 // INSERT's tenant-scoped `SELECT id FROM projects WHERE id = $12` subquery never cast-errors.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// C1 (v1.9) · Normaliza un identificador de documento (N° folio) para una comparación
+// tolerante a formato: minúsculas y sólo alfanumérico. Entre corridas el OCR varía la
+// puntuación/espacios del folio, pero el número en sí es estable — a diferencia del RUT,
+// que el OCR llega a malinterpretar dígitos (69060900-2 vs 6906090-2). Devuelve null si
+// no queda nada comparable.
+function normalizeDocKey(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return s.length ? s : null;
+}
+
 const TIPO_LABELS: Record<string, string> = {
   factura_recibida: 'Factura recibida',
   factura_emitida: 'Factura emitida',
@@ -279,12 +290,25 @@ export class PersistProcessor extends WorkerHost {
       return this.markDuplicate(evento_crudo_id, channel, payload, 'content-hash');
     }
 
-    // Natural key duplicate check — cacha una RE-FOTO del mismo comprobante (bytes
-    // distintos, mismo numero_documento + rut_emisor) que el hash nunca podría cachar.
-    if (datos.numero_documento && datos.rut_emisor) {
+    // Natural key duplicate check — cacha una RE-FOTO o un reenvío RE-ENCODEADO del mismo
+    // comprobante (bytes distintos → el hash de arriba NO lo caza) por su N° de documento.
+    // C1 (v1.9): antes exigía numero_documento + rut_emisor y comparaba contra
+    // invoices.numero_documento/rut_emisor — pero el INSERT NUNCA poblaba esas columnas
+    // (NULL en el 100% de las facturas) → la capa era CÓDIGO MUERTO. Ahora: (1) el INSERT
+    // de abajo persiste esas columnas, y (2) la llave es N° doc + monto (tenant-scoped),
+    // SIN rut_emisor: el OCR lee el RUT distinto entre corridas (69060900-2 vs 6906090-2),
+    // así que atarlo al RUT hacía la capa frágil aun poblada. Normalizamos el folio en ambos
+    // lados (sólo alfanumérico) para tolerar variación de puntuación; el monto — estable
+    // entre corridas — discrimina folios que colisionen entre proveedores distintos.
+    const numeroDocKey = normalizeDocKey(datos.numero_documento);
+    if (numeroDocKey && amount != null && amount > 0) {
       const dupInvoice = await this.dataSource.query(
-        `SELECT id FROM invoices WHERE client_id=$1 AND numero_documento=$2 AND rut_emisor=$3 LIMIT 1`,
-        [client_id, datos.numero_documento, datos.rut_emisor],
+        `SELECT id FROM invoices WHERE client_id=$1
+             AND deleted_at IS NULL
+             AND regexp_replace(lower(numero_documento), '[^a-z0-9]', '', 'g') = $2
+             AND amount = $3
+           LIMIT 1`,
+        [client_id, numeroDocKey, amount],
       );
       if (dupInvoice.length) {
         return this.markDuplicate(evento_crudo_id, channel, payload, 'natural-key');
@@ -340,6 +364,11 @@ export class PersistProcessor extends WorkerHost {
       projectId = null;
     }
 
+    // C2 (v1.9): inferir la activación real del gasto por (promotor del remitente + fecha),
+    // para que gasto y terreno/F5 compartan la misma entidad. null si 0 o >1 candidata; el
+    // valor sale de activations del propio tenant → seguro para el FK. Best-effort.
+    const activationId = await this.resolveActivationId(client_id, payload, channel, invoiceDate);
+
     // A2: resolve project_id ATOMICALLY inside the INSERT via a tenant-scoped correlated subquery,
     // and RETURN the resolved value. persistEvento runs inside runWithTenant = ONE Postgres
     // transaction, so the prior guard-SELECT + FK-retry was BROKEN: a 23503 FK violation ABORTS
@@ -348,15 +377,23 @@ export class PersistProcessor extends WorkerHost {
     // `no-catch-swallow-in-tx`). With the subquery the FK can NEVER be violated (the value is
     // drawn FROM projects) and there is no guard/INSERT race (one atomic statement): if the
     // project exists for this tenant the subquery yields its id, otherwise NULL.
+    // C1 (v1.9): persistimos los campos extraídos del comprobante (numero_documento,
+    // rut_emisor, tipo, destino, razón social, montos, fecha de emisión) que hasta acá el
+    // INSERT omitía — dejándolos NULL en el 100% de las facturas. Eso volvía código muerto la
+    // dedup por natural-key Y privaba al reporte de esos datos. Van APPENDeados después de
+    // posible_duplicado ($13) para no correr project_id ($12) ni los parámetros previos.
     const invoiceResult = await this.dataSource.query(
       `INSERT INTO invoices (
         client_id, source, vendor_name, amount, currency,
         invoice_date, category, description, status,
-        raw_payload, ai_extracted, project_id, posible_duplicado
+        raw_payload, ai_extracted, project_id, posible_duplicado,
+        numero_documento, rut_emisor, tipo, destino, razon_social_emisor,
+        monto_neto, monto_iva, monto_total, fecha_emision, activation_id
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
         (SELECT id FROM projects WHERE id = $12 AND client_id = $1 LIMIT 1),
-        $13
+        $13,
+        $14,$15,$16,$17,$18,$19,$20,$21,$22,$23
       )
       RETURNING id, project_id`,
       [
@@ -364,6 +401,10 @@ export class PersistProcessor extends WorkerHost {
         invoiceDate, category, description, 'pending',
         JSON.stringify(classification), JSON.stringify(classification), projectId,
         posibleDuplicado,
+        datos.numero_documento ?? null, datos.rut_emisor ?? null, tipo, destino,
+        datos.razon_social_emisor ?? null,
+        datos.monto_neto ?? null, datos.monto_iva ?? null,
+        datos.monto_total ?? amount, datos.fecha_emision ?? null, activationId,
       ],
     );
 
@@ -389,7 +430,7 @@ export class PersistProcessor extends WorkerHost {
         const personaId = await this.resolvePersonaId(client_id, payload, channel);
         if (personaId) {
           await this.rendicionesService.asignarFacturaARendicion(
-            client_id, invoiceId, personaId, assignedProjectId, amount, invoiceDate,
+            client_id, invoiceId, personaId, assignedProjectId, amount, invoiceDate, activationId,
           );
         }
       } catch (err: any) {
@@ -584,6 +625,50 @@ export class PersistProcessor extends WorkerHost {
     }
 
     this.logger.warn(`[F1Persist] Could not resolve persona_id for canal=${canal}`);
+    return null;
+  }
+
+  /**
+   * C2 (v1.9): infiere a qué ACTIVACIÓN pertenece un gasto que llega por WhatsApp, para
+   * romper el silo gasto↔terreno (F5). Un promotor que manda una boleta en terreno casi
+   * seguro está en su activación agendada de ESE día → la resolvemos por (promotor del
+   * remitente + activation_date = fecha de la factura), excluyendo canceladas.
+   *
+   * REGLA DE CONFIANZA: sólo liga si hay EXACTAMENTE UNA activación candidata. Con 0 o >1
+   * devuelve null (el gasto queda agrupado por proyecto, como hoy) — nunca adivina entre
+   * varias; el panel reasigna a mano. Best-effort: cualquier fallo → null, jamás voltea el
+   * persist. Sólo aplica al canal whatsapp (email/manual no tienen promotor en terreno).
+   */
+  private async resolveActivationId(
+    clientId: string,
+    payload: any,
+    canal: string,
+    invoiceDate: string,
+  ): Promise<string | null> {
+    if (canal !== 'whatsapp') return null;
+    const phone = typeof payload === 'object' ? (payload?.from ?? payload?.phone) : null;
+    const digits = normalizePhone(phone);
+    if (!digits) return null;
+
+    const promoter = await this.dataSource.query(
+      `SELECT id FROM promoters WHERE client_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2 LIMIT 1`,
+      [clientId, digits],
+    ).catch(() => []);
+    if (!promoter.length) return null;
+
+    // LIMIT 2: nos alcanza para distinguir "exactamente una" de "más de una" sin traer todo.
+    const acts = await this.dataSource.query(
+      `SELECT id FROM activations
+        WHERE client_id = $1 AND promoter_id = $2
+          AND activation_date = $3::date
+          AND status <> 'cancelled'
+        LIMIT 2`,
+      [clientId, promoter[0].id, invoiceDate],
+    ).catch(() => []);
+    if (acts.length === 1) return acts[0].id;
+    if (acts.length > 1) {
+      this.logger.log(`[F1Persist] activación ambigua para promotor=${promoter[0].id} fecha=${invoiceDate} — sin ligar (queda por proyecto)`);
+    }
     return null;
   }
 

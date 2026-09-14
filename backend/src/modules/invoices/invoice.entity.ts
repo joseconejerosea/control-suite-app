@@ -53,4 +53,9 @@ export class Invoice extends TenantBaseEntity {
   @ManyToOne(() => Project, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'project_id' })
   project: Project | null;
+
+  // C2 (v1.9): activación real a la que pertenece el gasto (inferida por promotor+fecha en
+  // el intake, o asignada a mano en el panel). Nullable: 0 o >1 candidata → sin activación.
+  @Column({ type: 'uuid', nullable: true, name: 'activation_id' })
+  activation_id: string | null;
 }

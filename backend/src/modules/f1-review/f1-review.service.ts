@@ -87,9 +87,11 @@ export class F1ReviewService {
           ec.parsed_data,
           ec.created_at,
           ec.updated_at,
-          p.name AS project_name
+          p.name AS project_name,
+          i.posible_duplicado AS posible_duplicado
         FROM eventos_crudos ec
         LEFT JOIN projects p ON p.id::text = ec.payload->>'project_id'
+        LEFT JOIN invoices i ON i.id = ec.factura_id
         WHERE ${where}
         ORDER BY ec.created_at DESC
         LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,

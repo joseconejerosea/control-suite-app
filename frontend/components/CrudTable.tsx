@@ -41,6 +41,18 @@ export type FieldDef = {
     form: Record<string, string>,
     rows: Record<string, Record<string, unknown>[]>,
   ) => string | null;
+  // P15 (v1.9): alta inline opt-in de una opción para un select dinámico. Cuando se define,
+  // el modal muestra un "+ Agregar" bajo el select: postea { name, address } al endpoint que
+  // resuelve `endpointFrom` (o null = deshabilitado), y la opción creada se agrega y selecciona.
+  // Sólo afecta a los campos que lo declaran; el resto de los selects no cambian en nada.
+  allowCreate?: {
+    endpointFrom: (
+      form: Record<string, string>,
+      rows: Record<string, Record<string, unknown>[]>,
+    ) => string | null;
+    addLabel?: string;
+    disabledHint?: string;
+  };
 };
 
 interface CrudTableProps {
@@ -51,6 +63,10 @@ interface CrudTableProps {
   fields: FieldDef[];
   defaultForm: Record<string, unknown>;
   emptyText?: string;
+  // P.v1.9 (copy): singular en español para los títulos "Crear/Editar {singular}" y el botón.
+  // Necesario cuando la derivación title.replace(/s$/,"") no funciona (plurales en -es, ej.
+  // "Activaciones" → "Activacione"). Si se omite, cae a esa derivación.
+  singular?: string;
   dataKey?: string;
   // Open the create modal (pre-filled from defaultForm) automatically on mount.
   autoOpenCreate?: boolean;
@@ -63,9 +79,12 @@ interface CrudTableProps {
 function Badge({
   value,
   map,
+  label,
 }: {
   value: string;
   map: Record<string, { bg: string; color: string }>;
+  // P.v1.9 (copy): texto a mostrar; si se omite, se muestra el valor crudo (compat).
+  label?: string;
 }) {
   const style = map[value] ?? {
     bg: "var(--secondary)",
@@ -76,10 +95,23 @@ function Badge({
       className="px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide"
       style={{ background: style.bg, color: style.color }}
     >
-      {value}
+      {label ?? value}
     </span>
   );
 }
+
+// P.v1.9 (copy): etiquetas en español para los enums de estado — el badge los mostraba
+// crudos (IN_PROGRESS, SCHEDULED) por el uppercase del CSS. La key de color sigue siendo el
+// valor crudo; sólo cambia el texto visible.
+const STATUS_LABELS: Record<string, string> = {
+  active: "Activa", paused: "Pausada", archived: "Archivada", draft: "Borrador",
+  ended: "Finalizada", inactive: "Inactiva", uploaded: "Cargado", processing: "Procesando",
+  parsed: "Analizado", populated: "Poblado", error: "Error",
+  observer: "Observador", supervisor: "Supervisor", coordinator: "Coordinador",
+  brand_manager: "Brand manager",
+  scheduled: "Agendada", in_progress: "En curso", completed: "Completada",
+  cancelled: "Cancelada", pending: "Pendiente",
+};
 
 export const StatusBadge = (v: unknown) => {
   const val = String(v ?? "");
@@ -123,7 +155,7 @@ export const StatusBadge = (v: unknown) => {
     },
     pending: { bg: "var(--secondary)", color: "var(--muted-foreground)" },
   };
-  return <Badge value={val} map={map} />;
+  return <Badge value={val} map={map} label={STATUS_LABELS[val] ?? val.replace(/_/g, " ")} />;
 };
 
 // Anexo · "fecha un día antes": una fecha date-only 'YYYY-MM-DD' con new Date(s) se
@@ -165,6 +197,150 @@ export const MoneyFmt = (v: unknown) =>
     <span style={{ color: "var(--muted-foreground)" }}>—</span>
   );
 
+// P15 (v1.9): alta inline de una opción para un select dinámico (opt-in vía field.allowCreate).
+// Encapsula su propio estado (abierto/nombre/dirección/guardando/error) para no inflar Modal.
+// Postea vía onCreate (el padre resuelve el endpoint y actualiza opciones/valor).
+function InlineOptionCreator({
+  field,
+  onCreate,
+}: {
+  field: FieldDef;
+  onCreate: (name: string, address: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const cfg = field.allowCreate!;
+
+  const submit = async () => {
+    if (!name.trim()) {
+      setErr("El nombre es obligatorio.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await onCreate(name.trim(), address.trim());
+      setOpen(false);
+      setName("");
+      setAddress("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "No se pudo crear.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "6px 10px",
+    borderRadius: 8,
+    fontSize: 13,
+    outline: "none",
+    background: "var(--card)",
+    border: "1px solid var(--border)",
+    color: "var(--foreground)",
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setErr(null);
+          setOpen(true);
+        }}
+        style={{
+          alignSelf: "flex-start",
+          background: "none",
+          border: "none",
+          color: "var(--primary)",
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+          padding: "2px 0",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <Plus size={12} /> {cfg.addLabel ?? "Agregar"}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: 8,
+        borderRadius: 8,
+        background: "var(--secondary)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Nombre *"
+        style={inputStyle}
+      />
+      <input
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        placeholder="Dirección (opcional)"
+        style={inputStyle}
+      />
+      {err && (
+        <span style={{ color: "var(--danger)", fontSize: 11 }}>{err}</span>
+      )}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={submit}
+          style={{
+            padding: "4px 12px",
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            border: "none",
+            cursor: saving ? "default" : "pointer",
+            background: "var(--primary)",
+            color: "#fff",
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setErr(null);
+          }}
+          style={{
+            padding: "4px 12px",
+            borderRadius: 8,
+            fontSize: 12,
+            border: "1px solid var(--border)",
+            cursor: "pointer",
+            background: "var(--card)",
+            color: "var(--foreground)",
+          }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Modal({
   title,
   onClose,
@@ -174,6 +350,7 @@ function Modal({
   form,
   setForm,
   error,
+  onCreateOption,
 }: {
   title: string;
   onClose: () => void;
@@ -183,6 +360,11 @@ function Modal({
   form: Record<string, string>;
   setForm: (f: Record<string, string>) => void;
   error?: string | null;
+  onCreateOption?: (
+    fieldKey: string,
+    name: string,
+    address: string,
+  ) => Promise<void>;
 }) {
   const set = (key: string, val: string) => setForm({ ...form, [key]: val });
   return (
@@ -236,23 +418,33 @@ function Modal({
                 {f.required && " *"}
               </label>
               {f.type === "select" ? (
-                <select
-                  value={form[f.key] ?? ""}
-                  onChange={(e) => set(f.key, e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                  style={{
-                    background: "var(--secondary)",
-                    border: "1px solid var(--border)",
-                    color: "var(--foreground)",
-                  }}
-                >
-                  <option value="">Select…</option>
-                  {f.options?.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    value={form[f.key] ?? ""}
+                    onChange={(e) => set(f.key, e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{
+                      background: "var(--secondary)",
+                      border: "1px solid var(--border)",
+                      color: "var(--foreground)",
+                    }}
+                  >
+                    <option value="">Seleccioná…</option>
+                    {f.options?.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {f.allowCreate && onCreateOption && (
+                    <InlineOptionCreator
+                      field={f}
+                      onCreate={(name, address) =>
+                        onCreateOption(f.key, name, address)
+                      }
+                    />
+                  )}
+                </>
               ) : f.type === "textarea" ? (
                 <textarea
                   value={form[f.key] ?? ""}
@@ -336,6 +528,7 @@ export default function CrudTable({
   fields,
   defaultForm,
   emptyText,
+  singular,
   dataKey,
   autoOpenCreate,
   onCreated,
@@ -556,6 +749,38 @@ export default function CrudTable({
       : f,
   );
 
+  // P15 (v1.9): crea una opción para un select dinámico (field.allowCreate) posteando
+  // { name, address } al endpoint que resuelve el field desde el form actual + dynRows.
+  // La opción creada se inyecta en dynOpts y se selecciona, para que el usuario no tenga
+  // que salir del modal a cargar el PDV. Tira un Error legible si el endpoint no resuelve
+  // (p.ej. campaña sin elegir) para que InlineOptionCreator lo muestre.
+  const handleCreateOption = useCallback(
+    async (fieldKey: string, name: string, address: string) => {
+      const field = fields.find((f) => f.key === fieldKey);
+      const url = field?.allowCreate?.endpointFrom(formRef.current, dynRows) ?? null;
+      if (!url) {
+        throw new Error(
+          field?.allowCreate?.disabledHint ?? "Todavía no se puede agregar.",
+        );
+      }
+      const res = await api.post<unknown>(url, { name, address });
+      const raw = (res ?? {}) as Record<string, unknown>;
+      const created = (raw.data ?? raw) as Record<string, unknown>;
+      const value = String(created[field?.optionsValueKey ?? "id"] ?? "");
+      if (!value) throw new Error("Respuesta inesperada del servidor.");
+      const label = field?.optionsLabel
+        ? field.optionsLabel(created)
+        : String(created[field?.optionsLabelKey ?? "name"] ?? name);
+      setDynOpts((prev) => {
+        const existing = prev[fieldKey] ?? [];
+        const deduped = existing.filter((o) => o.value !== value);
+        return { ...prev, [fieldKey]: [...deduped, { value, label }] };
+      });
+      setForm((prev) => ({ ...prev, [fieldKey]: value }));
+    },
+    [fields, dynRows],
+  );
+
   const openCreate = () => {
     const f: Record<string, string> = {};
     Object.entries(defaultForm).forEach(([k, v]) => {
@@ -692,7 +917,7 @@ export default function CrudTable({
             boxShadow: "0 4px 14px rgba(79,70,229,0.3)",
           }}
         >
-          <Plus size={14} /> New {title.replace(/s$/, "")}
+          <Plus size={14} /> Crear {singular ?? title.replace(/s$/, "")}
         </button>
       </div>
 
@@ -783,7 +1008,7 @@ export default function CrudTable({
                     className="px-4 py-14 text-center text-sm"
                     style={{ color: "var(--muted-foreground)" }}
                   >
-                    {emptyText ?? `No ${title.toLowerCase()} found.`}
+                    {emptyText ?? `No hay ${title.toLowerCase()}.`}
                   </td>
                 </tr>
               ) : (
@@ -852,8 +1077,8 @@ export default function CrudTable({
         <Modal
           title={
             modal === "create"
-              ? `New ${title.replace(/s$/, "")}`
-              : `Edit ${title.replace(/s$/, "")}`
+              ? `Crear ${singular ?? title.replace(/s$/, "")}`
+              : `Editar ${singular ?? title.replace(/s$/, "")}`
           }
           onClose={() => {
             setModal(null);
@@ -865,6 +1090,7 @@ export default function CrudTable({
           form={form}
           setForm={setForm}
           error={saveError}
+          onCreateOption={handleCreateOption}
         />
       )}
     </div>
