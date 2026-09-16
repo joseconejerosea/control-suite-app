@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { InvoicesService } from '../invoices/invoices.service';
 import { OperatorNotifierService } from '../whatsapp/operator-notifier.service';
 import { runWithTenant, runAsSystem } from '../../common/tenant/tenant-context';
+import { AppException } from '../../common/exceptions/app.exception';
 
 @Injectable()
 export class GmailService {
@@ -37,17 +38,22 @@ export class GmailService {
     );
   }
 
-  // C3 (v1.9): la integración Gmail requiere credenciales OAuth en el entorno. Si faltan,
-  // el connect fallaba con un error críptico ("No se pudo iniciar la conexión"). Devolvemos
-  // un mensaje claro que dice QUÉ falta, para no confundir un problema de config con un bug.
+  // C3 (v1.9): la integración Gmail requiere credenciales OAuth en el entorno.
+  // Si faltan, es un problema de configuración del servidor, NO algo que el
+  // usuario final pueda resolver ni entender. Por eso separamos:
+  //  - userMessage  → genérico y accionable ("contactá al administrador"), vía
+  //    AppException.config / SAFE_MESSAGES.CONFIG_ERROR. No expone nombres de
+  //    env vars ni jerga OAuth.
+  //  - technicalDetail → QUÉ variable falta, LOGUEADO server-side por el filtro
+  //    (http-exception.filter) para que el admin lo diagnostique sin exponerlo.
   private assertOAuthConfigured(): void {
     const missing = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REDIRECT_URI'].filter(
       (k) => !this.config.get(k),
     );
     if (missing.length) {
-      throw new ServiceUnavailableException(
-        'La integración con Gmail no está configurada en este entorno. ' +
-          'Falta configurar las credenciales OAuth (client ID, secret y redirect URI).',
+      throw AppException.config(
+        `Gmail OAuth no configurado: faltan env vars [${missing.join(', ')}]`,
+        503,
       );
     }
   }
