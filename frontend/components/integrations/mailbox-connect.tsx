@@ -12,18 +12,42 @@ function getToken() {
   try { return localStorage.getItem("cs_token") ?? ""; } catch { return ""; }
 }
 
-type GmailStatus = { connected: boolean; accounts: string[] };
+type MailStatus = { connected: boolean; accounts: string[] };
+
+export type MailProviderId = "gmail" | "outlook";
+
+const PROVIDERS: Record<MailProviderId, { label: string; title: string; hint: string; perms: string }> = {
+  gmail: {
+    label: "Gmail",
+    title: "Gmail — captura de comprobantes",
+    hint: "Conectá la casilla para importar comprobantes y exportar a Sheets automáticamente.",
+    perms: "Permisos: lectura de Gmail + escritura en Google Sheets. El consentimiento es único.",
+  },
+  outlook: {
+    label: "Outlook",
+    title: "Outlook — captura de comprobantes",
+    hint: "Conectá la casilla de Outlook/Microsoft 365 para importar comprobantes por correo.",
+    perms: "Permisos: lectura de correo (Mail.Read). No se pide acceso de escritura.",
+  },
+};
 
 /**
- * Conexión OAuth de Gmail para el tenant del usuario logueado.
+ * Conexión OAuth de una casilla de correo (Gmail u Outlook) para el tenant del
+ * usuario logueado.
  *
  * IMPORTANTE: el backend liga la conexión al `client_id` del JWT (nunca a un
  * tenant arbitrario). Por eso este componente solo es correcto cuando quien lo
  * usa ES el admin del cliente cuya casilla se conecta (p.ej. /client/config).
- * Un mismo consentimiento cubre Gmail (lectura) + Sheets (exportación).
  */
-export default function GmailConnect({ onToast }: { onToast?: (msg: string) => void }) {
-  const [status, setStatus]   = useState<GmailStatus>({ connected: false, accounts: [] });
+export default function MailboxConnect({
+  provider,
+  onToast,
+}: {
+  provider: MailProviderId;
+  onToast?: (msg: string) => void;
+}) {
+  const meta = PROVIDERS[provider];
+  const [status, setStatus]   = useState<MailStatus>({ connected: false, accounts: [] });
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
 
@@ -31,7 +55,7 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
 
   const loadStatus = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/auth/gmail/status`, { headers: authHeader() });
+      const r = await fetch(`${API}/auth/${provider}/status`, { headers: authHeader() });
       const d = await r.json();
       setStatus({
         connected: !!d?.connected,
@@ -39,23 +63,23 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
       });
     } catch { /* silencioso — el status es best-effort */ }
     finally { setLoading(false); }
-  }, []);
+  }, [provider]);
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 
   const connect = async () => {
     setWorking(true);
     try {
-      const r = await fetch(`${API}/auth/gmail/connect`, { headers: authHeader() });
+      const r = await fetch(`${API}/auth/${provider}/connect`, { headers: authHeader() });
       const d = await r.json();
-      // C3 (v1.9): si el backend explica el motivo (p.ej. Gmail no configurado en el entorno),
+      // Si el backend explica el motivo (p.ej. proveedor no configurado en el entorno),
       // mostramos ESE mensaje en vez del genérico — así se distingue config de bug.
       if (!d?.url) {
         onToast?.(d?.error?.message ?? d?.message ?? "No se pudo iniciar la conexión");
         setWorking(false);
         return;
       }
-      const popup = window.open(d.url, "gmail-oauth", "width=520,height=660");
+      const popup = window.open(d.url, `${provider}-oauth`, "width=520,height=660");
       // El callback del backend se muestra en el popup y guarda los tokens server-side.
       // Detectamos el cierre del popup y refrescamos el estado.
       const timer = setInterval(() => {
@@ -74,8 +98,8 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
   const disconnect = async () => {
     setWorking(true);
     try {
-      await fetch(`${API}/auth/gmail/disconnect`, { method: "DELETE", headers: authHeader() });
-      onToast?.("Gmail desconectado");
+      await fetch(`${API}/auth/${provider}/disconnect`, { method: "DELETE", headers: authHeader() });
+      onToast?.(`${meta.label} desconectado`);
       await loadStatus();
     } catch {
       onToast?.("Error al desconectar");
@@ -89,7 +113,7 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <Mail size={15} style={{ color: "var(--muted-foreground)" }} />
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Gmail — captura de comprobantes
+          {meta.title}
         </span>
       </div>
 
@@ -115,17 +139,17 @@ export default function GmailConnect({ onToast }: { onToast?: (msg: string) => v
       ) : (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
-            Conectá la casilla para importar comprobantes y exportar a Sheets automáticamente.
+            {meta.hint}
           </span>
           <button onClick={connect} disabled={working}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 7, background: "var(--primary)", color: "#fff", border: "none", cursor: working ? "default" : "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", opacity: working ? 0.7 : 1 }}>
-            {working ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} Conectar Gmail
+            {working ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} Conectar {meta.label}
           </button>
         </div>
       )}
 
       <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 10 }}>
-        Permisos: lectura de Gmail + escritura en Google Sheets. El consentimiento es único.
+        {meta.perms}
       </div>
     </div>
   );

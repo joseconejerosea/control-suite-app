@@ -30,7 +30,7 @@ import { DocumentIngestionModule } from './modules/document-ingestion/document-i
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
-import { GmailModule } from './modules/gmail/gmail.module';
+import { MailModule } from './modules/mail/mail.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { RendicionesModule } from './modules/rendiciones/rendiciones.module';
 import { BodegasModule } from './modules/bodegas/bodegas.module';
@@ -93,7 +93,7 @@ import { PendingStaffModule } from './modules/pending-staff/pending-staff.module
     EventosCrudosModule, WebhooksModule, QueueModule,
     ClientsModule, OnboardingModule, ProjectsModule,
     CollaboratorsModule, DocumentIngestionModule, DashboardModule,
-    WorkspaceModule, InvoicesModule, GmailModule, MetricsModule,
+    WorkspaceModule, InvoicesModule, MailModule, MetricsModule,
 
     RendicionesModule, BodegasModule, SkusModule,
     MovimientosPopModule, InventarioModule, MindModule,

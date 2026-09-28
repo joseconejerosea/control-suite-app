@@ -4,7 +4,7 @@ import {
   Settings, Warehouse, Link2, Building2,
   Save, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
-import GmailConnect from "@/components/integrations/gmail-connect";
+import MailboxConnect from "@/components/integrations/mailbox-connect";
 import AffiliationCode from "@/components/integrations/affiliation-code";
 import AppShell from "@/components/layout/app-shell";
 
@@ -231,7 +231,14 @@ export default function ConfigPage() {
   // INTEGRACIONES
   const tabIntegraciones = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <GmailConnect onToast={showToast} />
+      {/* Solo Manager (admin_cliente) o super_admin. El backend gatea connect/status/
+          disconnect con 403 al resto; no renderizamos las cards para no ofrecer la acción. */}
+      {(user.role === "admin_cliente" || user.role === "super_admin") && (
+        <>
+          <MailboxConnect provider="gmail" onToast={showToast} />
+          <MailboxConnect provider="outlook" onToast={showToast} />
+        </>
+      )}
 
       {/* Solo Manager (admin_cliente) o super_admin. El backend igual devuelve 403
           al resto; la card lo maneja mostrando un mensaje suave sin romper. */}
