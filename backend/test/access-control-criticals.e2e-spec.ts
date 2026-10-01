@@ -14,8 +14,8 @@ import { OnboardingController } from '../src/modules/onboarding/onboarding.contr
 import { OnboardingService } from '../src/modules/onboarding/onboarding.service';
 import { MetricsController } from '../src/modules/metrics/metrics.controller';
 import { MetricsService } from '../src/modules/metrics/metrics.service';
-import { GmailController } from '../src/modules/gmail/gmail.controller';
-import { GmailService } from '../src/modules/gmail/gmail.service';
+import { MailController } from '../src/modules/mail/mail.controller';
+import { MailIngestionService } from '../src/modules/mail/mail-ingestion.service';
 
 import { configServiceProvider, tokenFor } from './helpers';
 
@@ -39,7 +39,7 @@ const authMock = {
   login: async () => ({ accessToken: 'a', refreshToken: 'b' }),
   refreshToken: async () => ({ accessToken: 'a', refreshToken: 'b' }),
 };
-const gmailMock = {
+const mailMock = {
   getAuthUrl: () => 'https://accounts.google.com/o/oauth2/v2/auth?state=x',
   handleCallback: async () => 'cuenta@tenant.test',
   pollAllClients: async () => undefined,
@@ -51,12 +51,12 @@ describe('Access-control criticals (C3/C4/C5/C6)', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      controllers: [AuthController, OnboardingController, MetricsController, GmailController],
+      controllers: [AuthController, OnboardingController, MetricsController, MailController],
       providers: [
         { provide: AuthService, useValue: authMock },
         { provide: OnboardingService, useValue: onboardingMock },
         MetricsService, // liviano, sin deps
-        { provide: GmailService, useValue: gmailMock },
+        { provide: MailIngestionService, useValue: mailMock },
         AuthGuard,
         RolesGuard,
         Reflector,
@@ -141,10 +141,16 @@ describe('Access-control criticals (C3/C4/C5/C6)', () => {
     it('GET /auth/gmail/connect sin token → 401', () =>
       request(app.getHttpServer()).get('/auth/gmail/connect').expect(401));
 
-    it('GET /auth/gmail/connect autenticado → 200 con { url }', async () => {
-      const res = await request(app.getHttpServer())
+    it('GET /auth/gmail/connect usuario normal → 403', () =>
+      request(app.getHttpServer())
         .get('/auth/gmail/connect')
         .set('Authorization', `Bearer ${tokenFor(CLIENT, 'user')}`)
+        .expect(403));
+
+    it('GET /auth/gmail/connect manager (admin_cliente) → 200 con { url }', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/auth/gmail/connect')
+        .set('Authorization', `Bearer ${tokenFor(CLIENT, 'admin_cliente')}`)
         .expect(200);
       expect(res.body.url).toContain('accounts.google.com');
     });
