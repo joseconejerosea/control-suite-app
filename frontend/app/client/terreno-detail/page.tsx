@@ -44,17 +44,22 @@ function TerrenoDetail() {
     if (!id) return;
     try {
       const [ch, inc, rep, ev, rpt] = await Promise.all([
-        api.get<any>(`/f5/activaciones/${id}/checkins`).catch(() => []),
-        api.get<any>(`/f5/activaciones/${id}/incidencias`).catch(() => []),
-        api.get<any>(`/f5/activaciones/${id}/reportes-avance`).catch(() => []),
-        api.get<any>(`/f5/activaciones/${id}/eventos`).catch(() => []),
-        api.get<any>(`/f5/activaciones/${id}/reporte-cliente`).catch(() => null),
+        api.get<any>(`/v1/app/f5/activaciones/${id}/checkins`).catch(() => ({ data: [] })),
+        api.get<any>(`/v1/app/f5/activaciones/${id}/incidencias`).catch(() => ({ data: [] })),
+        api.get<any>(`/v1/app/f5/activaciones/${id}/reportes-avance`).catch(() => ({ data: [] })),
+        api.get<any>(`/v1/app/f5/activaciones/${id}/eventos`).catch(() => ({ data: [] })),
+        api.get<any>(`/v1/app/f5/activaciones/${id}/reporte-cliente`).catch(() => null),
       ]);
-      setCheckins(Array.isArray(ch) ? ch : []);
-      setIncidencias(Array.isArray(inc) ? inc : []);
-      setReportes(Array.isArray(rep) ? rep : []);
-      setEventos(Array.isArray(ev) ? ev : []);
-      setReporte(rpt);
+      // El backend envuelve toda respuesta en { data, timestamp, path } (ResponseInterceptor).
+      // Antes se hacía Array.isArray(ch) sobre el ENVELOPE → siempre false → se descartaban
+      // los datos y la Vista completa mostraba 0. Hay que leer .data. (Prefijo también
+      // corregido a /v1/app/f5 — el controller es @Controller('v1/app/f5'), como reporte-cliente.)
+      const arr = (r: any) => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []);
+      setCheckins(arr(ch));
+      setIncidencias(arr(inc));
+      setReportes(arr(rep));
+      setEventos(arr(ev));
+      setReporte(rpt?.data ?? rpt ?? null);
       setLastPoll(new Date());
     } catch {}
   }, [id]);
@@ -67,21 +72,21 @@ function TerrenoDetail() {
 
   const reportarIncidencia = async () => {
     if (!id || !incForm.descripcion.trim()) return;
-    await api.post(`/f5/activaciones/${id}/incidencias`, incForm).catch(console.error);
+    await api.post(`/v1/app/f5/activaciones/${id}/incidencias`, incForm).catch(console.error);
     setIncForm({ descripcion: "", severidad: "media" });
     setIncModal(false);
     fetchData();
   };
 
   const resolverIncidencia = async (incId: string) => {
-    await api.patch(`/f5/incidencias/${incId}/resolver`, {}).catch(console.error);
+    await api.patch(`/v1/app/f5/incidencias/${incId}/resolver`, {}).catch(console.error);
     fetchData();
   };
 
   const generarReporte = async () => {
     if (!id || generando) return;
     setGenerando(true);
-    await api.post(`/f5/activaciones/${id}/reporte-cliente/generar`, {}).catch(console.error);
+    await api.post(`/v1/app/f5/activaciones/${id}/reporte-cliente/generar`, {}).catch(console.error);
     setTimeout(() => {
       fetchData();
       setGenerando(false);
@@ -119,17 +124,33 @@ function TerrenoDetail() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold" style={{ color: "var(--primary)" }}>Último reporte generado</span>
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", color: "var(--success)" }}>
-                  {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.calificacion ?? "—"}
-                </span>
+                {(() => {
+                  // P.v1.9 (copy): el badge iba SIEMPRE en verde, así que "deficiente" (negativo)
+                  // se veía con color positivo. Coloreamos según la calificación.
+                  const cal = String((reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.calificacion ?? "—");
+                  const CAL_STYLE: Record<string, { bg: string; fg: string }> = {
+                    excelente: { bg: "color-mix(in srgb, var(--success) 15%, transparent)", fg: "var(--success)" },
+                    buena:     { bg: "color-mix(in srgb, var(--success) 15%, transparent)", fg: "var(--success)" },
+                    regular:   { bg: "rgba(245,158,11,0.15)", fg: "#f59e0b" },
+                    deficiente:{ bg: "color-mix(in srgb, var(--danger) 15%, transparent)", fg: "var(--danger)" },
+                  };
+                  const st = CAL_STYLE[cal.toLowerCase()] ?? { bg: "var(--secondary)", fg: "var(--muted-foreground)" };
+                  return (
+                    <span className="text-xs px-2 py-0.5 rounded-full capitalize" style={{ background: st.bg, color: st.fg }}>
+                      {cal}
+                    </span>
+                  );
+                })()}
               </div>
               <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
                 {reporte.aprobado_at ? new Date(reporte.aprobado_at).toLocaleString("es-CL") : "—"}
               </span>
             </div>
             {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb)?.resumen_ejecutivo && (
-              <p className="text-sm mt-2" style={{ color: "var(--muted-foreground)" }}>
-                {((reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb).resumen_ejecutivo as string).slice(0, 200)}...
+              // P.v1.9 (copy): antes se cortaba a 200 chars con "..." SIEMPRE (aun si era más
+              // corto). Mostramos el resumen completo (son 2-3 párrafos) — sin truncar.
+              <p className="text-sm mt-2 whitespace-pre-line" style={{ color: "var(--muted-foreground)" }}>
+                {(reporte.version_interna_jsonb ?? reporte.version_cliente_jsonb).resumen_ejecutivo as string}
               </p>
             )}
           </div>

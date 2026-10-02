@@ -39,6 +39,10 @@ export class CreateCampaignDto {
   @IsUUID()
   @IsOptional()
   location_id?: string;
+
+  @IsUUID()
+  @IsOptional()
+  project_id?: string;
 }
 
 export class UpdateCampaignDto extends PartialType(CreateCampaignDto) {} 

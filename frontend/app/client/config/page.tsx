@@ -4,7 +4,8 @@ import {
   Settings, Warehouse, Link2, Building2,
   Save, Trash2, Eye, EyeOff, Copy, RefreshCw,
 } from "lucide-react";
-import GmailConnect from "@/components/integrations/gmail-connect";
+import MailboxConnect from "@/components/integrations/mailbox-connect";
+import AffiliationCode from "@/components/integrations/affiliation-code";
 import AppShell from "@/components/layout/app-shell";
 
 // NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
@@ -32,7 +33,7 @@ export default function ConfigPage() {
   const [toast, setToast]   = useState<string | null>(null);
 
   // Cuenta
-  const [cuenta, setCuenta] = useState({ nombre: "", rut: "", plan: "", email_contacto: "" });
+  const [cuenta, setCuenta] = useState({ nombre: "", rut: "", plan: "", email_contacto: "", telefono_manager: "" });
 
   // Operaciones
   const [bodegas, setBodegas]   = useState<any[]>([]);
@@ -56,13 +57,16 @@ export default function ConfigPage() {
     // Workspace context (nombre, plan, rut)
     fetch(`${API}/workspace/context`, { headers: h })
       .then(r => r.json())
-      .then(d => {
+      // Backend wraps responses as { data, timestamp, path }; unwrap defensively.
+      .then(res => {
+        const d = res?.data ?? res;
         if (d?.client) {
           setCuenta(prev => ({
             ...prev,
             nombre: d.client.nombre ?? "",
             rut:    d.client.rut    ?? "",
             plan:   d.client.plan   ?? "basic",
+            telefono_manager: (d.client.config?.manager_phone as string) ?? "",
           }));
         }
       }).catch(() => {});
@@ -70,13 +74,13 @@ export default function ConfigPage() {
     // Bodegas
     fetch(`${API}/v1/app/bodegas`, { headers: h })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setBodegas(d); })
+      .then(res => { const d = res?.data ?? res; if (Array.isArray(d)) setBodegas(d); })
       .catch(() => {});
 
     // Canales
     fetch(`${API}/canal-entrada`, { headers: h })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d)) setCanales(d); })
+      .then(res => { const d = res?.data ?? res; if (Array.isArray(d)) setCanales(d); })
       .catch(() => {});
   }, []);
 
@@ -84,11 +88,18 @@ export default function ConfigPage() {
   const saveCuenta = async () => {
     setSaving(true);
     try {
-      await fetch(`${API}/clients/${user.client_id}`, {
+      // /workspace/account es el endpoint self-service (Manager) sobre el propio cliente.
+      // /clients/:id es super_admin-only → daba 403 desde el panel de cliente.
+      const res = await fetch(`${API}/workspace/account`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ nombre: cuenta.nombre, rut: cuenta.rut }),
+        body: JSON.stringify({
+          nombre: cuenta.nombre,
+          rut: cuenta.rut,
+          manager_phone: cuenta.telefono_manager,
+        }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showToast("Cuenta actualizada ✓");
     } catch { showToast("Error al guardar"); }
     finally { setSaving(false); }
@@ -148,6 +159,11 @@ export default function ConfigPage() {
             <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>RUT</label>
             {input(cuenta.rut, v => setCuenta(p => ({ ...p, rut: v })), "76.123.456-7")}
           </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>Teléfono del manager</label>
+          {input(cuenta.telefono_manager, v => setCuenta(p => ({ ...p, telefono_manager: v })), "+56 9 1234 5678", "tel")}
+          <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>Número de contacto del responsable de la cuenta.</div>
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={{ fontSize: 12, color: "var(--muted-foreground)", display: "block", marginBottom: 4 }}>Plan actual</label>
@@ -215,7 +231,20 @@ export default function ConfigPage() {
   // INTEGRACIONES
   const tabIntegraciones = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <GmailConnect onToast={showToast} />
+      {/* Solo Manager (admin_cliente) o super_admin. El backend gatea connect/status/
+          disconnect con 403 al resto; no renderizamos las cards para no ofrecer la acción. */}
+      {(user.role === "admin_cliente" || user.role === "super_admin") && (
+        <>
+          <MailboxConnect provider="gmail" onToast={showToast} />
+          <MailboxConnect provider="outlook" onToast={showToast} />
+        </>
+      )}
+
+      {/* Solo Manager (admin_cliente) o super_admin. El backend igual devuelve 403
+          al resto; la card lo maneja mostrando un mensaje suave sin romper. */}
+      {(user.role === "admin_cliente" || user.role === "super_admin") && (
+        <AffiliationCode onToast={showToast} />
+      )}
 
       {card(<>
         {sectionTitle("Google Sheets — destino de exportación")}

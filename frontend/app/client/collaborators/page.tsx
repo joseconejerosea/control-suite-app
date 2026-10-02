@@ -10,7 +10,7 @@ export default function CollaboratorsPage() {
         title="Colaboradores"
         subtitle="Terceros vinculados a proyectos — supervisores, brand managers, coordinadores"
         endpoint="/collaborators"
-        defaultForm={{ full_name: "", email: "", phone: "", role_label: "observer" }}
+        defaultForm={{ full_name: "", email: "", phone: "", role_label: "observer", project_id: "" }}
         columns={[
           { key: "full_name",  label: "Nombre" },
           { key: "email",      label: "Email" },
@@ -33,6 +33,7 @@ export default function CollaboratorsPage() {
               { value: "coordinator",   label: "Coordinador" },
               { value: "brand_manager", label: "Brand Manager" },
             ]},
+          { key: "project_id", label: "Proyecto", optionsEndpoint: "/projects", optionsLabelKey: "name" },
         ]}
       />
     </AppShell>

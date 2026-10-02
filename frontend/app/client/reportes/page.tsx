@@ -29,8 +29,15 @@ interface InvoiceRow {
   source: string; description: string | null; status: string; created_at: string;
   numero_documento?: string | null; rut_emisor?: string | null; destino?: string | null;
   confidence_score?: number | null;
+  // Tarea 8 — factura marcada como posible doble-conteo (excluida del total, sigue visible).
+  posible_duplicado?: boolean;
 }
-interface ReportSection { total_amount: number; total_count: number; rows: InvoiceRow[]; }
+interface ReportSection {
+  total_amount: number; total_count: number; rows: InvoiceRow[];
+  // Tarea 8 — posibles duplicados EXCLUIDOS del total.
+  dup_excluidos_count?: number;
+  dup_excluidos_amount?: number;
+}
 interface ReportData { sales: ReportSection; costs: ReportSection; expenses: ReportSection; }
 type StageStatus = "pending" | "running" | "completed" | "failed";
 interface DisplayStage { name: string; label: string; status: StageStatus; }
@@ -319,6 +326,28 @@ function SourceBadge({ source }: { source: string }) {
   return <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600, background: s.background, color: s.color, textTransform: "capitalize" }}>{source}</span>;
 }
 
+// Tarea 8 — badge de advertencia para filas marcadas como posible duplicado.
+function DupBadge() {
+  return (
+    <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 10, fontWeight: 600, background: "rgba(245,158,11,0.15)", color: "#f59e0b", whiteSpace: "nowrap" }}>
+      posible duplicado
+    </span>
+  );
+}
+
+// Tarea 8 — línea informativa bajo el total: N posibles duplicados excluidos ($X).
+function DupExcludedLine({ section }: { section?: ReportSection }) {
+  const count = section?.dup_excluidos_count ?? 0;
+  if (count <= 0) return null;
+  const amount = section?.dup_excluidos_amount ?? 0;
+  return (
+    <div style={{ fontSize: 12, color: "#f59e0b", marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+      <AlertCircle size={13} />
+      {count} posible{count === 1 ? "" : "s"} duplicado{count === 1 ? "" : "s"} excluido{count === 1 ? "" : "s"} del total ({formatCLP(amount)})
+    </div>
+  );
+}
+
 function KpiCard({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -422,7 +451,7 @@ export default function ReportesPage() {
             </div>
             <ActionBar tabKey="gastos" />
             {renderTable(expenses, [
-              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
+              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)", display: "inline-flex", alignItems: "center", gap: 6 }}>{r.invoice_date ?? "—"}{r.posible_duplicado && <DupBadge />}</span> },
               { label: "Descripcion", render: r => <span style={{ fontWeight: 500 }}>{r.description ?? "—"}</span> },
               { label: "Proveedor", render: r => r.vendor_name ?? "—" },
               { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "var(--danger)" }}>{r.amount ? `−${formatCLP(r.amount)}` : "—"}</span> },
@@ -450,7 +479,7 @@ export default function ReportesPage() {
                     })}
                   </div>
                 )},
-                { label: "Total", content: <div style={{ fontSize: 28, fontWeight: 800, color: "var(--danger)" }}>{formatCLP(report?.expenses?.total_amount ?? null)}</div> },
+                { label: "Total", content: <div><div style={{ fontSize: 28, fontWeight: 800, color: "var(--danger)" }}>{formatCLP(report?.expenses?.total_amount ?? null)}</div><DupExcludedLine section={report?.expenses} /></div> },
                 { label: "Alertas IA", content: <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Documentos con confianza baja apareceran aqui para revision.</div> },
               ].map(({ label, content }) => (
                 <div key={label} className="rounded-xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -472,13 +501,14 @@ export default function ReportesPage() {
             </div>
             <ActionBar tabKey="ventas" />
             {renderTable(sales, [
-              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
+              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)", display: "inline-flex", alignItems: "center", gap: 6 }}>{r.invoice_date ?? "—"}{r.posible_duplicado && <DupBadge />}</span> },
               { label: "N Factura", render: r => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.numero_documento ?? "—"}</span> },
               { label: "Cliente", render: r => <span style={{ fontWeight: 500 }}>{r.vendor_name ?? r.description ?? "—"}</span> },
               { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "var(--success)" }}>+{formatCLP(r.amount)}</span> },
               { label: "Estado", render: r => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: r.status === "approved" ? "color-mix(in srgb, var(--success) 15%, transparent)" : "rgba(245,158,11,0.15)", color: r.status === "approved" ? "var(--success)" : "#f59e0b" }}>{r.status}</span> },
               { label: "Origen", render: r => <SourceBadge source={r.source} /> },
             ])}
+            <DupExcludedLine section={report?.sales} />
           </div>
         )}
 
@@ -492,13 +522,14 @@ export default function ReportesPage() {
             </div>
             <ActionBar tabKey="costos" />
             {renderTable(costs, [
-              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)" }}>{r.invoice_date ?? "—"}</span> },
+              { label: "Fecha", render: r => <span style={{ color: "var(--muted-foreground)", display: "inline-flex", alignItems: "center", gap: 6 }}>{r.invoice_date ?? "—"}{r.posible_duplicado && <DupBadge />}</span> },
               { label: "OC / Factura", render: r => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.numero_documento ?? "—"}</span> },
               { label: "Proveedor", render: r => <span style={{ fontWeight: 500 }}>{r.vendor_name ?? "—"}</span> },
               { label: "Tipo", render: r => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>{r.description ?? "—"}</span> },
               { label: "Monto", render: r => <span style={{ fontWeight: 700, color: "#f59e0b" }}>−{formatCLP(r.amount)}</span> },
               { label: "Origen", render: r => <SourceBadge source={r.source} /> },
             ])}
+            <DupExcludedLine section={report?.costs} />
           </div>
         )}
       </div>

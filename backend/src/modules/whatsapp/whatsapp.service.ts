@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getWaFrom } from './whatsapp-send-context';
+import { ACTION_MENU_CLOSING_INVITE } from './action-menu.service';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -8,6 +8,12 @@ export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
   private readonly phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   private readonly token = process.env.WHATSAPP_ACCESS_TOKEN;
+  private readonly convocatoriaTemplate =
+    process.env.WHATSAPP_CONVOCATORIA_TEMPLATE ?? 'convocatoria_promotor';
+  // Código de idioma de la plantilla en Meta. Debe MATCHEAR el que Meta le asignó
+  // (WhatsApp usa es / es_AR / es_ES / es_MX; NO es_CL). Configurable por si difiere.
+  private readonly templateLang =
+    process.env.WHATSAPP_TEMPLATE_LANG ?? 'es';
 
   /**
    * Argentina (país 54): Meta ENTREGA los mensajes entrantes con el 9 de móvil
@@ -21,30 +27,20 @@ export class WhatsAppService {
   }
 
   /**
-   * WhatsApp gap 2 — multi-tenant: resuelve el phone_number_id DESDE el cual sale
-   * el mensaje. Orden: (a) el explícito pasado por el caller; (b) el del contexto
-   * de tenant (seteado por el webhook con el número entrante); (c) el global de
-   * env como fallback (comportamiento previo intacto).
-   */
-  private resolveFrom(fromPhoneNumberId?: string): string | undefined {
-    return fromPhoneNumberId ?? getWaFrom() ?? this.phoneNumberId;
-  }
-
-  /**
-   * R1-002 (SSRF defense) — the resolved phone_number_id is interpolated into
-   * the Graph API URL, so it MUST be a plain numeric id. Anything else (a
-   * spoofed value, an undefined fallback, path/host injection) would let a
-   * caller redirect the request. Reject non-numeric / missing ids fail-closed.
+   * Single global number: every tenant's outbound WhatsApp goes through the one
+   * WHATSAPP_PHONE_NUMBER_ID. R1-002 (SSRF defense) — the id is interpolated into
+   * the Graph API URL, so it MUST be a plain numeric id; reject anything else
+   * (missing/misconfigured env) fail-closed.
    */
   private validFrom(from: string | undefined): string | null {
     return from && /^\d+$/.test(from) ? from : null;
   }
 
-  async sendText(to: string, message: string, fromPhoneNumberId?: string): Promise<boolean> {
-    const from = this.validFrom(this.resolveFrom(fromPhoneNumberId));
+  async sendText(to: string, message: string): Promise<boolean> {
+    const from = this.validFrom(this.phoneNumberId);
     if (!from) {
       this.logger.error(
-        `[WhatsApp] Refusing sendText: invalid phone_number_id=${this.resolveFrom(fromPhoneNumberId)}`,
+        `[WhatsApp] Refusing sendText: invalid phone_number_id=${this.phoneNumberId}`,
       );
       return false;
     }
@@ -80,12 +76,11 @@ export class WhatsAppService {
     to: string,
     templateName: string,
     params: string[],
-    fromPhoneNumberId?: string,
   ): Promise<boolean> {
-    const from = this.validFrom(this.resolveFrom(fromPhoneNumberId));
+    const from = this.validFrom(this.phoneNumberId);
     if (!from) {
       this.logger.error(
-        `[WhatsApp] Refusing sendTemplate: invalid phone_number_id=${this.resolveFrom(fromPhoneNumberId)}`,
+        `[WhatsApp] Refusing sendTemplate: invalid phone_number_id=${this.phoneNumberId}`,
       );
       return false;
     }
@@ -102,7 +97,7 @@ export class WhatsAppService {
           type: 'template',
           template: {
             name: templateName,
-            language: { code: 'es' },
+            language: { code: this.templateLang },
             components: params.length ? [{
               type: 'body',
               parameters: params.map(p => ({ type: 'text', text: p })),
@@ -131,20 +126,19 @@ export class WhatsAppService {
     local: string;
     direccion: string;
   }): Promise<boolean> {
-    // El promotor puede no tener nombre cargado; evitar "Hola null 👋".
-    const saludo = opts.nombrePromotor?.trim() ? `Hola ${opts.nombrePromotor.trim()} 👋` : 'Hola 👋';
-    const msg = `${saludo}
-
-Te convocamos para la activación *${opts.proyecto}*:
-
-📅 Fecha: ${opts.fecha}
-📍 Local: ${opts.local}
-🗺 Dirección: ${opts.direccion}
-
-Responde *SI* para confirmar o *NO* para rechazar.
-
-Control Suite BTL ⚡`;
-    return this.sendText(opts.telefono, msg);
+    // Una convocatoria es un mensaje business-initiated FUERA de la ventana de 24h:
+    // Meta la rechaza como texto libre y sólo la entrega vía plantilla APROBADA. El
+    // cuerpo del mensaje vive en la plantilla de Meta (body {{1}}..{{5}}); acá sólo
+    // pasamos los parámetros en el orden exacto que espera esa plantilla.
+    // Meta rechaza parámetros vacíos, así que el nombre nunca puede ser ''.
+    const nombre = opts.nombrePromotor?.trim() || 'promotor/a';
+    return this.sendTemplate(opts.telefono, this.convocatoriaTemplate, [
+      nombre,
+      opts.proyecto,
+      opts.fecha,
+      opts.local,
+      opts.direccion,
+    ]);
   }
 
   // F1 — Confirmación de documento procesado y registrado.
@@ -171,7 +165,7 @@ Tipo: ${opts.tipo}
 Proveedor: ${opts.proveedor}
 Monto: ${opts.monto}
 Proyecto: ${opts.proyecto}
-Estado: ${opts.estado}${nuevoSection}
+Estado: ${opts.estado}${nuevoSection}${ACTION_MENU_CLOSING_INVITE}
 
 Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);
@@ -182,7 +176,7 @@ Control Suite BTL ⚡`;
   async avisarDuplicado(telefono: string): Promise<boolean> {
     const msg = `ℹ️ *Documento duplicado*
 
-Este documento ya estaba registrado, así que no lo cargamos de nuevo.
+Este documento ya estaba registrado, así que no lo cargamos de nuevo.${ACTION_MENU_CLOSING_INVITE}
 
 Control Suite BTL ⚡`;
     return this.sendText(telefono, msg);
@@ -217,7 +211,7 @@ Control Suite BTL ⚡`;
 ID: ${opts.codigo}
 Proyecto: ${opts.proyecto}
 Bodega: ${opts.bodega}
-Cantidad: ${opts.cantidad}
+Cantidad: ${opts.cantidad}${ACTION_MENU_CLOSING_INVITE}
 
 Control Suite BTL ⚡`;
     return this.sendText(opts.telefono, msg);

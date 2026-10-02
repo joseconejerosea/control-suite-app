@@ -30,7 +30,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         router.replace("/admin/dashboard");
         return;
       }
-    } catch { 
+    } catch {
       router.replace("/login");
       return;
     }
@@ -40,11 +40,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   if (!ready) return null;
 
+  // Artifact shell: full-width header on top, sidebar + content below it.
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: "var(--background)" }}>
-      <Sidebar />
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <Topbar />
+    <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--paper)" }}>
+      <Topbar />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
         <main className="flex-1 overflow-y-auto p-7 animate-fade-up">
           {children}
         </main>

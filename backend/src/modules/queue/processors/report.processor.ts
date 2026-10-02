@@ -58,12 +58,23 @@ export class ReportProcessor extends WorkerHost {
         return;
       }
 
-      const [checkins, incidencias, eventos, reportesAvance] = await Promise.all([
+      const [checkins, incidencias, eventos, reportesAvance, gastos] = await Promise.all([
         this.ds.query(`SELECT * FROM checkins WHERE activacion_id=$1 ORDER BY ts`, [activation_id]).catch(() => []),
         this.ds.query(`SELECT * FROM incidencias WHERE activacion_id=$1 ORDER BY created_at`, [activation_id]).catch(() => []),
         this.ds.query(`SELECT * FROM activation_events WHERE activation_id=$1 ORDER BY created_at`, [activation_id]).catch(() => []),
         this.ds.query(`SELECT * FROM reportes_avance WHERE activacion_id=$1 ORDER BY ts`, [activation_id]).catch(() => []),
+        // C2 (v1.9): gastos ligados a ESTA activación. Ahora que invoices.activation_id existe,
+        // el reporte D+1 refleja la actividad económica real del operativo, no solo el terreno.
+        this.ds.query(
+          `SELECT vendor_name, amount, invoice_date, numero_documento
+             FROM invoices
+            WHERE activation_id=$1 AND deleted_at IS NULL AND posible_duplicado=false
+            ORDER BY invoice_date`,
+          [activation_id],
+        ).catch(() => []),
       ]);
+
+      const gastosTotal = gastos.reduce((s: number, g: any) => s + Number(g.amount ?? 0), 0);
 
       const prompt = `Genera un reporte ejecutivo de activación BTL.
 
@@ -83,11 +94,15 @@ ${eventos.map((e: any) => `- ${e.event_type}: ${e.location_status ?? 'N/A'}`).jo
 REPORTES DE AVANCE (${reportesAvance.length}):
 ${reportesAvance.map((r: any) => `- ${r.momento}: ${r.observacion ?? r.contenido ?? ''}`).join('\n') || 'Ninguno'}
 
+GASTOS DE LA ACTIVACIÓN (${gastos.length}, total $${gastosTotal.toLocaleString('es-CL')}):
+${gastos.map((g: any) => `- ${g.invoice_date ?? 'N/A'}: ${g.vendor_name ?? 'Sin proveedor'} $${Number(g.amount ?? 0).toLocaleString('es-CL')}${g.numero_documento ? ` (doc ${g.numero_documento})` : ''}`).join('\n') || 'Ninguno'}
+
 Responde en JSON con esta estructura:
 {
   "resumen_ejecutivo": "2-3 párrafos",
   "asistencia": { "total_checkins": N, "verificados": N, "desfasados": N },
   "incidencias_resumen": "resumen de incidencias",
+  "gastos_resumen": "una línea sobre el gasto del operativo",
   "timeline": ["evento1", "evento2"],
   "conclusion": "párrafo final",
   "calificacion": "excelente|buena|regular|deficiente"
@@ -106,6 +121,11 @@ Responde en JSON con esta estructura:
       } catch {
         reportData = { resumen_ejecutivo: text, calificacion: 'regular' };
       }
+
+      // C2 (v1.9): adjuntamos los gastos estructurados + total al reporte, para que el
+      // dato económico no dependa solo de la narrativa del LLM y el panel/PDF lo pueda usar.
+      reportData.gastos = gastos;
+      reportData.gastos_total = gastosTotal;
 
       const pdfBuffer = await this.generatePdf(activation, reportData, checkins, incidencias);
 

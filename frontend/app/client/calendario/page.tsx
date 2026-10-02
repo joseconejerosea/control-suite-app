@@ -1,8 +1,27 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import AppShell from "@/components/layout/app-shell";
-import { api } from "@/lib/api";
+import { api, getUser } from "@/lib/api";
+
+// Calendario GLOBAL (read-only): monitoreo cross-proyecto por semana. Muestra las
+// convocatorias de TODOS los proyectos y marca los puntos sin cubrir. La operación
+// de asignar/convocar vive en /client/convocatorias; acá el único atajo es disparar
+// las convocatorias YA asignadas (pendientes) de un punto sin cubrir.
+
+type Conv = {
+  proyecto_id: string; proyecto_nombre: string;
+  persona_id: string; persona_nombre: string | null;
+  dia: string; estado: string;
+  local_nombre: string | null; local_direccion: string | null;
+};
+type Gap = {
+  proyecto_id: string; proyecto_nombre: string;
+  dia: string; local_nombre: string; local_direccion: string | null;
+  tiene_pendientes: boolean;
+  aprobado: boolean;
+};
 
 const ESTADO_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   pendiente:   { bg: "rgba(100,116,139,0.25)", color: "#94a3b8", label: "Pend" },
@@ -11,313 +30,229 @@ const ESTADO_STYLE: Record<string, { bg: string; color: string; label: string }>
   rechazada:   { bg: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)", label: "Rech" },
   reemplazada: { bg: "rgba(245,158,11,0.25)",  color: "#f59e0b", label: "Reemp" },
   no_show:     { bg: "color-mix(in srgb, var(--danger) 18%, transparent)",  color: "var(--danger)", label: "No show" },
+  cancelada:   { bg: "color-mix(in srgb, var(--danger) 12%, transparent)",  color: "var(--danger)", label: "Cancel" },
 };
 
-const fieldStyle = { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any };
-const labelStyle = { fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase" as any, display: "block", marginBottom: 4 };
-
-const promoterName = (p: any) =>
-  [p?.first_name, p?.last_name].filter(Boolean).join(" ").trim() || p?.name || (p?.id ? p.id.slice(0, 8) : "—");
-
-// ─── ASIGNAR TURNO MODAL ────────────────────────────────────────────────────
-function TurnoModal({ projectId, promoters, onClose, onDone }: { projectId: string; promoters: any[]; onClose: () => void; onDone: () => void }) {
-  const [form, setForm] = useState({ persona_id: "", dia: "", local_nombre: "", local_direccion: "" });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const canSave = !!form.persona_id && !!form.dia;
-
-  const save = async () => {
-    if (!canSave) return;
-    setSaving(true); setError("");
-    try {
-      await api.post(`/projects/${projectId}/turno-equipo`, {
-        persona_id: form.persona_id,
-        dias: [form.dia],
-        local_nombre: form.local_nombre || undefined,
-        local_direccion: form.local_direccion || undefined,
-      });
-      onDone(); onClose();
-    } catch (e: any) { setError(e.message ?? "Error"); } finally { setSaving(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
-      <div className="rounded-2xl border w-full max-w-md" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--border)" }}>
-          <div className="font-bold">Asignar turno</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", fontSize: 18 }}>✕</button>
-        </div>
-        <div className="p-5 space-y-3">
-          <div>
-            <label style={labelStyle}>Promotor *</label>
-            <select value={form.persona_id} onChange={e => setForm(f => ({ ...f, persona_id: e.target.value }))} style={fieldStyle}>
-              <option value="">Selecciona un promotor...</option>
-              {promoters.map(p => <option key={p.id} value={p.id}>{promoterName(p)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Día *</label>
-            <input type="date" value={form.dia} onChange={e => setForm(f => ({ ...f, dia: e.target.value }))} style={fieldStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Local</label>
-            <input value={form.local_nombre} onChange={e => setForm(f => ({ ...f, local_nombre: e.target.value }))} placeholder="Sucursal Centro" style={fieldStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Dirección</label>
-            <input value={form.local_direccion} onChange={e => setForm(f => ({ ...f, local_direccion: e.target.value }))} placeholder="Av. Ejemplo 123" style={fieldStyle} />
-          </div>
-          {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
-        </div>
-        <div className="flex gap-2 px-5 pb-5">
-          <button onClick={onClose} style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted-foreground)", cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} disabled={saving || !canSave} style={{ flex: 2, padding: "9px", borderRadius: 8, border: "none", background: canSave ? "var(--primary)" : "var(--secondary)", color: canSave ? "#fff" : "var(--muted-foreground)", cursor: "pointer", fontWeight: 600 }}>
-            {saving ? "Guardando..." : "Asignar"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+const isoOf = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const mondayOf = (d: Date) => { const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); x.setHours(12, 0, 0, 0); return x; };
+const dayNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+// Mismo criterio que el backend (normLocal): matchear local por nombre ignorando
+// mayúsculas/espacios, para que el atajo Convocar encuentre las pendientes del gap.
+const normLocal = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+const formatDia = (iso: string) => {
+  const date = new Date(iso + "T12:00:00");
+  return { dayName: dayNames[date.getDay()], dayNum: date.getDate(), month: date.toLocaleDateString("es-CL", { month: "short" }) };
+};
 
 export default function CalendarioPage() {
-  const [projects, setProjects]               = useState<any[]>([]);
-  const [promoters, setPromoters]             = useState<any[]>([]);
-  const [selectedProject, setSelectedProject] = useState("");
-  const [convocatorias, setConvocatorias]     = useState<any[]>([]);
-  const [loading, setLoading]                 = useState(false);
-  const [selected, setSelected]               = useState<any>(null);
-  const [showTurno, setShowTurno]             = useState(false);
-  const [toast, setToast]                     = useState<string | null>(null);
-  const [busy, setBusy]                       = useState(false);
+  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
+  const [convocatorias, setConvocatorias] = useState<Conv[]>([]);
+  const [gaps, setGaps] = useState<Gap[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Conv | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // OPERATOR (UserRole.OPERATOR = 'user') no puede convocar: el endpoint POST
+  // /convocar excluye ese rol → un click garantiza 403. Se gatea el botón.
+  const role = getUser()?.role;
+  const canConvocar = role !== "user";
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
+  const dias = useMemo(() => Array.from({ length: 7 }, (_, i) => isoOf(addDays(weekStart, i))), [weekStart]);
 
-  useEffect(() => {
-    api.get<any>("/projects").then(r => setProjects(Array.isArray(r) ? r : (r?.data ?? []))).catch(console.error);
-    api.get<any>("/promoters").then(r => setPromoters(Array.isArray(r) ? r : (r?.data ?? []))).catch(console.error);
-  }, []);
-
-  const loadConvocatorias = () => {
-    if (!selectedProject) { setConvocatorias([]); return; }
+  const load = () => {
+    const desde = dias[0];
+    const hasta = dias[6];
     setLoading(true);
-    api.get<any>(`/projects/${selectedProject}/convocatorias`)
-      .then((r) => setConvocatorias(Array.isArray(r) ? r : (r?.data ?? [])))
-      .catch(() => setConvocatorias([]))
+    api.get<any>(`/projects/calendario?desde=${desde}&hasta=${hasta}`)
+      .then((r) => {
+        const d = r?.data ?? r;
+        setConvocatorias(Array.isArray(d?.convocatorias) ? d.convocatorias : []);
+        setGaps(Array.isArray(d?.gaps) ? d.gaps : []);
+      })
+      .catch(() => { setConvocatorias([]); setGaps([]); })
       .finally(() => setLoading(false));
   };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [dias]);
 
-  useEffect(loadConvocatorias, [selectedProject]);
+  // Filas = proyectos con actividad (convocatoria o gap) en la semana.
+  const proyectos = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of convocatorias) map.set(c.proyecto_id, c.proyecto_nombre);
+    for (const g of gaps) if (!map.has(g.proyecto_id)) map.set(g.proyecto_id, g.proyecto_nombre);
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [convocatorias, gaps]);
 
-  const project   = useMemo(() => projects.find((p: any) => p.id === selectedProject), [projects, selectedProject]);
-  const aprobado  = project?.config?.ia_status === "aprobado";
-  const pendientes = useMemo(() => convocatorias.filter((c: any) => c.estado === "pendiente"), [convocatorias]);
+  const convAt = (proyId: string, dia: string) =>
+    convocatorias.filter((c) => c.proyecto_id === proyId && c.dia?.slice(0, 10) === dia);
+  const gapsAt = (proyId: string, dia: string) =>
+    gaps.filter((g) => g.proyecto_id === proyId && g.dia === dia);
 
-  const refreshProject = async () => {
-    // El estado de aprobación vive en projects.config.ia_status → recargar la lista.
-    try { const r = await api.get<any>("/projects"); setProjects(Array.isArray(r) ? r : (r?.data ?? [])); } catch { /* noop */ }
-  };
-
-  const aprobar = async () => {
-    setBusy(true);
-    try {
-      await api.post(`/projects/${selectedProject}/aprobar`, { comentario: "Aprobado desde calendario" });
-      await refreshProject();
-      showToast("Proyecto aprobado ✓");
-    } catch (e: any) { showToast(e.message ?? "Error al aprobar"); } finally { setBusy(false); }
-  };
-
-  const enviarConvocatoria = async () => {
-    if (!pendientes.length) return;
-    setBusy(true);
-    try {
-      const items = pendientes.map((c: any) => ({
+  // Atajo: enviar las convocatorias 'pendiente' (asignadas sin enviar) de un gap.
+  const convocarGap = async (gap: Gap) => {
+    const items = convocatorias
+      .filter((c) =>
+        c.proyecto_id === gap.proyecto_id &&
+        c.dia?.slice(0, 10) === gap.dia &&
+        normLocal(c.local_nombre) === normLocal(gap.local_nombre) &&
+        c.estado === "pendiente")
+      .map((c) => ({
         persona_id: c.persona_id,
         dia: c.dia?.slice(0, 10),
         local_nombre: c.local_nombre ?? undefined,
         local_direccion: c.local_direccion ?? undefined,
       }));
-      const res = await api.post<any>(`/projects/${selectedProject}/convocar`, { modo: "manual", items });
+    if (!items.length) { showToast("No hay convocatorias pendientes para enviar en este punto."); return; }
+    setBusy(true);
+    try {
+      const res = await api.post<any>(`/projects/${gap.proyecto_id}/convocar`, { modo: "manual", items });
       const d = res?.data ?? res;
       showToast(`Convocatoria enviada: ${d.enviados ?? 0} ok, ${d.errores ?? 0} con error`);
-      loadConvocatorias();
-    } catch (e: any) { showToast(e.message ?? "Error al enviar"); } finally { setBusy(false); }
+      load();
+    } catch (e: any) { showToast(e.message ?? "Error al convocar"); } finally { setBusy(false); }
   };
 
-  const { personas, dias, matrix } = useMemo(() => {
-    const personaMap = new Map<string, string>();
-    const diaSet = new Set<string>();
-    for (const c of convocatorias) {
-      const prom = promoters.find((p: any) => p.id === c.persona_id);
-      personaMap.set(c.persona_id, prom ? promoterName(prom) : (c.persona_nombre ?? c.persona_id?.slice(0, 8)));
-      diaSet.add(c.dia?.slice(0, 10));
-    }
-    const dias = Array.from(diaSet).sort();
-    const personas = Array.from(personaMap.entries()).map(([id, name]) => ({ id, name }));
-    const matrix = new Map<string, any>();
-    for (const c of convocatorias) matrix.set(`${c.persona_id}__${c.dia?.slice(0, 10)}`, c);
-    return { personas, dias, matrix };
-  }, [convocatorias, promoters]);
-
-  const formatDia = (d: string) => {
-    const date = new Date(d + "T12:00:00");
-    const dayNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-    return { dayName: dayNames[date.getDay()], dayNum: date.getDate(), month: date.toLocaleDateString("es-CL", { month: "short" }) };
-  };
-
-  const stats = useMemo(() => {
-    const s: Record<string, number> = {};
-    for (const c of convocatorias) s[c.estado] = (s[c.estado] ?? 0) + 1;
-    return s;
-  }, [convocatorias]);
-
-  const btn = (label: string, onClick: () => void, opts: { primary?: boolean; disabled?: boolean } = {}) => (
-    <button onClick={onClick} disabled={opts.disabled || busy}
-      style={{ padding: "8px 14px", borderRadius: 10, border: opts.primary ? "none" : "1px solid var(--border)",
-        background: opts.primary ? (opts.disabled ? "var(--secondary)" : "var(--primary)") : "var(--secondary)",
-        color: opts.primary && !opts.disabled ? "#fff" : "var(--foreground)",
-        cursor: opts.disabled || busy ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, opacity: opts.disabled ? 0.6 : 1 }}>
-      {label}
-    </button>
-  );
+  const rangeLabel = `${formatDia(dias[0]).dayNum} ${formatDia(dias[0]).month} – ${formatDia(dias[6]).dayNum} ${formatDia(dias[6]).month}`;
+  const totalGaps = gaps.length;
 
   return (
     <AppShell>
-      {showTurno && selectedProject && (
-        <TurnoModal projectId={selectedProject} promoters={promoters} onClose={() => setShowTurno(false)} onDone={loadConvocatorias} />
-      )}
-
       <div className="animate-fade-up">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div>
-            <h1 className="text-xl font-bold">Convocatorias</h1>
-            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Asigná turnos, aprobá y convocá a los promotores</p>
+            <h1 className="text-xl font-bold">Calendario</h1>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+              Monitoreo de convocatorias de todos los proyectos. Para asignar o convocar, entrá a{" "}
+              <Link href="/client/convocatorias" style={{ color: "var(--primary)", fontWeight: 600 }}>Convocatorias</Link>.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setWeekStart((w) => addDays(w, -7))}
+              style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontWeight: 600 }}>◀</button>
+            <div className="text-sm font-semibold px-2 min-w-[140px] text-center">{rangeLabel}</div>
+            <button onClick={() => setWeekStart((w) => addDays(w, 7))}
+              style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontWeight: 600 }}>▶</button>
+            <button onClick={() => setWeekStart(mondayOf(new Date()))}
+              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Hoy</button>
           </div>
         </div>
 
-        {/* Project selector */}
-        <div className="mb-4">
-          <select value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)}
-            className="w-full max-w-md rounded-xl px-4 py-2.5 text-sm outline-none"
-            style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
-            <option value="">Seleccionar proyecto...</option>
-            {projects.map((p: any) => (<option key={p.id} value={p.id}>{p.name}</option>))}
-          </select>
-        </div>
-
-        {/* Toolbar de acciones */}
-        {selectedProject && (
-          <div className="flex items-center gap-3 mb-5 flex-wrap">
-            <span className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-              style={aprobado ? { background: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)" } : { background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
-              {aprobado ? "Aprobado ✓" : "Pendiente de aprobación"}
-            </span>
-            {!aprobado && btn("Aprobar proyecto", aprobar, { primary: true })}
-            {btn("+ Asignar turno", () => setShowTurno(true))}
-            {btn(
-              `Enviar convocatoria${pendientes.length ? ` (${pendientes.length})` : ""}`,
-              enviarConvocatoria,
-              { primary: true, disabled: !aprobado || pendientes.length === 0 },
-            )}
-            {!aprobado && (
-              <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>Aprobá el proyecto para poder enviar</span>
-            )}
-          </div>
-        )}
-
-        {!selectedProject && (
-          <div className="text-center py-16" style={{ color: "var(--muted-foreground)" }}>
-            <div className="text-4xl mb-3">📅</div>
-            <p>Selecciona un proyecto para gestionar las convocatorias</p>
+        {totalGaps > 0 && (
+          <div className="mb-4 px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-2"
+            style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+            <span>⚠</span> {totalGaps} punto{totalGaps === 1 ? "" : "s"} sin cubrir esta semana
           </div>
         )}
 
         {loading && <div className="text-center py-16" style={{ color: "var(--muted-foreground)" }}>Cargando...</div>}
 
-        {selectedProject && !loading && convocatorias.length === 0 && (
+        {!loading && proyectos.length === 0 && (
           <div className="text-center py-16" style={{ color: "var(--muted-foreground)" }}>
-            <p>Sin convocatorias para este proyecto</p>
-            <p className="text-xs mt-1">Usá "+ Asignar turno" para crear la primera.</p>
+            <div className="text-4xl mb-3">📅</div>
+            <p>Sin convocatorias ni puntos programados en esta semana</p>
           </div>
         )}
 
-        {selectedProject && !loading && convocatorias.length > 0 && (
-          <>
-            {/* Stats bar */}
-            <div className="flex gap-3 mb-4 flex-wrap">
-              {Object.entries(ESTADO_STYLE).map(([key, style]) => {
-                const count = stats[key] ?? 0;
-                if (!count) return null;
-                return (
-                  <div key={key} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: style.bg, color: style.color }}>
-                    <span className="w-2 h-2 rounded-full" style={{ background: style.color }} />
-                    {key}: {count}
-                  </div>
-                );
-              })}
-              <div className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: "var(--secondary)", color: "var(--muted-foreground)" }}>
-                Total: {convocatorias.length}
-              </div>
-            </div>
-
-            {/* Calendar grid */}
-            <div className="rounded-xl border overflow-x-auto" style={{ borderColor: "var(--border)" }}>
-              <table className="w-full border-collapse" style={{ minWidth: dias.length * 70 + 180 }}>
-                <thead>
-                  <tr style={{ background: "var(--secondary)" }}>
-                    <th className="px-4 py-3 text-left sticky left-0 z-10" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)", background: "var(--secondary)", minWidth: 180 }}>
-                      Persona
-                    </th>
+        {!loading && proyectos.length > 0 && (
+          <div className="rounded-xl border overflow-x-auto" style={{ borderColor: "var(--border)" }}>
+            <table className="w-full border-collapse" style={{ minWidth: 7 * 150 + 200 }}>
+              <thead>
+                <tr style={{ background: "var(--secondary)" }}>
+                  <th className="px-4 py-3 text-left sticky left-0 z-10"
+                    style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)", background: "var(--secondary)", minWidth: 200 }}>
+                    Proyecto
+                  </th>
+                  {dias.map((d) => {
+                    const f = formatDia(d);
+                    return (
+                      <th key={d} className="px-2 py-2 text-center"
+                        style={{ fontSize: 10, fontWeight: 500, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)", minWidth: 150 }}>
+                        <div>{f.dayName}</div>
+                        <div className="text-sm font-bold" style={{ color: "var(--foreground)" }}>{f.dayNum}</div>
+                        <div>{f.month}</div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {proyectos.map((p) => (
+                  <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td className="px-4 py-2 text-sm font-medium sticky left-0 z-10"
+                      style={{ background: "var(--card)", borderRight: "1px solid var(--border)", verticalAlign: "top", minWidth: 200, maxWidth: 200 }}>
+                      {p.name}
+                    </td>
                     {dias.map((d) => {
-                      const f = formatDia(d);
+                      const cs = convAt(p.id, d);
+                      const gs = gapsAt(p.id, d);
                       return (
-                        <th key={d} className="px-1 py-2 text-center" style={{ fontSize: 10, fontWeight: 500, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)", minWidth: 60 }}>
-                          <div>{f.dayName}</div>
-                          <div className="text-sm font-bold" style={{ color: "var(--foreground)" }}>{f.dayNum}</div>
-                          <div>{f.month}</div>
-                        </th>
+                        <td key={d} className="px-1.5 py-1.5 align-top" style={{ background: "var(--card)", verticalAlign: "top" }}>
+                          <div className="flex flex-col gap-1">
+                            {cs.map((c, i) => {
+                              const style = ESTADO_STYLE[c.estado] ?? ESTADO_STYLE.pendiente;
+                              return (
+                                <button key={`${c.persona_id}-${i}`} onClick={() => setSelected(c)}
+                                  className="w-full px-2 py-1 rounded-md text-[11px] font-semibold text-left truncate"
+                                  title={`${c.persona_nombre ?? c.persona_id} · ${c.estado}${c.local_nombre ? ` · ${c.local_nombre}` : ""}`}
+                                  style={{ background: style.bg, color: style.color, border: "none", cursor: "pointer" }}>
+                                  {c.persona_nombre ?? c.persona_id?.slice(0, 8)}
+                                </button>
+                              );
+                            })}
+                            {gs.map((g, i) => (
+                              <div key={`gap-${i}`} className="px-2 py-1 rounded-md text-[11px]"
+                                style={{ background: "rgba(245,158,11,0.12)", border: "1px dashed #f59e0b" }}>
+                                <div className="font-semibold truncate" style={{ color: "#f59e0b" }} title={g.local_nombre}>⚠ {g.local_nombre}</div>
+                                {g.tiene_pendientes && g.aprobado && canConvocar ? (
+                                  <button onClick={() => convocarGap(g)} disabled={busy}
+                                    className="mt-1 w-full py-0.5 rounded text-[11px] font-semibold"
+                                    style={{ background: "var(--primary)", color: "#fff", border: "none", cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1 }}>
+                                    Convocar
+                                  </button>
+                                ) : (
+                                  <Link href={`/client/convocatorias?proyecto=${g.proyecto_id}`}
+                                    className="mt-1 block w-full py-0.5 rounded text-[11px] font-semibold text-center"
+                                    style={{ background: "var(--secondary)", color: "var(--foreground)", border: "1px solid var(--border)" }}>
+                                    Asignar
+                                  </Link>
+                                )}
+                              </div>
+                            ))}
+                            {cs.length === 0 && gs.length === 0 && (
+                              <span className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>—</span>
+                            )}
+                          </div>
+                        </td>
                       );
                     })}
                   </tr>
-                </thead>
-                <tbody>
-                  {personas.map((p) => (
-                    <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td className="px-4 py-2 text-sm font-medium sticky left-0 z-10" style={{ background: "var(--card)", borderRight: "1px solid var(--border)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 180 }}>
-                        {p.name}
-                      </td>
-                      {dias.map((d) => {
-                        const conv = matrix.get(`${p.id}__${d}`);
-                        if (!conv) return <td key={d} className="px-1 py-2" style={{ background: "var(--card)" }} />;
-                        const style = ESTADO_STYLE[conv.estado] ?? ESTADO_STYLE.pendiente;
-                        return (
-                          <td key={d} className="px-1 py-1" style={{ background: "var(--card)" }}>
-                            <button onClick={() => setSelected(conv)} className="w-full py-1.5 rounded-md text-xs font-semibold" style={{ background: style.bg, color: style.color, border: "none", cursor: "pointer" }}>
-                              {style.label}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Legend */}
-            <div className="flex gap-4 mt-4 flex-wrap">
-              {Object.entries(ESTADO_STYLE).map(([key, style]) => (
-                <div key={key} className="flex items-center gap-1.5 text-xs" style={{ color: "var(--muted-foreground)" }}>
-                  <span className="w-3 h-3 rounded" style={{ background: style.bg, border: `1px solid ${style.color}` }} />
-                  <span className="capitalize">{key.replace("_", " ")}</span>
-                </div>
-              ))}
-            </div>
-          </>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
-        {/* Detail Modal */}
+        {/* Legend */}
+        {!loading && proyectos.length > 0 && (
+          <div className="flex gap-4 mt-4 flex-wrap">
+            {Object.entries(ESTADO_STYLE).map(([key, style]) => (
+              <div key={key} className="flex items-center gap-1.5 text-xs" style={{ color: "var(--muted-foreground)" }}>
+                <span className="w-3 h-3 rounded" style={{ background: style.bg, border: `1px solid ${style.color}` }} />
+                <span className="capitalize">{key.replace("_", " ")}</span>
+              </div>
+            ))}
+            <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--muted-foreground)" }}>
+              <span className="w-3 h-3 rounded" style={{ background: "rgba(245,158,11,0.12)", border: "1px dashed #f59e0b" }} />
+              <span>Punto sin cubrir</span>
+            </div>
+          </div>
+        )}
+
+        {/* Detail Modal (read-only) */}
         {selected && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setSelected(null)}>
             <div className="rounded-2xl border p-6 w-full max-w-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }} onClick={(e) => e.stopPropagation()}>
@@ -327,8 +262,12 @@ export default function CalendarioPage() {
               </div>
               <div className="space-y-3">
                 <div>
+                  <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Proyecto</div>
+                  <div className="text-sm font-medium">{selected.proyecto_nombre}</div>
+                </div>
+                <div>
                   <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Persona</div>
-                  <div className="text-sm font-medium">{promoters.find((p: any) => p.id === selected.persona_id) ? promoterName(promoters.find((p: any) => p.id === selected.persona_id)) : (selected.persona_nombre ?? selected.persona_id?.slice(0, 8))}</div>
+                  <div className="text-sm font-medium">{selected.persona_nombre ?? selected.persona_id?.slice(0, 8)}</div>
                 </div>
                 <div>
                   <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Día</div>
@@ -336,7 +275,8 @@ export default function CalendarioPage() {
                 </div>
                 <div>
                   <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Estado</div>
-                  <span className="text-xs px-2 py-0.5 rounded-full font-semibold capitalize" style={{ background: (ESTADO_STYLE[selected.estado] ?? ESTADO_STYLE.pendiente).bg, color: (ESTADO_STYLE[selected.estado] ?? ESTADO_STYLE.pendiente).color }}>
+                  <span className="text-xs px-2 py-0.5 rounded-full font-semibold capitalize"
+                    style={{ background: (ESTADO_STYLE[selected.estado] ?? ESTADO_STYLE.pendiente).bg, color: (ESTADO_STYLE[selected.estado] ?? ESTADO_STYLE.pendiente).color }}>
                     {selected.estado?.replace("_", " ")}
                   </span>
                 </div>
@@ -347,18 +287,11 @@ export default function CalendarioPage() {
                     {selected.local_direccion && <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{selected.local_direccion}</div>}
                   </div>
                 )}
-                {selected.mensaje_enviado_at && (
-                  <div>
-                    <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Mensaje enviado</div>
-                    <div className="text-sm">{new Date(selected.mensaje_enviado_at).toLocaleString("es-CL")}</div>
-                  </div>
-                )}
-                {selected.respuesta_texto && (
-                  <div>
-                    <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Respuesta</div>
-                    <div className="text-sm">{selected.respuesta_texto}</div>
-                  </div>
-                )}
+                <Link href={`/client/convocatorias?proyecto=${selected.proyecto_id}`}
+                  className="block w-full mt-2 py-2 rounded-lg text-sm font-semibold text-center"
+                  style={{ background: "var(--secondary)", color: "var(--foreground)", border: "1px solid var(--border)" }}>
+                  Gestionar en Convocatorias →
+                </Link>
               </div>
             </div>
           </div>

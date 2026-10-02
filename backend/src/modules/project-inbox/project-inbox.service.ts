@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { ProjectInbox } from './entities/project-inbox.entity';
+import { syncProjectLocations, LocaleEntry } from '../projects/projects.service';
 
 const QUEUE_PROJECT_INBOX_EXTRACT = 'project-inbox-extract';
 const QUEUE_OCR = 'ocr';
@@ -199,15 +200,12 @@ export class ProjectInboxService {
       );
       projectId = projRes[0].id;
 
-      if (extracted.locales?.length) {
-        for (const local of extracted.locales) {
-          await qr.query(
-            `INSERT INTO locations (client_id, name, address)
-             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-            [tenantId, local.nombre, local.direccion],
-          ).catch(() => {});
-        }
-      }
+      // JA-002/JB-002 — The B5 location upsert is deliberately NOT done here inside
+      // the open QueryRunner tx. Running it in-tx wrapped in `.catch(() => {})` is the
+      // documented anti-pattern (no-catch-swallow-in-tx): if the upsert throws, the
+      // swallow hides it AND Postgres poisons the tx, so the NEXT statement fails with
+      // "current transaction is aborted". Instead we sync locations AFTER commit,
+      // best-effort (see post-commit block below), mirroring create()/update().
 
       await qr.query(
         `UPDATE project_inbox
@@ -275,6 +273,17 @@ export class ProjectInboxService {
     } finally {
       await qr.release();
     }
+
+    // JA-002/JB-002 — Post-commit, best-effort B5 location sync. Done OUTSIDE the tx
+    // so a PDV-sync failure can never roll back or corrupt the already-committed
+    // approve. Mirrors the non-fatal pattern in ProjectsService.create/update.
+    // this.ds.query is the same request-scoped, RLS-safe path used elsewhere here.
+    const localesToSync: LocaleEntry[] = Array.isArray(extracted.locales)
+      ? (extracted.locales as LocaleEntry[])
+      : [];
+    await syncProjectLocations(this.ds, tenantId, projectId, localesToSync).catch((err: any) =>
+      this.logger.warn(`[ProjectInbox] B5 syncProjectLocations failed project=${projectId}: ${err.message}`),
+    );
 
     // B01/B03 — Post-commit: enqueue OCR for each reassigned evento.
     // Done AFTER commitTransaction so a rollback never leaves ghost jobs.

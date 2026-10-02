@@ -1,6 +1,5 @@
 /// <reference types="jest" />
 import { WhatsAppService } from './whatsapp.service';
-import { runWithWaFrom } from './whatsapp-send-context';
 
 const API = 'https://graph.facebook.com/v19.0';
 
@@ -14,7 +13,7 @@ function fetchResponse(ok: boolean, body: unknown): Response {
   } as unknown as Response;
 }
 
-describe('WhatsAppService — outbound phone_number_id resolution', () => {
+describe('WhatsAppService — outbound to the single global number', () => {
   const GLOBAL_PN = '100000000000000';
   const TO = '5215512345678';
 
@@ -38,7 +37,6 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
-    // R3-011 — restore mutated env vars.
     if (savedPn === undefined) delete process.env.WHATSAPP_PHONE_NUMBER_ID;
     else process.env.WHATSAPP_PHONE_NUMBER_ID = savedPn;
     if (savedToken === undefined) delete process.env.WHATSAPP_ACCESS_TOKEN;
@@ -54,29 +52,9 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
   }
 
   describe('sendText', () => {
-    it('uses the explicit fromPhoneNumberId argument when provided', async () => {
-      await service.sendText(TO, 'hola', '222222222222222');
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(urlOfCall()).toBe(`${API}/222222222222222/messages`);
-    });
-
-    it('uses the ALS waFrom when no explicit argument is given', async () => {
-      await runWithWaFrom('333333333333333', async () => {
-        await service.sendText(TO, 'hola');
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(urlOfCall()).toBe(`${API}/333333333333333/messages`);
-    });
-
-    it('prefers the explicit argument over the ALS value', async () => {
-      await runWithWaFrom('333333333333333', async () => {
-        await service.sendText(TO, 'hola', '222222222222222');
-      });
-      expect(urlOfCall()).toBe(`${API}/222222222222222/messages`);
-    });
-
-    it('falls back to the global env id when neither an argument nor ALS is set', async () => {
+    it('sends from the single global WHATSAPP_PHONE_NUMBER_ID', async () => {
       await service.sendText(TO, 'hola');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(urlOfCall()).toBe(`${API}/${GLOBAL_PN}/messages`);
     });
 
@@ -93,14 +71,16 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
       expect(body.to).toBe('5215512345678');
     });
 
-    // R1-002 — a non-numeric resolved id must NOT hit fetch and returns false.
-    it('refuses to fetch when the resolved id is non-numeric (R1-002)', async () => {
-      const ok = await service.sendText(TO, 'hola', 'evil.example.com/../path');
+    // R1-002 — a non-numeric configured id must NOT hit fetch and returns false.
+    it('refuses to fetch when the global id is non-numeric (R1-002)', async () => {
+      process.env.WHATSAPP_PHONE_NUMBER_ID = 'evil.example.com/../path';
+      const svc = new WhatsAppService();
+      const ok = await svc.sendText(TO, 'hola');
       expect(ok).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('refuses to fetch when no id resolves at all (R1-002)', async () => {
+    it('refuses to fetch when no id is configured (R1-002)', async () => {
       delete process.env.WHATSAPP_PHONE_NUMBER_ID;
       const svc = new WhatsAppService(); // constructs with undefined global id
       const ok = await svc.sendText(TO, 'hola');
@@ -110,19 +90,7 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
   });
 
   describe('sendTemplate', () => {
-    it('uses the explicit fromPhoneNumberId argument when provided', async () => {
-      await service.sendTemplate(TO, 'tpl', [], '222222222222222');
-      expect(urlOfCall()).toBe(`${API}/222222222222222/messages`);
-    });
-
-    it('uses the ALS waFrom when no explicit argument is given', async () => {
-      await runWithWaFrom('333333333333333', async () => {
-        await service.sendTemplate(TO, 'tpl', []);
-      });
-      expect(urlOfCall()).toBe(`${API}/333333333333333/messages`);
-    });
-
-    it('falls back to the global env id when neither an argument nor ALS is set', async () => {
+    it('sends from the single global WHATSAPP_PHONE_NUMBER_ID', async () => {
       await service.sendTemplate(TO, 'tpl', []);
       expect(urlOfCall()).toBe(`${API}/${GLOBAL_PN}/messages`);
     });
@@ -138,11 +106,82 @@ describe('WhatsAppService — outbound phone_number_id resolution', () => {
       expect(body.to).toBe('5215512345678');
     });
 
-    // R1-002 — non-numeric resolved id blocks fetch and returns false.
-    it('refuses to fetch when the resolved id is non-numeric (R1-002)', async () => {
-      const ok = await service.sendTemplate(TO, 'tpl', [], 'not-a-number');
+    // R1-002 — non-numeric configured id blocks fetch and returns false.
+    it('refuses to fetch when the global id is non-numeric (R1-002)', async () => {
+      process.env.WHATSAPP_PHONE_NUMBER_ID = 'not-a-number';
+      const svc = new WhatsAppService();
+      const ok = await svc.sendTemplate(TO, 'tpl', []);
       expect(ok).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // T5 — F4 convocatoria. A business-initiated message outside the 24h window is
+  // rejected by Meta as free text, so it MUST go out as an APPROVED template.
+  describe('enviarConvocatoria', () => {
+    const savedTemplate = process.env.WHATSAPP_CONVOCATORIA_TEMPLATE;
+
+    afterEach(() => {
+      if (savedTemplate === undefined) delete process.env.WHATSAPP_CONVOCATORIA_TEMPLATE;
+      else process.env.WHATSAPP_CONVOCATORIA_TEMPLATE = savedTemplate;
+    });
+
+    it('sends a TEMPLATE (not free text) with the default template name and body params in order', async () => {
+      delete process.env.WHATSAPP_CONVOCATORIA_TEMPLATE;
+      const svc = new WhatsAppService();
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const ok = await svc.enviarConvocatoria({
+        telefono: TO,
+        nombrePromotor: 'Ana',
+        proyecto: 'Proyecto X',
+        fecha: '2026-08-20',
+        local: 'Local Centro',
+        direccion: 'Calle 1 #23',
+      });
+
+      expect(ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(initOfCall().body as string);
+      expect(body.type).toBe('template');
+      expect(body.template.name).toBe('convocatoria_promotor');
+      const params = body.template.components[0].parameters.map((p: any) => p.text);
+      expect(params).toEqual(['Ana', 'Proyecto X', '2026-08-20', 'Local Centro', 'Calle 1 #23']);
+    });
+
+    it('uses WHATSAPP_CONVOCATORIA_TEMPLATE when set', async () => {
+      process.env.WHATSAPP_CONVOCATORIA_TEMPLATE = 'convocatoria_custom';
+      const svc = new WhatsAppService();
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      await svc.enviarConvocatoria({
+        telefono: TO,
+        nombrePromotor: 'Ana',
+        proyecto: 'P',
+        fecha: 'F',
+        local: 'L',
+        direccion: 'D',
+      });
+
+      const body = JSON.parse(initOfCall().body as string);
+      expect(body.template.name).toBe('convocatoria_custom');
+    });
+
+    // Meta rejects empty template params — an unnamed promotor must fall back.
+    it('falls back to "promotor/a" when the name is empty', async () => {
+      const ok = await service.enviarConvocatoria({
+        telefono: TO,
+        nombrePromotor: '   ',
+        proyecto: 'P',
+        fecha: 'F',
+        local: 'L',
+        direccion: 'D',
+      });
+
+      expect(ok).toBe(true);
+      const body = JSON.parse(initOfCall().body as string);
+      const params = body.template.components[0].parameters.map((p: any) => p.text);
+      expect(params[0]).toBe('promotor/a');
     });
   });
 });

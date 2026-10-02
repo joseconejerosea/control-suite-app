@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
 
@@ -12,6 +12,75 @@ const ESTADO_STYLE: Record<string, { background: string; color: string }> = {
   rechazada: { background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" },
 };
 
+// C2 (v1.9): reasignar la activación de una boleta cuando la inferencia la dejó sin ligar
+// (o mal ligada). Carga las activaciones candidatas del proyecto y postea el cambio; al
+// terminar, onDone() refresca los items (la boleta se mueve a la rendición correcta).
+function ReasignarActivacion({ invoiceId, onDone }: { invoiceId: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [opts, setOpts] = useState<{ id: string; label: string }[] | null>(null);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = async () => {
+    setOpen(true);
+    setErr(null);
+    if (opts) return;
+    try {
+      const res = await api.get<{ id: string; label: string }[]>(`/rendiciones/boletas/${invoiceId}/activaciones`);
+      setOpts(Array.isArray(res) ? res : []);
+    } catch {
+      setOpts([]);
+      setErr("No se pudieron cargar las activaciones.");
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setErr(null);
+    try {
+      await api.patch(`/rendiciones/boletas/${invoiceId}/activacion`, { activation_id: value || null });
+      setOpen(false);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "No se pudo reasignar.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button type="button" onClick={load}
+        style={{ marginTop: 4, background: "none", border: "none", color: "var(--primary)", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: 0 }}>
+        Reasignar activación
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+      <select value={value} onChange={(e) => setValue(e.target.value)}
+        style={{ fontSize: 11, padding: "4px 6px", borderRadius: 6, background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}>
+        <option value="">— Sin activación —</option>
+        {(opts ?? []).map((o) => (
+          <option key={o.id} value={o.id}>{o.label}</option>
+        ))}
+      </select>
+      {err && <span style={{ fontSize: 10, color: "var(--danger)" }}>{err}</span>}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" disabled={saving} onClick={save}
+          style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, border: "none", background: "var(--primary)", color: "#fff", cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}>
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+        <button type="button" onClick={() => setOpen(false)}
+          style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--card)", color: "var(--foreground)", cursor: "pointer" }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function RendicionesPage() {
   const [rendiciones, setRendiciones] = useState<any[]>([]);
   const [kpis, setKpis]               = useState<any>(null);
@@ -19,6 +88,48 @@ export default function RendicionesPage() {
   const [filtroEstado, setFiltroEstado] = useState("");
   const [selected, setSelected]       = useState<any>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [items, setItems]             = useState<any[]>([]);
+  const [boletaUrls, setBoletaUrls]   = useState<Record<string, string>>({});
+  // C2 (v1.9): bump para re-cargar las boletas del detalle tras reasignar una activación.
+  const [reloadItems, setReloadItems] = useState(0);
+
+  // Al abrir el detalle: traer las boletas (items) y cargar sus imágenes con un
+  // fetch autenticado → object URL (el <img> no puede mandar el Bearer).
+  useEffect(() => {
+    if (!selected) { setItems([]); setBoletaUrls({}); return; }
+    const created: string[] = [];
+    const token = localStorage.getItem("cs_token");
+    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+    api.get<any>(`/rendiciones/${selected.id}/items`)
+      .then(async (r) => {
+        const list = Array.isArray(r) ? r : (r?.data ?? []);
+        setItems(list);
+        const urls: Record<string, string> = {};
+        await Promise.all(
+          list.filter((it: any) => it.has_boleta && it.invoice_id).map(async (it: any) => {
+            try {
+              const res = await fetch(`${base}/api/rendiciones/boletas/${it.invoice_id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return;
+              const url = URL.createObjectURL(await res.blob());
+              urls[it.invoice_id] = url;
+              created.push(url);
+            } catch { /* boleta sin imagen */ }
+          }),
+        );
+        setBoletaUrls(urls);
+      })
+      .catch(() => setItems([]));
+    return () => { created.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [selected, reloadItems]);
+
+  // Duplicados: boletas con el mismo monto dentro de la rendición.
+  const dupMontos = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const it of items) counts[String(it.monto)] = (counts[String(it.monto)] ?? 0) + 1;
+    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+  }, [items]);
 
   const fetchData = () => {
     setLoading(true);
@@ -50,8 +161,14 @@ export default function RendicionesPage() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `rendicion-${id.slice(0, 8)}.pdf`;
+      // P9 (v1.9): el anchor DEBE estar en el DOM (Firefox/otros no disparan la descarga
+      // con un <a> detached) y el object URL NO se puede revocar en el mismo tick que el
+      // click — la descarga es asíncrona y revocar sincrónico la cancelaba ("no baja el
+      // archivo"). Adjuntamos, clickeamos, removemos, y revocamos con un delay.
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { console.error(e); }
   };
 
@@ -216,6 +333,55 @@ export default function RendicionesPage() {
                   <div className="font-bold mt-1">{selected.num_items ?? 0}</div>
                 </div>
               </div>
+              {/* Boletas: imagen + datos + flag de duplicado */}
+              <div className="mb-4">
+                <div className="text-xs font-semibold mb-2" style={{ color: "var(--muted-foreground)" }}>
+                  Boletas ({items.length})
+                </div>
+                {items.length === 0 ? (
+                  <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>Sin boletas</div>
+                ) : (
+                  <div className="space-y-2" style={{ maxHeight: 288, overflowY: "auto" }}>
+                    {items.map((it: any, i: number) => {
+                      const dup = dupMontos.has(String(it.monto));
+                      const url = boletaUrls[it.invoice_id];
+                      return (
+                        <div key={it.id ?? i} className="flex gap-3 rounded-lg p-2 border"
+                          style={{ borderColor: dup ? "#f59e0b" : "var(--border)", background: "var(--card)" }}>
+                          {url ? (
+                            <a href={url} target="_blank" rel="noreferrer">
+                              <img src={url} alt="Boleta"
+                                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                            </a>
+                          ) : (
+                            <div style={{ width: 56, height: 56, borderRadius: 6, background: "var(--secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--muted-foreground)", textAlign: "center" }}>
+                              Sin imagen
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium truncate">{it.vendor_name ?? "—"}</div>
+                            <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                              {it.invoice_date ? new Date(String(it.invoice_date).slice(0, 10) + "T12:00:00").toLocaleDateString("es-CL") : "—"} · {fmtCLP(it.monto)}
+                            </div>
+                            {dup && (
+                              <span className="text-[10px] font-semibold" style={{ color: "#f59e0b" }}>
+                                ⚠ Posible duplicado (mismo monto)
+                              </span>
+                            )}
+                            {selected.estado === "borrador" && it.invoice_id && (
+                              <ReasignarActivacion
+                                invoiceId={it.invoice_id}
+                                onDone={() => setReloadItems((n) => n + 1)}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {selected.requiere_admin && (
                 <div className="rounded-lg p-3 text-sm" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>
                   Aprobacion manual requerida — excede {fmtCLP(selected.excede_por_clp)} el presupuesto

@@ -38,9 +38,10 @@ export class WhatsAppParser implements IEventParser {
       timestamp,
       messageId,
       type,
-      phoneNumberId: value?.metadata?.phone_number_id ?? null,
-      displayPhoneNumber: value?.metadata?.display_phone_number ?? null,
-      raw: body, // preserve original for auditability
+      // Single global number: the recipient phone_number_id no longer identifies a
+      // tenant (this path routes by the canalEntradaId in the URL; the bot routes by
+      // sender), so it is not surfaced here. The full body stays in `raw` for audit.
+      raw: body,
     };
 
     return {

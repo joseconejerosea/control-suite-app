@@ -1,6 +1,6 @@
 import {
-  Body, Controller, Get, Param, ParseUUIDPipe,
-  Patch, Post, Put, Req, UseGuards,
+  BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe,
+  Patch, Post, Put, Query, Req, UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -12,7 +12,7 @@ import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { IsString, IsNotEmpty, IsArray, IsDateString, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
+import { IsString, IsNotEmpty, IsArray, IsBoolean, IsOptional, IsUUID, ValidateNested, IsIn, IsEmail } from 'class-validator';
 import { Type } from 'class-transformer';
 
 interface AuthedRequest extends Request {
@@ -23,14 +23,20 @@ interface AuthedRequest extends Request {
 
 // ── DTOs inline (small, project-specific) ────────────────────────────────────
 
-class ConvocatoriaItemDto {
+export class ConvocatoriaItemDto {
   @IsUUID() persona_id: string;
-  @IsDateString() dia: string;
+  // B3: la validación de FORMATO/ausencia de fecha NO vive en el pipe global
+  // (emitía un error crudo con prefijo "items.N." y lo repetía por cada anfitrión).
+  // Se valida a mano en el servicio (assertConvocatoriaDatesValid) para dar UN solo
+  // mensaje limpio. Acá `dia` queda REQUERIDO (string) para no romper el tipo del
+  // servicio (ConvocatoriaItem.dia: string); el front siempre manda el campo (aunque
+  // vacío), y el guard atrapa vacío/no-ISO con el mensaje amigable.
+  @IsString() dia: string;
   @IsOptional() @IsString() local_nombre?: string;
   @IsOptional() @IsString() local_direccion?: string;
 }
 
-class EnviarConvocatoriaDto {
+export class EnviarConvocatoriaDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ConvocatoriaItemDto)
@@ -52,19 +58,31 @@ class AprobarProyectoDto {
   @IsOptional() @IsString() comentario?: string;
 }
 
-class ConvocarAnfitrionesDto {
+export class ConvocarAnfitrionesDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ConvocatoriaItemDto)
   items: ConvocatoriaItemDto[];
 
   @IsOptional() @IsString() comentario?: string;
+
+  // T6 — force=true salta el chequeo de anti-choque de anfitrión (el operador ya
+  // confirmó el pop-up "Convocar a ambas").
+  @IsOptional() @IsBoolean() force?: boolean;
 }
 
 class ReportRecipientsDto {
   @IsArray()
   @IsEmail({}, { each: true })
   emails: string[];
+}
+
+// P15 (v1.9): alta inline de un PDV para un proyecto. Permite crear la ubicación desde el
+// form de activación cuando el proyecto todavía no tiene PDVs (nacía sin locales si el
+// documento de origen no los listaba), sin bloquear el flujo.
+class CreateProjectLocationDto {
+  @IsString() @IsNotEmpty() name: string;
+  @IsOptional() @IsString() address?: string;
 }
 
 // ── Controller ────────────────────────────────────────────────────────────────
@@ -83,8 +101,46 @@ export class ProjectsController {
 
   @Get()
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
-  findAll(@Req() req: AuthedRequest) {
-    return this.service.findAll(req.user.client_id);
+  findAll(@Req() req: AuthedRequest, @Query('archived') archived?: string) {
+    // ?archived=1|true → solo archivados (vista "Ver archivados"); por defecto, solo activos.
+    return this.service.findAll(req.user.client_id, { archived: archived === '1' || archived === 'true' });
+  }
+
+  // ── Matriz v1.3: archivar / restaurar proyecto (soft-delete reversible) ──────
+  //   PATCH /projects/:id/archive   → status='archived' (sale de las listas activas)
+  //   PATCH /projects/:id/unarchive → status='active'   (lo restaura)
+  //   Declarados ANTES de PATCH :id no hace falta (rutas distintas), pero se agrupan acá.
+
+  @Patch(':id/archive')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'ARCHIVE_PROJECT', entity: 'Project' })
+  archive(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.setArchived(req.user.client_id, id, true);
+  }
+
+  @Patch(':id/unarchive')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN)
+  @AuditAction({ action: 'UNARCHIVE_PROJECT', entity: 'Project' })
+  unarchive(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.setArchived(req.user.client_id, id, false);
+  }
+
+  // ── T9: Calendario global (read-only) ──────────────────────────────────────
+  //   GET /projects/calendario?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+  //   Agrega convocatorias de TODOS los proyectos del tenant + puntos sin cubrir.
+  //   Declarado ANTES de :id para no chocar con el ParseUUIDPipe de findOne.
+  @Get('calendario')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  getCalendarioGlobal(
+    @Req() req: AuthedRequest,
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+  ) {
+    const isISO = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? '');
+    if (!isISO(desde) || !isISO(hasta)) {
+      throw new BadRequestException('desde y hasta son requeridos (YYYY-MM-DD)');
+    }
+    return this.service.getCalendarioGlobal(req.user.client_id, desde, hasta);
   }
 
   @Get(':id')
@@ -108,6 +164,28 @@ export class ProjectsController {
   @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
   summary(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.summary(req.user.client_id, id);
+  }
+
+  // ── B5: Project-scoped PDV dropdown ──────────────────────────────────────
+  //   GET /projects/:id/locations → active locations for this project (id, name, address)
+
+  @Get(':id/locations')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  getProjectLocations(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getProjectLocations(req.user.client_id, id);
+  }
+
+  // P15 (v1.9): POST /projects/:id/locations → alta inline de un PDV. Devuelve la ubicación
+  // creada (id, name, address) para que el front la agregue al dropdown y la seleccione.
+  @Post(':id/locations')
+  @Roles(UserRole.MANAGER, UserRole.SERVICE_LEAD, UserRole.SUPERADMIN, UserRole.OPERATOR)
+  @AuditAction({ action: 'CREATE_PROJECT_LOCATION', entity: 'Project' })
+  createProjectLocation(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateProjectLocationDto,
+  ) {
+    return this.service.createProjectLocation(req.user.client_id, id, dto.name, dto.address ?? null);
   }
 
   // ── F5: Destinatarios del reporte al cliente (por proyecto) ───────────────
@@ -215,6 +293,6 @@ export class ProjectsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ConvocarAnfitrionesDto,
   ) {
-    return this.service.convocarAnfitriones(req.user.client_id, id, req.user.sub, dto.items, dto.comentario);
+    return this.service.convocarAnfitriones(req.user.client_id, id, req.user.sub, dto.items, dto.comentario, dto.force ?? false);
   }
 }

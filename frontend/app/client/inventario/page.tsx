@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/layout/app-shell";
 import { api } from "@/lib/api";
-import { Plus, X, Package, Warehouse, ArrowLeftRight } from "lucide-react";
+import { Plus, X, Package, Warehouse, ArrowLeftRight, Upload } from "lucide-react";
 
 const TABS = ["Bodega", "SKUs", "Movimientos", "Devoluciones"];
 
@@ -17,6 +17,15 @@ function getEstado(cantidad: number): string {
   if (cantidad <= 0) return "critico";
   if (cantidad < 5)  return "bajo";
   return "ok";
+}
+
+// Anexo · Cantidades enteras en formato chileno: "4.800" (miles con punto) → 4800.
+// Se limpia a SOLO dígitos antes de parsear porque parseInt("4.800") = 4 (para en el
+// punto) → truncaba la cantidad y disparaba falsas alertas de stock bajo. NaN si no hay
+// dígitos. Mismo criterio que parseCLP del formulario de proyecto (B1).
+function parseEntero(v: string): number {
+  const digits = String(v ?? "").replace(/[^\d]/g, "");
+  return digits ? parseInt(digits, 10) : NaN;
 }
 
 const fieldStyle = { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", fontSize: 13, outline: "none", boxSizing: "border-box" as any };
@@ -72,7 +81,7 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
     if (!form.nombre.trim()) return;
     setSaving(true); setError("");
     try {
-      await api.post("/v1/app/skus", { nombre: form.nombre, codigo: form.codigo || undefined, min_stock: parseInt(form.min_stock) || 5 });
+      await api.post("/v1/app/skus", { nombre: form.nombre, codigo: form.codigo || undefined, min_stock: parseEntero(form.min_stock) || 5 });
       onDone(); onClose();
     } catch (e: any) { setError(e.message ?? "Error"); } finally { setSaving(false); }
   };
@@ -87,7 +96,7 @@ function SkuModal({ onClose, onDone }: { onClose: () => void; onDone: () => void
         <div className="p-5 space-y-3">
           <div><label style={labelStyle}>Nombre *</label><input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Afiche A3" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Codigo SKU</label><input value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} placeholder="MAT-001" style={fieldStyle} /></div>
-          <div><label style={labelStyle}>Stock minimo</label><input type="number" value={form.min_stock} onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))} style={fieldStyle} /></div>
+          <div><label style={labelStyle}>Stock minimo</label><input type="text" inputMode="numeric" value={form.min_stock} onChange={e => setForm(f => ({ ...f, min_stock: e.target.value.replace(/[^\d.]/g, "") }))} style={fieldStyle} /></div>
           {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
         <div className="flex gap-2 px-5 pb-5">
@@ -114,8 +123,14 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
   const requiereProyecto = TIPOS_CON_PROYECTO.has(form.tipo);
   // El traslado exige ambas bodegas (origen y destino); el backend las requiere.
   const esTraslado = form.tipo === "transfer";
-  const canSave = !!form.sku_id && !!form.cantidad
+  // T12 · Bodega obligatoria en los movimientos de depósito (entrada/salida/devolución):
+  // sin ella el movimiento no dice dónde está el stock. Consumo/merma NO la requieren.
+  const requiereBodega = ["entrada", "salida", "devolucion"].includes(form.tipo);
+  // Anexo · validar la cantidad PARSEADA (chilena) > 0, no el string crudo: "4.800" es
+  // válido (→4800), pero "0"/""/"abc" no deben habilitar Guardar.
+  const canSave = !!form.sku_id && parseEntero(form.cantidad) > 0
     && (!requiereProyecto || !!form.proyecto_destino_id)
+    && (!requiereBodega || !!form.bodega_origen_id)
     && (!esTraslado || (!!form.bodega_origen_id && !!form.bodega_destino_id));
 
   const save = async () => {
@@ -127,7 +142,7 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
         bodega_origen_id: form.bodega_origen_id || undefined,
         bodega_destino_id: form.bodega_destino_id || undefined,
         tipo: form.tipo,
-        cantidad: parseInt(form.cantidad),
+        cantidad: parseEntero(form.cantidad),
         observacion: form.observacion || undefined,
         proyecto_destino_id: form.proyecto_destino_id || undefined,
       });
@@ -171,9 +186,9 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label style={labelStyle}>Bodega origen</label>
+              <label style={labelStyle}>Bodega origen {(requiereBodega || esTraslado) ? "*" : ""}</label>
               <select value={form.bodega_origen_id} onChange={e => setForm(f => ({ ...f, bodega_origen_id: e.target.value }))} style={fieldStyle}>
-                <option value="">Ninguna</option>
+                <option value="">{(requiereBodega || esTraslado) ? "Selecciona una bodega…" : "Ninguna"}</option>
                 {bodegas.map(b => <option key={b.id} value={b.id}>{b.nombre}</option>)}
               </select>
             </div>
@@ -185,7 +200,7 @@ function MovimientoModal({ onClose, onDone, bodegas, skus, projects }: { onClose
               </select>
             </div>
           </div>
-          <div><label style={labelStyle}>Cantidad *</label><input type="number" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} placeholder="0" style={fieldStyle} /></div>
+          <div><label style={labelStyle}>Cantidad *</label><input type="text" inputMode="numeric" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value.replace(/[^\d.]/g, "") }))} placeholder="0" style={fieldStyle} /></div>
           <div><label style={labelStyle}>Observacion</label><input value={form.observacion} onChange={e => setForm(f => ({ ...f, observacion: e.target.value }))} placeholder="Motivo del movimiento..." style={fieldStyle} /></div>
           {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
         </div>
@@ -218,6 +233,29 @@ export default function InventarioPage() {
   const [rejectModal, setRejectModal] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // T13 — importar SKUs desde Excel: leer el archivo como base64 y postear JSON
+  // (mismo patrón Fastify-safe que el resto de uploads). Muestra el resumen.
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permitir re-subir el mismo archivo
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const file_base64 = String(reader.result).split(",")[1] ?? "";
+        const res = await api.post<any>("/v1/app/skus/import", { file_base64 });
+        const d = res?.data ?? res;
+        alert(`Importación: ${d.creados ?? 0} creados · ${d.omitidos ?? 0} omitidos · ${d.errores?.length ?? 0} con error.`);
+        fetchAll();
+      } catch (err: any) {
+        alert(err?.message ?? "Error al importar el Excel");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const fetchAll = () => {
     setLoading(true);
@@ -269,6 +307,11 @@ export default function InventarioPage() {
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
               <ArrowLeftRight size={13} /> Movimiento
             </button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} style={{ display: "none" }} />
+            <button onClick={() => fileInputRef.current?.click()}
+              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+              <Upload size={13} /> Importar Excel
+            </button>
             <button onClick={() => setShowSkuModal(true)}
               style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--secondary)", color: "var(--foreground)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
               <Package size={13} /> + SKU
@@ -309,7 +352,7 @@ export default function InventarioPage() {
           ) : (
             <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
               <table className="w-full border-collapse">
-                <thead><tr><TH c="SKU" /><TH c="Bodega" /><TH c="Cliente final" /><TH c="Cantidad" /><TH c="Estado" /></tr></thead>
+                <thead><tr><TH c="Nombre" /><TH c="Bodega" /><TH c="Cliente final" /><TH c="Cantidad" /><TH c="Estado" /></tr></thead>
                 <tbody>
                   {filteredInv.map((item: any, i: number) => {
                     const estado = getEstado(item.cantidad ?? 0);
@@ -375,7 +418,7 @@ export default function InventarioPage() {
           ) : (
             <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
               <table className="w-full border-collapse">
-                <thead><tr><TH c="SKU" /><TH c="Tipo" /><TH c="Cantidad" /><TH c="Origen" /><TH c="Destino" /><TH c="Fecha" /></tr></thead>
+                <thead><tr><TH c="Nombre" /><TH c="Tipo" /><TH c="Cantidad" /><TH c="Origen" /><TH c="Destino" /><TH c="Fecha" /></tr></thead>
                 <tbody>
                   {filteredMov.map((m: any, i: number) => (
                     <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}

@@ -3,10 +3,10 @@ import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 
-// El constructor de GmailService programa un cron real (cada 10s). Lo neutralizamos.
+// El constructor de MailIngestionService programa un cron real (cada 10s). Lo neutralizamos.
 jest.mock('node-cron', () => ({ schedule: jest.fn() }));
 
-import { GmailService } from '../src/modules/gmail/gmail.service';
+import { MailIngestionService } from '../src/modules/mail/mail-ingestion.service';
 import { InvoicesService } from '../src/modules/invoices/invoices.service';
 
 /**
@@ -31,29 +31,31 @@ describe('C3 — Gmail OAuth signed state', () => {
     // 4º dep (OperatorNotifierService): este test solo ejercita el firmado de state
     // (usa config.JWT_SECRET), así que un stub vacío alcanza.
     const notifier = {} as any;
-    svc = new GmailService(config, ds, invoices, notifier);
+    // 5º dep: registry de providers vacío — este test solo ejercita el firmado de
+    // state (usa config.JWT_SECRET), que es provider-agnóstico.
+    svc = new MailIngestionService(config, ds, invoices, notifier, []);
   });
 
-  it('roundtrip: verifyState(buildState(clientId)) === clientId', () => {
+  it('roundtrip: verifyState(buildState(clientId)).clientId === clientId', () => {
     const clientId = randomUUID();
-    const state = svc.buildState(clientId);
-    expect(svc.verifyState(state)).toBe(clientId);
+    const state = svc.buildState(clientId, 'gmail');
+    expect(svc.verifyState(state).clientId).toBe(clientId);
   });
 
   it('firma adulterada → rechaza', () => {
     const clientId = randomUUID();
-    const state = svc.buildState(clientId);
+    const state = svc.buildState(clientId, 'gmail');
     const tampered = state.slice(0, -2) + (state.endsWith('aa') ? 'bb' : 'aa');
     expect(() => svc.verifyState(tampered)).toThrow();
   });
 
   it('state firmado con OTRO secreto → rechaza', () => {
-    const forged = craftState('otro-secreto-cualquiera', { c: randomUUID(), n: 'aa', e: Date.now() + 60000 });
+    const forged = craftState('otro-secreto-cualquiera', { c: randomUUID(), p: 'gmail', n: 'aa', e: Date.now() + 60000 });
     expect(() => svc.verifyState(forged)).toThrow();
   });
 
   it('state expirado → rechaza', () => {
-    const expired = craftState(SECRET, { c: randomUUID(), n: 'aa', e: Date.now() - 1000 });
+    const expired = craftState(SECRET, { c: randomUUID(), p: 'gmail', n: 'aa', e: Date.now() - 1000 });
     expect(() => svc.verifyState(expired)).toThrow();
   });
 
@@ -63,6 +65,6 @@ describe('C3 — Gmail OAuth signed state', () => {
   });
 
   it('handleCallback con state inválido rechaza ANTES de tocar Google', async () => {
-    await expect(svc.handleCallback('any-code', 'bad.state')).rejects.toThrow();
+    await expect(svc.handleCallback('gmail', 'any-code', 'bad.state')).rejects.toThrow();
   });
 });

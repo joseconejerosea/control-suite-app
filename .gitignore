@@ -5,3 +5,7 @@ dist/
 *.log
 uploads/
 context/
+
+# Local test artifacts (do not commit)
+docker-compose.override.yml
+.playwright-mcp/

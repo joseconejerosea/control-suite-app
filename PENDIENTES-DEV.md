@@ -26,8 +26,7 @@ REDIS_TLS=true
 
 | Variable | Valor | De dónde sale |
 |----------|-------|---------------|
-| `WHATSAPP_PHONE_NUMBER_ID` | `1051291648061070` | Meta → WhatsApp → API Setup → "Phone number ID" |
-| `META_WABA_ID` | `1341456194674619` | Meta → WhatsApp → API Setup → "WhatsApp Business Account ID" |
+| `WHATSAPP_PHONE_NUMBER_ID` | `1051291648061070` | Meta → WhatsApp → API Setup → "Phone number ID" (número global único) |
 | `META_APP_SECRET` | `e52f9eaf17778c4b7eee35856e0cc625` | Meta → App Settings → Basic → "App secret" |
 | `WHATSAPP_VERIFY_TOKEN` | `change-me` | Lo inventás vos (va igual en la config del Webhook en Meta) |
 | `WHATSAPP_ACCESS_TOKEN` | ⚠️ **REGENERAR** | Meta → WhatsApp → API Setup → "Temporary access token" |
@@ -67,7 +66,6 @@ set_env() {
 
 set_env REDIS_TLS 'true'
 set_env WHATSAPP_PHONE_NUMBER_ID '1051291648061070'
-set_env META_WABA_ID '1341456194674619'
 set_env META_APP_SECRET 'e52f9eaf17778c4b7eee35856e0cc625'
 set_env WHATSAPP_VERIFY_TOKEN 'change-me'
 set_env ANTHROPIC_API_KEY 'PEGAR_API_KEY'
@@ -92,7 +90,7 @@ docker compose logs -f --tail 20 backend   # el ECONNRESET debe PARAR
 
 Cargar en **GitHub → Secrets and variables → Actions**:
 - `META_APP_SECRET`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`,
-  `WHATSAPP_VERIFY_TOKEN`, `META_WABA_ID`, `ANTHROPIC_API_KEY`
+  `WHATSAPP_VERIFY_TOKEN`, `ANTHROPIC_API_KEY`
 
 Y agregar `REDIS_TLS=true` al bloque del `.env` en `.github/workflows/deploy-backend.yml`
 (o como Variable/Secret), sino el próximo deploy revive el ECONNRESET.

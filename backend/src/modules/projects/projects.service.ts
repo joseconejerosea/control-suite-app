@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { isISO8601 } from 'class-validator';
+import { DataSource, Not, FindOptionsWhere } from 'typeorm';
 import { TenantRepository } from '../../common/repositories/tenant.repository';
 import { Project } from './project.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -9,6 +10,85 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappOutputService } from '../whatsapp/whatsapp-output.service';
 import { StockReturnsService } from '../movimientos-pop/stock-returns.service';
 import { UserRole } from '../../common/enums/user-role.enum';
+
+// ── B5: Project-scoped location sync ──────────────────────────────────────────
+
+export interface LocaleEntry {
+  nombre?: string | null;
+  direccion?: string | null;
+}
+
+/**
+ * B5 — Synchronises a project's PDV list into the `locations` table.
+ *
+ * Rules:
+ *  - INSERT new locations (by lower(name)) that don't exist yet for this project.
+ *  - UPDATE address if a location with the same lower(name) already exists.
+ *  - DEACTIVATE (status='inactive') any project-linked location whose lower(name)
+ *    is no longer present in `locales`. Does NOT DELETE — preserves activation FKs.
+ *  - Skips entries with empty or null `nombre`.
+ *
+ * Exported as a standalone async function so it can be unit-tested without
+ * NestJS/DI bootstrap and reused from both ProjectsService and ProjectInboxService.
+ *
+ * @param ds        The DataSource (or a QueryRunner's manager) to run queries on.
+ * @param clientId  The tenant (client_id) scope.
+ * @param projectId The project whose PDVs are being synced.
+ * @param locales   Array of {nombre, direccion} entries from config.locales or ia_extracted.locales.
+ */
+export async function syncProjectLocations(
+  ds: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> },
+  clientId: string,
+  projectId: string,
+  locales: LocaleEntry[],
+): Promise<void> {
+  // Normalise and filter out empty/null entries
+  const validLocales = locales
+    .map((l) => ({
+      nombre: (l.nombre ?? '').trim(),
+      direccion: (l.direccion ?? '').trim() || null,
+    }))
+    .filter((l) => l.nombre !== '');
+
+  // 1. Fetch current project-linked location rows (id + lower_name) for deactivation check
+  const existing = await ds.query(
+    `SELECT id, lower(name) AS lower_name
+       FROM locations
+      WHERE client_id = $1
+        AND project_id = $2`,
+    [clientId, projectId],
+  ) as { id: string; lower_name: string }[];
+
+  // 2. Upsert each valid locale: INSERT … ON CONFLICT (client_id, project_id, lower(name))
+  //    WHERE project_id IS NOT NULL → UPDATE address (re-activate too in case it was inactive).
+  for (const locale of validLocales) {
+    await ds.query(
+      `INSERT INTO locations (client_id, project_id, name, address, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       ON CONFLICT (client_id, project_id, lower(name))
+         WHERE project_id IS NOT NULL
+         DO UPDATE SET
+           address    = EXCLUDED.address,
+           status     = 'active',
+           updated_at = NOW()`,
+      [clientId, projectId, locale.nombre, locale.direccion],
+    );
+  }
+
+  // 3. Deactivate locations whose name is no longer in the current locales list.
+  //    Compare lower(name) to cover case differences between runs.
+  const currentLowerNames = new Set(validLocales.map((l) => l.nombre.toLowerCase()));
+  const toDeactivate = existing.filter((row) => !currentLowerNames.has(row.lower_name));
+
+  for (const row of toDeactivate) {
+    await ds.query(
+      `UPDATE locations
+          SET status = 'inactive', updated_at = NOW()
+        WHERE id = $1`,
+      [row.id],
+    );
+  }
+}
 
 export interface ProjectSummary {
   project_id:       string;
@@ -27,6 +107,62 @@ interface ConvocatoriaItem {
   local_nombre?:    string;
   local_direccion?: string;
 }
+
+/**
+ * B3 — guard de fechas de convocatoria.
+ *
+ * La validación de `dia` se sacó del ValidationPipe global (emitía un mensaje
+ * crudo con prefijo `items.N.` y lo repetía una vez por anfitrión). En su lugar
+ * validamos a mano ambos flujos (enviarConvocatoria / convocarAnfitriones) con
+ * ESTE helper, que lanza UNA sola vez un mensaje limpio y accionable en cuanto
+ * cualquier item tiene la fecha ausente o no-ISO8601. Un único throw evita la
+ * duplicación por comas del pipe y no lleva prefijo de propiedad.
+ */
+export function assertConvocatoriaDatesValid(
+  items: Array<{ dia?: string }> | undefined | null,
+): void {
+  if (items?.some((it) => !it.dia || !isISO8601(it.dia))) {
+    throw new BadRequestException('Falta la fecha o no es válida. Revísala antes de enviar.');
+  }
+}
+
+export interface CalendarioConvocatoria {
+  proyecto_id:      string;
+  proyecto_nombre:  string;
+  persona_id:       string;
+  persona_nombre:   string | null;
+  dia:              string;
+  estado:           string;
+  local_nombre:     string | null;
+  local_direccion:  string | null;
+}
+
+export interface CalendarioGap {
+  proyecto_id:      string;
+  proyecto_nombre:  string;
+  dia:              string;
+  local_nombre:     string;
+  local_direccion:  string | null;
+  tiene_pendientes: boolean;
+  aprobado:         boolean;
+}
+
+/** Días ISO (YYYY-MM-DD) inclusive entre dos fechas; en UTC para no driftear por TZ. */
+function eachISODayInclusive(startISO: string, endISO: string): string[] {
+  const out: string[] = [];
+  const cur = new Date(startISO + 'T00:00:00Z');
+  const end = new Date(endISO + 'T00:00:00Z');
+  if (isNaN(cur.getTime()) || isNaN(end.getTime()) || cur > end) return out;
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+// Comparar fechas ISO (YYYY-MM-DD) es seguro lexicográficamente.
+const maxISODate = (a: string, b: string): string => (a >= b ? a : b);
+const minISODate = (a: string, b: string): string => (a <= b ? a : b);
 
 @Injectable()
 export class ProjectsService {
@@ -48,7 +184,7 @@ export class ProjectsService {
     if (dto.start_date && dto.end_date && dto.start_date > dto.end_date) {
       throw new BadRequestException('start_date cannot be after end_date');
     }
-    return this.repo.create(clientId, {
+    const project = await this.repo.create(clientId, {
       name:        dto.name,
       description: dto.description ?? null,
       objectives:  dto.objectives ?? null,
@@ -58,10 +194,32 @@ export class ProjectsService {
       budget:      dto.budget ?? null,
       config:      dto.config ?? null,
     });
+
+    // B5 — Sync project-scoped locations from config.locales (if present)
+    await this.syncLocationsFromConfig(clientId, project.id, project.config);
+
+    return project;
   }
 
-  async findAll(clientId: string): Promise<Project[]> {
-    return this.repo.findAll(clientId, { order: { created_at: 'DESC' } });
+  // Matriz v1.3 · "eliminar proyecto" (soft-delete): la lista excluye los archivados por
+  // defecto; con { archived: true } devuelve SOLO los archivados (para la vista "Ver
+  // archivados" y restaurarlos). El historial se conserva — archivar solo cambia el status.
+  async findAll(clientId: string, opts?: { archived?: boolean }): Promise<Project[]> {
+    return this.repo.findAll(clientId, {
+      where: { status: opts?.archived ? 'archived' : Not('archived') } as FindOptionsWhere<Project>,
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  /**
+   * Matriz v1.3 · archiva/desarchiva un proyecto (soft-delete reversible). NO usa el update()
+   * general para evitar sus efectos colaterales (invalidación de aprobación, sync de locales):
+   * archivar solo cambia el status. findOne valida existencia + tenant (404 si no corresponde).
+   * Restaurar vuelve a 'active'.
+   */
+  async setArchived(clientId: string, id: string, archived: boolean): Promise<Project> {
+    await this.findOne(clientId, id);
+    return this.repo.update(clientId, id, { status: archived ? 'archived' : 'active' });
   }
 
   async findOne(clientId: string, id: string): Promise<Project> {
@@ -95,6 +253,11 @@ export class ProjectsService {
     // F4 Fase 4: editar un proyecto cuya convocatoria YA se envió invalida la
     // aprobación → hay que re-aprobar antes de re-enviar (el gate vuelve a cerrar).
     await this.invalidarAprobacionSiEditadoPostEnvio(clientId, id, dto);
+
+    // B5 — Sync project-scoped locations if config (and therefore locales) changed.
+    if (dto.config !== undefined) {
+      await this.syncLocationsFromConfig(clientId, id, updated.config);
+    }
 
     return updated;
   }
@@ -146,15 +309,94 @@ export class ProjectsService {
     }
   }
 
+  // ── B5: Project-scoped PDV sync ───────────────────────────────────────────
+
+  /**
+   * Extracts locales from project config (root-level AND ia_extracted) and calls
+   * syncProjectLocations. Runs silently on errors to avoid breaking the main flow.
+   */
+  private async syncLocationsFromConfig(
+    clientId: string,
+    projectId: string,
+    config: Record<string, unknown> | null | undefined,
+  ): Promise<void> {
+    if (!config) return;
+    const cfg = config as Record<string, any>;
+    const rootLocales: LocaleEntry[] = Array.isArray(cfg.locales) ? cfg.locales : [];
+    const iaLocales: LocaleEntry[]   = Array.isArray(cfg.ia_extracted?.locales) ? cfg.ia_extracted.locales : [];
+    const merged = [...rootLocales, ...iaLocales];
+    // JB-001 — Do NOT early-return on an empty merged list: syncProjectLocations
+    // handles empty correctly by deactivating every previously-synced PDV. Skipping
+    // it here would leave cleared PDVs active forever. Always call the sync.
+    await syncProjectLocations(this.dataSource, clientId, projectId, merged).catch((err) =>
+      this.logger.warn(`[B5] syncProjectLocations failed project=${projectId}: ${err.message}`),
+    );
+  }
+
+  /**
+   * B5 — Returns active PDVs for the project, for the dropdown.
+   * Delegates to raw SQL via dataSource to stay RLS-safe.
+   */
+  async getProjectLocations(
+    clientId: string,
+    projectId: string,
+  ): Promise<{ id: string; name: string; address: string | null }[]> {
+    return this.dataSource.query(
+      `SELECT id, name, address
+         FROM locations
+        WHERE client_id = $1
+          AND project_id = $2
+          AND status = 'active'
+        ORDER BY name ASC`,
+      [clientId, projectId],
+    );
+  }
+
+  // P15 (v1.9): alta inline de un PDV para un proyecto. Valida que el proyecto sea del
+  // tenant (findOne tira 404 si no), luego upsertea la ubicación con la MISMA llave que
+  // syncProjectLocations (client_id, project_id, lower(name)) para no duplicar si ya existe
+  // ni chocar con lo sembrado desde el documento. Reactiva una inactiva del mismo nombre.
+  async createProjectLocation(
+    clientId: string,
+    projectId: string,
+    name: string,
+    address: string | null,
+  ): Promise<{ id: string; name: string; address: string | null }> {
+    await this.findOne(clientId, projectId);
+    const rows = await this.dataSource.query(
+      `INSERT INTO locations (client_id, project_id, name, address, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       ON CONFLICT (client_id, project_id, lower(name))
+         WHERE project_id IS NOT NULL
+         DO UPDATE SET
+           address    = EXCLUDED.address,
+           status     = 'active',
+           updated_at = NOW()
+       RETURNING id, name, address`,
+      [clientId, projectId, name.trim(), address?.trim() || null],
+    );
+    return rows[0];
+  }
+
   async summary(clientId: string, id: string): Promise<ProjectSummary> {
     const project  = await this.findOne(clientId, id);
+    // Activation counting mirrors ActivationsService.findByProject: an activation
+    // belongs to the project when its project_id matches OR its campaign_id belongs
+    // to one of the project's campaigns (UI activations set campaign_id, not project_id).
     const [counts] = await this.dataSource.query(
       `SELECT
          (SELECT COUNT(*)::int FROM campaigns   WHERE client_id=$1 AND project_id=$2) AS total_campaigns,
-         (SELECT COUNT(*)::int FROM activations WHERE client_id=$1 AND project_id=$2) AS total_activations,
+         (SELECT COUNT(*)::int FROM activations a
+           WHERE a.client_id=$1
+             AND (a.project_id=$2
+                  OR a.campaign_id IN (SELECT id FROM campaigns
+                                        WHERE project_id=$2 AND client_id=$1)))       AS total_activations,
          (SELECT COUNT(DISTINCT p.id)::int
             FROM promoters p JOIN activations a ON a.promoter_id=p.id
-           WHERE p.client_id=$1 AND a.project_id=$2)                                  AS active_promoters,
+           WHERE p.client_id=$1
+             AND (a.project_id=$2
+                  OR a.campaign_id IN (SELECT id FROM campaigns
+                                        WHERE project_id=$2 AND client_id=$1)))       AS active_promoters,
          COALESCE((SELECT SUM(budget)::numeric FROM campaigns
                     WHERE client_id=$1 AND project_id=$2),0)::text                    AS budget_used`,
       [clientId, id],
@@ -324,6 +566,9 @@ export class ProjectsService {
     items:     ConvocatoriaItem[],
     modo:      'ai' | 'manual',
   ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    // B3: valida fechas antes de tocar la DB — UN solo mensaje limpio.
+    assertConvocatoriaDatesValid(items);
+
     const [proyecto] = await this.dataSource.query(
       `SELECT name, aprobado_por_user_id, aprobado_at FROM projects WHERE id=$1 AND client_id=$2`,
       [projectId, clientId],
@@ -384,16 +629,27 @@ export class ProjectsService {
           direccion:      item.local_direccion ?? 'Por confirmar',
         });
 
-        // Actualizar convocatoria en DB
-        await this.dataSource.query(
-          `UPDATE convocatorias
-           SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
-           WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
-          [clientId, projectId, item.persona_id, item.dia],
-        ).catch(() => {});
-
-        if (ok) { enviados++; } else { errores++; }
-        detalle.push({ persona_id: item.persona_id, dia: item.dia, ok });
+        // El estado sólo avanza a 'enviada' cuando Meta ACEPTÓ el envío. Si el
+        // send falló (rechazo de Meta o falta de plantilla), la convocatoria queda
+        // 'pendiente' (reintentable) en vez de mentirle a la UI un "enviada".
+        if (ok) {
+          await this.dataSource.query(
+            `UPDATE convocatorias
+             SET mensaje_enviado_at=NOW(), estado='enviada', updated_at=NOW()
+             WHERE client_id=$1 AND proyecto_id=$2 AND persona_id=$3 AND dia=$4`,
+            [clientId, projectId, item.persona_id, item.dia],
+          ).catch(() => {});
+          enviados++;
+          detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: true });
+        } else {
+          errores++;
+          detalle.push({
+            persona_id: item.persona_id,
+            dia: item.dia,
+            ok: false,
+            error: 'El envío por WhatsApp falló (Meta lo rechazó o falta la plantilla).',
+          });
+        }
       } catch (err: any) {
         errores++;
         detalle.push({ persona_id: item.persona_id, dia: item.dia, ok: false, error: err?.message ?? 'Error al enviar' });
@@ -402,6 +658,91 @@ export class ProjectsService {
 
     this.logger.log(`[F4] Convocatoria enviada proyecto=${projectId} enviados=${enviados} errores=${errores}`);
     return { enviados, errores, detalle };
+  }
+
+  // ── T9: Calendario global (read-only) ─────────────────────────────────────
+  // Vista de monitoreo cross-proyecto: agrega las convocatorias de TODOS los
+  // proyectos del tenant en [desde,hasta] y deriva los "puntos sin cubrir". Un
+  // local (config.ia_extracted.locales) está cubierto un día si hay >=1 convocatoria
+  // ese día con ese local_nombre en estado 'confirmada'; si no, es un gap.
+  // tiene_pendientes marca si hay filas 'pendiente' (asignadas sin enviar) que el
+  // atajo "Convocar" del calendario puede despachar en el momento.
+  async getCalendarioGlobal(
+    clientId: string,
+    desde: string,
+    hasta: string,
+  ): Promise<{
+    desde: string;
+    hasta: string;
+    convocatorias: CalendarioConvocatoria[];
+    gaps: CalendarioGap[];
+  }> {
+    const desdeISO = String(desde).slice(0, 10);
+    const hastaISO = String(hasta).slice(0, 10);
+
+    const convocatorias: CalendarioConvocatoria[] = await this.dataSource.query(
+      `SELECT c.proyecto_id,
+              pr.name AS proyecto_nombre,
+              c.persona_id,
+              COALESCE(NULLIF(TRIM(COALESCE(p.first_name,'') || ' ' || COALESCE(p.last_name,'')), ''), p.name) AS persona_nombre,
+              c.dia::text AS dia, c.estado, c.local_nombre, c.local_direccion
+         FROM convocatorias c
+         JOIN projects pr ON pr.id = c.proyecto_id AND pr.client_id = c.client_id
+         LEFT JOIN promoters p ON p.id = c.persona_id AND p.client_id = c.client_id
+        WHERE c.client_id = $1 AND c.dia >= $2 AND c.dia <= $3
+          AND COALESCE(pr.status,'') <> 'closed'
+        ORDER BY c.dia, pr.name`,
+      [clientId, desdeISO, hastaISO],
+    );
+
+    const proyectos: Array<{
+      id: string; name: string; start_date: string | null; end_date: string | null; config: any; aprobado: boolean;
+    }> = await this.dataSource.query(
+      `SELECT id, name, start_date::text AS start_date, end_date::text AS end_date, config,
+              (aprobado_por_user_id IS NOT NULL AND aprobado_at IS NOT NULL) AS aprobado
+         FROM projects
+        WHERE client_id = $1 AND COALESCE(status,'') <> 'closed'`,
+      [clientId],
+    );
+
+    const normLocal = (s: string | null | undefined): string => (s ?? '').trim().toLowerCase();
+
+    const gaps: CalendarioGap[] = [];
+    for (const pr of proyectos) {
+      if (!pr.start_date || !pr.end_date) continue; // sin rango no se puede derivar cobertura
+      const cfg = typeof pr.config === 'string' ? JSON.parse(pr.config) : (pr.config ?? {});
+      const ia = cfg?.ia_extracted ?? cfg ?? {};
+      const locales: any[] = Array.isArray(ia.locales) ? ia.locales : [];
+      if (!locales.length) continue; // sin puntos cargados no hay gap derivable
+
+      const rangoDesde = maxISODate(String(pr.start_date).slice(0, 10), desdeISO);
+      const rangoHasta = minISODate(String(pr.end_date).slice(0, 10), hastaISO);
+
+      for (const dia of eachISODayInclusive(rangoDesde, rangoHasta)) {
+        for (const local of locales) {
+          const localNombre: string | null = local?.nombre ?? null;
+          if (!localNombre) continue;
+          const celda = convocatorias.filter(
+            (c) =>
+              c.proyecto_id === pr.id &&
+              String(c.dia).slice(0, 10) === dia &&
+              normLocal(c.local_nombre) === normLocal(localNombre),
+          );
+          if (celda.some((c) => c.estado === 'confirmada')) continue; // cubierto
+          gaps.push({
+            proyecto_id:      pr.id,
+            proyecto_nombre:  pr.name,
+            dia,
+            local_nombre:     localNombre,
+            local_direccion:  local?.direccion ?? null,
+            tiene_pendientes: celda.some((c) => c.estado === 'pendiente'),
+            aprobado:         !!pr.aprobado,
+          });
+        }
+      }
+    }
+
+    return { desde: desdeISO, hasta: hastaISO, convocatorias, gaps };
   }
 
   // ── F4: Sugerencia de anfitriones desde el perfil que extrajo la IA ────────
@@ -437,7 +778,7 @@ export class ProjectsService {
       const rolPerfil = String(perfil?.rol ?? '').trim().toLowerCase();
       const cantidad  = Number(perfil?.cantidad) > 0 ? Number(perfil.cantidad) : 1;
       const matches = (disponibles as any[]).filter(
-        (p) => !usados.has(p.id) && (!rolPerfil || String(p.rol ?? '').toLowerCase().includes(rolPerfil)),
+        (p) => !usados.has(p.id) && (!rolPerfil || String(p.rol ?? '').trim().toLowerCase().includes(rolPerfil)),
       );
       for (const p of matches.slice(0, cantidad)) {
         usados.add(p.id);
@@ -455,11 +796,57 @@ export class ProjectsService {
   // El click de "Aprobar y enviar" ES la aprobación humana (gate F4). Reusa
   // aprobarProyecto (setea el gate) → asignarTurno (crea las convocatorias) →
   // enviarConvocatoria (manda WhatsApp). Nada nuevo en el envío.
+  /**
+   * T6 — Anti-choque de anfitrión. Detecta convocatorias NO terminales del MISMO
+   * cliente en OTROS proyectos que colisionan en (persona, día) con los items que
+   * se van a convocar. Una misma persona no puede estar en dos activaciones de
+   * proyectos distintos el mismo día (físicamente imposible). Devuelve las filas
+   * en conflicto (o [] si no hay ninguna) para que el front confirme.
+   */
+  private async detectarChoquesDia(
+    clientId: string, projectId: string, items: ConvocatoriaItem[],
+  ): Promise<unknown[]> {
+    const personaIds: string[] = [];
+    const dias: string[] = [];
+    for (const it of items) {
+      if (!it.dia) continue;
+      personaIds.push(it.persona_id);
+      dias.push(it.dia);
+    }
+    if (!personaIds.length) return [];
+
+    return this.dataSource.query(
+      `SELECT c.id AS convocatoria_id, c.proyecto_id, pr.name AS proyecto_nombre,
+              c.persona_id, COALESCE(NULLIF(TRIM(COALESCE(prom.first_name,'') || ' ' || COALESCE(prom.last_name,'')), ''), prom.name) AS persona_nombre,
+              c.dia::text AS dia, c.local_nombre, c.estado
+         FROM convocatorias c
+         JOIN projects pr ON pr.id = c.proyecto_id
+         LEFT JOIN promoters prom ON prom.id = c.persona_id
+        WHERE c.client_id = $1
+          AND c.proyecto_id <> $2
+          AND c.estado NOT IN ('rechazada','no_show','cancelada','reemplazada')
+          AND (c.persona_id::text, c.dia::text) IN (SELECT p, d FROM unnest($3::text[], $4::text[]) AS t(p, d))`,
+      [clientId, projectId, personaIds, dias],
+    );
+  }
+
   async convocarAnfitriones(
     clientId: string, projectId: string, userId: string,
-    items: ConvocatoriaItem[], comentario?: string,
-  ): Promise<{ enviados: number; errores: number; detalle: unknown[] }> {
+    items: ConvocatoriaItem[], comentario?: string, force = false,
+  ): Promise<{ enviados: number; errores: number; detalle: unknown[]; conflicts?: unknown[] }> {
     if (!items?.length) throw new BadRequestException('No hay anfitriones para convocar');
+
+    // B3: valida fechas antes de aprobar/crear turnos (evita escrituras parciales
+    // con fecha inválida) — UN solo mensaje limpio para todo el lote.
+    assertConvocatoriaDatesValid(items);
+
+    if (!force) {
+      const conflicts = await this.detectarChoquesDia(clientId, projectId, items);
+      if (conflicts.length) {
+        // NO aprobar, NO enviar — devuelve el choque para que el front confirme.
+        return { enviados: 0, errores: 0, detalle: [], conflicts };
+      }
+    }
 
     await this.aprobarProyecto(clientId, projectId, userId, comentario);
 

@@ -7,7 +7,8 @@ import {
   IsNotEmpty,
   Matches,
 } from 'class-validator';
-import { PartialType } from '@nestjs/mapped-types'; 
+import { PartialType } from '@nestjs/mapped-types';
+import { PROMOTOR_ROL_TIPO_MEMBERS } from '../../../common/promoter-role/role-rota.util';
 
 export class CreatePromoterDto {
   @IsString()
@@ -45,6 +46,12 @@ export class CreatePromoterDto {
   @IsOptional()
   @MaxLength(100)
   rol?: string;
+
+  // Rol estructurado. Validado contra el enum; el servidor deriva `rota` de este campo.
+  // `rota` NO es parte del DTO — el cliente no puede establecerlo (spec I-6).
+  @IsOptional()
+  @IsIn([...PROMOTOR_ROL_TIPO_MEMBERS])
+  rol_tipo?: string;
 }
 
-export class UpdatePromoterDto extends PartialType(CreatePromoterDto) {} 
+export class UpdatePromoterDto extends PartialType(CreatePromoterDto) {}

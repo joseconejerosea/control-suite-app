@@ -1,47 +1,24 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { clearAuth } from "@/lib/api";
-import { LogOut, Bell } from "lucide-react";
-import { useState, useEffect } from "react";
-
-const TITLES: Record<string, string> = {
-  "/client/dashboard":     "Dashboard",
-  "/admin/dashboard":      "Admin Dashboard",
-  "/admin/onboarding":     "Client Onboarding",
-  "/admin/clientes":       "Clientes",
-  "/admin/usuarios":       "Usuarios por Cliente",
-  "/admin/eventos":        "Eventos Crudos",
-  "/admin/tickets":        "Tickets",
-  "/admin/monitoreo":      "Monitoreo",
-  "/admin/facturacion":    "Facturación",
-  "/admin/auditoria":      "Auditoría",
-  "/client/projects":      "Proyectos",
-  "/client/campaigns":     "Campañas",
-  "/client/locations":     "Ubicaciones",
-  "/client/promoters":     "Staff",
-  "/client/documents":     "Documentos",
-  "/client/collaborators": "Colaboradores",
-  "/client/reportes":      "Reportes Internos",
-  "/client/inventario":    "Inventario POP",
-};
+import { Zap, LogOut } from "lucide-react";
+import { useState } from "react";
+import NotificationsBell from "@/components/notifications/NotificationsBell";
 
 export default function Topbar() {
-  const pathname = usePathname();
-  const router   = useRouter();
-  const title    = TITLES[pathname] ?? "Control Suite";
-  const [user, setUser] = useState<Record<string, string> | null>(null);
-
-  useEffect(() => {
+  const router = useRouter();
+  const [user] = useState<Record<string, string> | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
       const stored = localStorage.getItem("cs_user");
-      if (stored) setUser(JSON.parse(stored));
-    } catch { /* ignore */ }
-  }, []);
+      return stored ? (JSON.parse(stored) as Record<string, string>) : null;
+    } catch {
+      return null;
+    }
+  });
 
-  const initials = user?.email
-    ? user.email.slice(0, 2).toUpperCase()
-    : "CS";
+  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "CS";
 
   const logout = () => {
     clearAuth();
@@ -49,29 +26,40 @@ export default function Topbar() {
   };
 
   return (
-    <header className="h-14 flex items-center justify-between px-6 border-b flex-shrink-0"
-      style={{ background: "var(--paper)", borderColor: "var(--line)" }}>
-      <h1 className="font-semibold text-sm">{title}</h1>
-
-      <div className="flex items-center gap-3">
-        {/* Notification bell */}
-        <button className="relative p-2 rounded-lg transition-colors"
-          style={{ background: "var(--secondary)", border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}>
-          <Bell size={15} />
-          <span className="absolute top-1 right-1 w-2 h-2 rounded-full" style={{ background: "var(--danger)" }} />
-        </button>
-
-        {/* User avatar */}
-        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold"
-          style={{ background: "var(--ai-gradient)", color: "#fff" }}>
-          {initials}
+    <header
+      className="h-14 flex items-center justify-between px-6 border-b flex-shrink-0"
+      style={{ background: "var(--paper)", borderColor: "var(--line)" }}
+    >
+      {/* Brand */}
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-md flex items-center justify-center bg-gradient-to-br from-indigo-500 to-cyan-500">
+          <Zap size={16} color="#fff" strokeWidth={2.5} />
         </div>
+        <span className="font-semibold text-sm">
+          Control Suite <span className="text-indigo-600">BTL</span>
+        </span>
+      </div>
 
-        {/* Logout */}
-        <button onClick={logout}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors"
-          style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
-          <LogOut size={12} /> Sign out
+      {/* Actions */}
+      <div className="flex items-center gap-3">
+        <NotificationsBell />
+
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+          style={{ border: "none", cursor: "pointer" }}
+        >
+          <div
+            className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white bg-gradient-to-br from-indigo-500 to-cyan-500"
+          >
+            {initials}
+          </div>
+          {user?.email && (
+            <span className="text-xs font-medium max-w-[160px] truncate hidden sm:inline" style={{ color: "var(--foreground)" }}>
+              {user.email}
+            </span>
+          )}
+          <LogOut size={13} style={{ color: "var(--muted-foreground)" }} />
         </button>
       </div>
     </header>

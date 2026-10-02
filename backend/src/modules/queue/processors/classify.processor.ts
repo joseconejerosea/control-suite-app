@@ -10,8 +10,6 @@ import { ProjectResolverService } from '../../project-resolver/project-resolver.
 import { ClarificationService } from '../../project-resolver/clarification.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../../common/tenant/tenant-context';
-import { runWithWaFrom } from '../../whatsapp/whatsapp-send-context';
-import { resolveWaFrom } from '../../whatsapp/resolve-wa-from';
 import { isFinalAttempt } from '../../../common/queue/is-final-attempt';
 import { SAFE_MESSAGES } from '../../../common/exceptions';
 
@@ -37,9 +35,7 @@ export class ClassifyProcessor extends WorkerHost {
   }
 
   async process(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
-    // Responder desde el número por el que entró el mensaje, no el global (JD-B-003).
-    const waFrom = await resolveWaFrom(this.dataSource, job.data.evento_crudo_id, job.data.client_id);
-    await runWithWaFrom(waFrom, () => this.runJob(job));
+    return this.runJob(job);
   }
 
   private async runJob(job: Job<{ evento_crudo_id: string; client_id: string; canal: string }>): Promise<void> {
@@ -177,7 +173,7 @@ export class ClassifyProcessor extends WorkerHost {
     } else {
       // Run ProjectResolverService to improve project assignment
       try {
-        const messageText = ocr_text || payload?.text || '';
+        const messageText = ocr_text || payload?.text || payload?.caption || '';
         const phoneNumber = payload?.from || payload?.phone || null;
         const resolved = await this.projectResolver.resolve(
           messageText, null, client_id, phoneNumber as string,
@@ -223,91 +219,111 @@ export class ClassifyProcessor extends WorkerHost {
     // Record final event status metric
     this.metrics.f1EventsTotal.inc({ client_id, canal, status: processingStatus });
 
-    // Baja confianza → diálogo bidireccional por WhatsApp.
-    //  - Sin proyecto resuelto → se pregunta a qué proyecto pertenece.
-    //    Case 3 (0 proyectos activos) → prompt de creación para MANAGER.
-    //    Case 2 (>1 proyectos activos) → lista con opción de crear para MANAGER.
-    //  - Con proyecto pero campos críticos faltantes → se piden esos datos.
+    // ── Control-flow order (P2 / JD-008) ──────────────────────────────────────
+    // 1. UPDATE (done above)
+    // 2. Ask-project guard — fires on ANY confidence (processed OR low_confidence),
+    //    but NOT on no_clasificable/unclassified (isClassifiable guard, JD-008).
+    //    WhatsApp-only (JD-009): email/non-WA proceeds straight to persist.
+    // 3. Data-clarification — stays gated on low_confidence (I-4 unchanged).
+    // 4. no_clasificable notify
+    // 5. persist
     //
-    // [ADR-12] Short-circuit SCOPE: si resolved_project_id está seteado, el proyecto ya
-    // fue resuelto por una decisión humana previa. Se saltea SÓLO la resolución de proyecto
-    // y la clarificación/creación de proyecto (Case 3 / Case 2), PERO se PRESERVA la
-    // data-clarification: una factura ya asignada a proyecto pero con monto/fecha/razón_social
-    // faltantes debe seguir pidiendo esos datos. Como resolvedProjectId ya seteó
-    // proyecto_id_sugerido arriba, el flujo entra naturalmente en la rama else (data).
-    if (processingStatus === 'low_confidence') {
-      const phoneNumber = payload?.from as string;
-      if (phoneNumber && canal === 'whatsapp') {
-        try {
-          // [ADR-12] Con resolved_project_id, proyecto_id_sugerido ya está seteado →
-          // esta rama de resolución/clarificación de proyecto NO corre. El guard explícito
-          // documenta la intención y evita ofrecer crear proyecto sobre un evento ya resuelto.
-          if (!resolvedProjectId && !classification.proyecto_id_sugerido) {
-            const activeProjects = await this.dataSource.query(
-              `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
-              [client_id],
-            );
+    // [ADR-12] Short-circuit: when resolved_project_id is set, proyecto_id_sugerido
+    // was already set above → the !proyecto_id_sugerido guard in step 2 is false →
+    // ask-project skipped; data-clarification may still fire (step 3). ADR-12 preserved.
 
-            if (activeProjects.length === 0) {
-              // [Case 3] No active projects — offer project creation to MANAGER.
-              const userLang = await this.clarificationService.getUserLanguageForCreate(phoneNumber, client_id);
-              const isManager = await this.clarificationService.canCreateProject(phoneNumber, client_id);
-              if (isManager) {
-                await this.clarificationService.beginProjectCreate({
-                  eventoCrudoId: evento_crudo_id,
-                  clientId: client_id,
-                  from: phoneNumber,
-                  lang: userLang,
-                });
-                this.logger.log(`[F1Classify] Case 3: beginProjectCreate for ${evento_crudo_id}`);
-              } else {
-                // Non-MANAGER: send denial/guidance message
-                const denialMsg = userLang === 'en'
-                  ? 'No active projects found. Please contact your coordinator to create a project first.'
-                  : 'No hay proyectos activos. Contactá a tu coordinador para crear un proyecto primero.';
-                await this.wa.sendText(phoneNumber, denialMsg);
-                this.logger.log(`[F1Classify] Case 3: non-MANAGER denial for ${evento_crudo_id}`);
-              }
-              return;
-            } else if (activeProjects.length > 1) {
-              // [Case 2] Multiple projects — show list with optional create sentinel.
-              const userLang = await this.clarificationService.getUserLanguageForCreate(phoneNumber, client_id);
-              const allowCreate = await this.clarificationService.canCreateProject(phoneNumber, client_id);
-              await this.clarificationService.requestProjectClarification({
-                eventoCrudoId: evento_crudo_id,
-                clientId: client_id,
-                phoneNumber,
-                projects: activeProjects,
-                language: userLang,
-                allowCreate,
-              });
-              this.logger.log(`[F1Classify] Case 2: project clarification requested for ${evento_crudo_id} (allowCreate=${allowCreate})`);
-              return;
-            }
-            // Case 1 (length === 1): resolve() already set proyecto_id_sugerido → fall through to persist.
-          } else {
-            // Project resolved but critical fields missing → data clarification.
-            const missing = this.missingCriticalFields(classification.datos_extraidos);
-            if (missing.length) {
-              const userLang = await this.getUserLanguage(phoneNumber, client_id);
-              await this.clarificationService.requestDataClarification({
-                eventoCrudoId: evento_crudo_id,
-                clientId: client_id,
-                phoneNumber,
-                pendingFields: missing,
-                language: userLang,
-              });
-              this.logger.log(`[F1Classify] Data clarification requested for ${evento_crudo_id} (${missing.join(',')})`);
-              return;
-            }
-          }
-        } catch (err: any) {
-          this.logger.warn(`[F1Classify] Clarification trigger error: ${err.message}`);
+    const phone = payload?.from as string | undefined;
+    const isWhatsApp = canal === 'whatsapp' && !!phone;
+    const isClassifiable =
+      classification.tipo !== 'no_clasificable' && processingStatus !== 'unclassified';
+
+    // Step 2: Ask-project guard (P2 — lifted out of low_confidence gate)
+    if (isWhatsApp && isClassifiable && !resolvedProjectId && !classification.proyecto_id_sugerido) {
+      try {
+        // [JD-010] Idempotency: on a BullMQ retry the prior attempt may have already
+        // opened an awaiting_project clarification for THIS evento. Skip re-prompting.
+        const already = await this.clarificationService
+          .hasPendingProjectClarification(evento_crudo_id)
+          .catch(() => false);
+
+        if (already) {
+          // Already asked on a prior attempt: do NOT re-prompt. Return to avoid persisting.
+          return;
         }
+
+        const activeProjects = await this.dataSource.query(
+          `SELECT id, name FROM projects WHERE client_id = $1 AND status = 'active' ORDER BY name LIMIT 10`,
+          [client_id],
+        );
+
+        if (activeProjects.length === 0) {
+          // [Case 3] No active projects — offer project creation to MANAGER.
+          const userLang = await this.clarificationService.getUserLanguageForCreate(phone, client_id);
+          const isManager = await this.clarificationService.canCreateProject(phone, client_id);
+          if (isManager) {
+            await this.clarificationService.beginProjectCreate({
+              eventoCrudoId: evento_crudo_id,
+              clientId: client_id,
+              from: phone,
+              lang: userLang,
+            });
+            this.logger.log(`[F1Classify] Case 3: beginProjectCreate for ${evento_crudo_id}`);
+          } else {
+            // Non-MANAGER: send denial/guidance message
+            const denialMsg = userLang === 'en'
+              ? 'No active projects found. Please contact your coordinator to create a project first.'
+              : 'No hay proyectos activos. Contactá a tu coordinador para crear un proyecto primero.';
+            await this.wa.sendText(phone, denialMsg);
+            this.logger.log(`[F1Classify] Case 3: non-MANAGER denial for ${evento_crudo_id}`);
+          }
+          return;
+        } else if (activeProjects.length > 1) {
+          // [Case 2] Multiple projects — show list with optional create sentinel.
+          const userLang = await this.clarificationService.getUserLanguageForCreate(phone, client_id);
+          const allowCreate = await this.clarificationService.canCreateProject(phone, client_id);
+          await this.clarificationService.requestProjectClarification({
+            eventoCrudoId: evento_crudo_id,
+            clientId: client_id,
+            phoneNumber: phone,
+            projects: activeProjects,
+            language: userLang,
+            allowCreate,
+          });
+          this.logger.log(`[F1Classify] Case 2: project clarification requested for ${evento_crudo_id} (allowCreate=${allowCreate})`);
+          return;
+        }
+        // Case 1 (length === 1): resolver could not set proyecto_id_sugerido.
+        // Fall through to persist (single project, not ambiguous).
+      } catch (err: any) {
+        this.logger.warn(`[F1Classify] Ask-project guard error: ${err.message}`);
       }
     }
 
-    // no_clasificable: el archivo ya quedó guardado (Storage + evento 'unclassified'),
+    // Step 3: Data-clarification — stays gated on low_confidence (I-4 unchanged).
+    // [ADR-12] With resolved_project_id, proyecto_id_sugerido is set → ask-project guard
+    // skipped above; data branch evaluates here naturally.
+    if (processingStatus === 'low_confidence' && isWhatsApp
+        && (resolvedProjectId || classification.proyecto_id_sugerido)) {
+      try {
+        const missing = this.missingCriticalFields(classification.datos_extraidos);
+        if (missing.length) {
+          const userLang = await this.getUserLanguage(phone!, client_id);
+          await this.clarificationService.requestDataClarification({
+            eventoCrudoId: evento_crudo_id,
+            clientId: client_id,
+            phoneNumber: phone!,
+            pendingFields: missing,
+            language: userLang,
+          });
+          this.logger.log(`[F1Classify] Data clarification requested for ${evento_crudo_id} (${missing.join(',')})`);
+          return;
+        }
+      } catch (err: any) {
+        this.logger.warn(`[F1Classify] Data clarification trigger error: ${err.message}`);
+      }
+    }
+
+    // Step 4: no_clasificable: el archivo ya quedó guardado (Storage + evento 'unclassified'),
     // pero NO se persiste como factura. Avisar al remitente por WhatsApp para no
     // dejarlo colgado en "procesando..." tras el "Documento recibido" inicial.
     if (classification.tipo === 'no_clasificable') {

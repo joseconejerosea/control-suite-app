@@ -57,8 +57,8 @@ export class ConvocatoriaClassifyProcessor extends WorkerHost {
   private async handle(data: ConvocatoriaClassifyJob): Promise<void> {
     const { evento_crudo_id, client_id, from, text, wa_message_id } = data;
 
-    // 1. Resolver promotor por teléfono. Comparar por DÍGITOS (igual que el gate
-    //    isAuthorizedSender y F1Persist): el `from` de Meta llega 549... pero el
+    // 1. Resolver promotor por teléfono. Comparar por DÍGITOS (mismo criterio que el
+    //    bot y F1Persist, regexp_replace(phone,'\D','','g')): el `from` de Meta llega 549... pero el
     //    phone guardado tiene '+', espacios, etc. Con match exacto se descartaba
     //    la respuesta del promotor a la convocatoria.
     const digits = normalizePhone(from);

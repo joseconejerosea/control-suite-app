@@ -28,7 +28,10 @@ export class SanitizeInputPipe implements PipeTransform {
   private checkForInjection(text: string): void {
     for (const pattern of INJECTION_PATTERNS) {
       if (pattern.test(text)) {
-        throw new BadRequestException('Input contains disallowed content');
+        // P.v1.9 (copy): mensaje de cara al usuario — claro y en español, no técnico/inglés.
+        throw new BadRequestException(
+          'El texto ingresado contiene contenido no permitido. Revisalo y volvé a intentar.',
+        );
       }
     }
   }

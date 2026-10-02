@@ -13,6 +13,12 @@ export class Rendicion extends TenantBaseEntity {
   @Column({ type: 'uuid', nullable: true })
   project_id: string | null;
 
+  // C2 (v1.9): activación real que agrupa esta rendición. Parte de la llave de agrupación
+  // (junto a persona_id + project_id + periodo) — gastos de la misma activación se juntan.
+  // Nullable: gastos sin activación resoluble caen en la rendición project-only (como hoy).
+  @Column({ type: 'uuid', nullable: true })
+  activation_id: string | null;
+
   @Column({ type: 'varchar', length: 10 })
   periodo: string; // '2026-W43'
 

@@ -109,7 +109,15 @@ async function request<T>(
   const data = await res.json().catch(() => ({}));
   // El backend envuelve los errores como { success: false, error: { message, statusCode } }.
   // Leer error.message primero; data.message queda como fallback para respuestas sin envolver.
-  if (!res.ok) throw new Error(data?.error?.message ?? data?.message ?? `HTTP ${res.status}`);
+  // P.v1.9 (copy): si no hay mensaje, NO exponemos "HTTP 400" crudo — texto claro en español
+  // (el código queda sólo como pista entre paréntesis).
+  if (!res.ok) {
+    throw new Error(
+      data?.error?.message ??
+        data?.message ??
+        `No se pudo completar la operación (error ${res.status}). Intentá de nuevo.`,
+    );
+  }
   return data as T;
 }
 

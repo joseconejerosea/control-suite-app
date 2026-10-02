@@ -21,6 +21,9 @@ type F1Doc = {
   updated_at: string;
   project_name: string | null;
   signed_url?: string | null;
+  // C1 (v1.9): flag de la factura ligada — un reenvío que el soft-check marcó como
+  // posible doble-conteo. Excluido del total en reportes; acá el revisor lo ve antes de aprobar.
+  posible_duplicado?: boolean | null;
 };
 
 type Pagination = { page: number; limit: number; total: number; pages: number };
@@ -317,6 +320,11 @@ export default function DocumentosRevisarPage() {
                             : conf != null ? `${conf}%` : doc.status.replace(/_/g, " ")}
                         </span>
                         <span style={{ fontSize: 10, color: "var(--muted-foreground)", textTransform: "capitalize" }}>{doc.source}</span>
+                        {doc.posible_duplicado && (
+                          <span title="Posible duplicado — excluido del total de gastos" style={{ fontSize: 10, background: "rgba(245,158,11,0.15)", color: "#f59e0b", padding: "2px 8px", borderRadius: 8, fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}>
+                            <AlertTriangle size={9} /> posible duplicado
+                          </span>
+                        )}
                       </div>
                     </div>
                     {datos?.monto_total && (

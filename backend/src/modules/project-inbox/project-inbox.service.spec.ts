@@ -587,6 +587,124 @@ describe('ProjectInboxService · approve() reassignment (B01/B03)', () => {
     expect(requeueCalls.length).toBe(0);
   });
 
+  it('syncs project locations OUTSIDE the QR transaction, AFTER commit (JA-002/JB-002)', async () => {
+    // The location upsert must NOT run inside the open QueryRunner tx: an upsert
+    // failure there poisons the tx (Postgres aborts) and the swallow hides it.
+    // Fix: perform the sync post-commit via this.ds.query, best-effort.
+    const callLog: string[] = [];
+
+    const commitFn = jest.fn().mockImplementation(async () => { callLog.push('commit'); });
+
+    const qrQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('INSERT INTO projects')) return [{ id: 'proj-new' }];
+      // If the location upsert runs on the QR, record it — the fix forbids this.
+      if (sql.includes('INSERT INTO locations')) { callLog.push('qr-locations'); return []; }
+      return [];
+    });
+
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT pi.*')) {
+        return [{
+          id: 'inbox-1',
+          status: 'READY',
+          extracted_data: JSON.stringify({
+            nombre_proyecto: 'Test',
+            locales: [{ nombre: 'Local Uno', direccion: 'Calle 1' }],
+          }),
+          raw_content: JSON.stringify({ pending_evento_ids: [] }),
+        }];
+      }
+      // Post-commit sync runs on ds.query: SELECT existing + INSERT locations.
+      if (sql.includes('SELECT id, lower(name)')) return [];
+      if (sql.includes('INSERT INTO locations')) { callLog.push('ds-locations'); return []; }
+      return [];
+    });
+
+    const ds = {
+      query: (sql: string, params?: any[]) => dsQuery(sql, params),
+      createQueryRunner: jest.fn(() => ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: commitFn,
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => qrQuery(sql, params),
+      })),
+    } as unknown as DataSource;
+
+    const svc = new ProjectInboxService(
+      ds,
+      { add: jest.fn().mockResolvedValue({}) } as any,
+      { add: jest.fn().mockResolvedValue({}) } as any,
+      { log: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    const result = await svc.approve('tenant-1', 'inbox-1', 'user-1', {}, '127.0.0.1');
+    expect(result).toEqual({ project_id: 'proj-new' });
+
+    // The location upsert must NOT be issued on the QueryRunner (inside the tx).
+    expect(callLog).not.toContain('qr-locations');
+    // It must be issued on ds.query AFTER commit.
+    expect(callLog).toContain('ds-locations');
+    expect(callLog.indexOf('commit')).toBeLessThan(callLog.indexOf('ds-locations'));
+  });
+
+  it('does NOT rollback or fail approve when post-commit location sync throws (JA-002/JB-002)', async () => {
+    const rollbackFn = jest.fn().mockResolvedValue(undefined);
+
+    const qrQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('INSERT INTO projects')) return [{ id: 'proj-new' }];
+      return [];
+    });
+
+    const dsQuery = jest.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT pi.*')) {
+        return [{
+          id: 'inbox-1',
+          status: 'READY',
+          extracted_data: JSON.stringify({
+            nombre_proyecto: 'Test',
+            locales: [{ nombre: 'Local Uno', direccion: 'Calle 1' }],
+          }),
+          raw_content: JSON.stringify({ pending_evento_ids: [] }),
+        }];
+      }
+      // Post-commit location sync blows up (e.g. index/constraint error).
+      if (sql.includes('SELECT id, lower(name)')) throw new Error('LOCATION_SYNC_FAIL');
+      if (sql.includes('INSERT INTO locations')) throw new Error('LOCATION_SYNC_FAIL');
+      return [];
+    });
+
+    const ds = {
+      query: (sql: string, params?: any[]) => dsQuery(sql, params),
+      createQueryRunner: jest.fn(() => ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: rollbackFn,
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => qrQuery(sql, params),
+      })),
+    } as unknown as DataSource;
+
+    const svc = new ProjectInboxService(
+      ds,
+      { add: jest.fn().mockResolvedValue({}) } as any,
+      { add: jest.fn().mockResolvedValue({}) } as any,
+      { log: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    // A location-sync failure is non-fatal: approve still resolves with the project.
+    const result = await svc.approve('tenant-1', 'inbox-1', 'user-1', {}, '127.0.0.1');
+    expect(result).toEqual({ project_id: 'proj-new' });
+    // The committed tx must NOT be rolled back by a post-commit sync failure.
+    expect(rollbackFn).not.toHaveBeenCalled();
+  });
+
   it('rolls back and propagates error when reassignment DML fails (NFR-02 / SCENARIO-21)', async () => {
     const rollbackFn = jest.fn().mockResolvedValue(undefined);
 

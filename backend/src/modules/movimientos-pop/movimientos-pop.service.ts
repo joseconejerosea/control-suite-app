@@ -48,6 +48,16 @@ export class MovimientosPopService {
       return this.createAdjustment(clientId, dto);
     }
 
+    // T12 · Bodega obligatoria para los movimientos de depósito (entrada/salida/devolución):
+    // sin ella el movimiento no dice DÓNDE está el stock (el bug reportado: movimientos "sin
+    // lugar"). Consumo/merma NO la requieren (se consumen en la activación). El traslado ya la
+    // exige (ambas) en createTransfer. El flujo de WhatsApp ya provee la bodega en las entradas.
+    if (['entrada', 'salida', 'devolucion'].includes(dto.tipo) && !dto.bodega_origen_id) {
+      throw new BadRequestException(
+        `El movimiento de tipo "${dto.tipo}" requiere una bodega. Elegí la bodega antes de guardar.`,
+      );
+    }
+
     // Verificar stock disponible para salida
     if (dto.tipo === 'salida' && dto.bodega_origen_id) {
       await this.checkStock(clientId, dto.sku_id, dto.bodega_origen_id, dto.cantidad);
@@ -68,13 +78,14 @@ export class MovimientosPopService {
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
          (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+          tipo, cantidad, foto_key, tiempo_uso_dias, fecha_retorno_esperada, estado, observacion, correlativo, activacion_id, created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [
         clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id ?? null,
         dto.proyecto_destino_id ?? null, dto.tipo, dto.cantidad,
         dto.foto_key ?? null, dto.tiempo_uso_dias ?? null,
         dto.fecha_retorno_esperada ?? null, estado, dto.observacion ?? null, correlativo,
+        dto.activacion_id ?? null, dto.created_by_user_id ?? null,
       ],
     );
 
@@ -117,24 +128,24 @@ export class MovimientosPopService {
       const outRes = await queryRunner.query(
         `INSERT INTO movimientos_pop
            (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-            tipo, cantidad, estado, observacion, correlativo)
-         VALUES ($1,$2,$3,$4,$5,'salida',$6,'transfer_out',$7,$8) RETURNING id`,
+            tipo, cantidad, estado, observacion, correlativo, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,'salida',$6,'transfer_out',$7,$8,$9) RETURNING id`,
         [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id,
          dto.proyecto_destino_id ?? null, dto.cantidad,
          `Transfer a bodega ${dto.bodega_destino_id}. ${dto.observacion ?? ''}`,
-         corrOut],
+         corrOut, dto.created_by_user_id ?? null],
       );
 
       // IN to destination
       const inRes = await queryRunner.query(
         `INSERT INTO movimientos_pop
            (client_id, sku_id, persona_id, bodega_origen_id, proyecto_destino_id,
-            tipo, cantidad, estado, observacion, correlativo)
-         VALUES ($1,$2,$3,$4,$5,'entrada',$6,'transfer_in',$7,$8) RETURNING id`,
+            tipo, cantidad, estado, observacion, correlativo, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,'entrada',$6,'transfer_in',$7,$8,$9) RETURNING id`,
         [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_destino_id,
          dto.proyecto_destino_id ?? null, dto.cantidad,
          `Transfer desde bodega ${dto.bodega_origen_id}. ${dto.observacion ?? ''}`,
-         corrIn],
+         corrIn, dto.created_by_user_id ?? null],
       );
 
       // Update inventory: subtract from origin
@@ -189,10 +200,10 @@ export class MovimientosPopService {
 
     const res = await this.ds.query(
       `INSERT INTO movimientos_pop
-         (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion, correlativo)
-       VALUES ($1,$2,$3,$4,'adjustment',$5,'adjustment',$6,$7) RETURNING *`,
+         (client_id, sku_id, persona_id, bodega_origen_id, tipo, cantidad, estado, observacion, correlativo, created_by_user_id)
+       VALUES ($1,$2,$3,$4,'adjustment',$5,'adjustment',$6,$7,$8) RETURNING *`,
       [clientId, dto.sku_id, dto.persona_id ?? null, dto.bodega_origen_id, Math.abs(diff),
-       `Ajuste: ${currentQty} → ${dto.cantidad}. ${dto.observacion ?? ''}`, correlativo],
+       `Ajuste: ${currentQty} → ${dto.cantidad}. ${dto.observacion ?? ''}`, correlativo, dto.created_by_user_id ?? null],
     );
 
     // Set inventory to exact quantity
@@ -260,12 +271,21 @@ export class MovimientosPopService {
 
     const merma = parseInt(salidas[0].total) - parseInt(devoluciones[0].total) - parseInt(consumos[0].total);
     if (merma > 0) {
-      await this.ds.query(
-        `INSERT INTO movimientos_pop (client_id, sku_id, proyecto_destino_id, tipo, cantidad, estado, observacion)
-         VALUES ($1,$2,$3,'merma',$4,'merma','Merma calculada automáticamente')`,
-        [clientId, skuId, proyectoId, merma],
+      // P19 · La merma auto-generada era la ÚNICA INSERT que no calculaba correlativo →
+      // quedaba NULL. Se calcula igual que en create()/createTransfer: secuencial por
+      // (client_id, sku_id), para que "Merma con correlativo" también aplique a la auto-merma.
+      const corrRows = await this.ds.query(
+        `SELECT COALESCE(MAX(correlativo), 0) + 1 AS next_correlativo
+         FROM movimientos_pop WHERE client_id=$1 AND sku_id=$2`,
+        [clientId, skuId],
       );
-      this.logger.warn(`[F3] Merma calculada: ${merma} unidades SKU ${skuId} proyecto ${proyectoId}`);
+      const correlativo: number = corrRows[0]?.next_correlativo ?? 1;
+      await this.ds.query(
+        `INSERT INTO movimientos_pop (client_id, sku_id, proyecto_destino_id, tipo, cantidad, estado, observacion, correlativo)
+         VALUES ($1,$2,$3,'merma',$4,'merma','Merma calculada automáticamente',$5)`,
+        [clientId, skuId, proyectoId, merma, correlativo],
+      );
+      this.logger.warn(`[F3] Merma calculada: ${merma} unidades SKU ${skuId} proyecto ${proyectoId} (correlativo ${correlativo})`);
     }
   }
 

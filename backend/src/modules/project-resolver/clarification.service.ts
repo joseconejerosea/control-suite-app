@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { runWithTenant } from '../../common/tenant/tenant-context';
 import { WhatsAppSessionService, WhatsAppSession } from '../whatsapp/whatsapp-session.service';
+import { WhatsAppActionMenuService } from '../whatsapp/action-menu.service';
 
 // Non-null clarification sub-object shape, derived from the session union so that
 // field mismatches (e.g. reading a field that does not exist on the union) are
@@ -77,7 +78,36 @@ export class ClarificationService {
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
     private readonly projectInboxService: ProjectInboxService,
+    private readonly actionMenu: WhatsAppActionMenuService,
   ) {}
+
+  // ── Idempotency guard: check if a project clarification is already pending for this evento ──
+
+  /**
+   * Returns true if a project clarification was already triggered for `eventoId`.
+   * Used by classify.processor on BullMQ retries to avoid sending a duplicate prompt.
+   *
+   * Checks the eventos_crudos status and clarification_type in parsed_data.
+   * If the DB lookup errors → returns false (default-false: proceed to ask; the
+   * clarification service upserts idempotently by evento so re-prompting is safe).
+   * Errors are logged but NEVER thrown (JD-010).
+   */
+  async hasPendingProjectClarification(eventoId: string): Promise<boolean> {
+    try {
+      const rows = await this.ds.query(
+        `SELECT status, parsed_data FROM eventos_crudos
+          WHERE id = $1
+            AND status = 'awaiting_clarification'
+            AND (parsed_data->>'clarification_type') = 'project'
+          LIMIT 1`,
+        [eventoId],
+      );
+      return rows.length > 0;
+    } catch (err: any) {
+      this.logger.warn(`[Clarification] hasPendingProjectClarification error evento=${eventoId}: ${err.message}`);
+      return false;
+    }
+  }
 
   // ── Role gate: MANAGER-only may initiate project creation (ADR-4) ──────────
 
@@ -262,8 +292,8 @@ export class ClarificationService {
     // Valid name: park evento(s) + create draft atomically, then confirm and clear.
     const pendingEventoIds: string[] = clarification.pendingEventoIds ?? [clarification.eventoCrudoId];
 
-    // [JBA-005/JBA-004] The name-reply path reaches here under runWithWaFrom only
-    // (webhook is @Public, no tenant GUC). The park UPDATE and the createDraftFromWhatsApp
+    // [JBA-005/JBA-004] The name-reply path reaches here from the @Public webhook with
+    // no tenant GUC set. The park UPDATE and the createDraftFromWhatsApp
     // INSERT touch RLS tables (eventos_crudos, project_inbox) that read app.current_tenant.
     // Wrap both in a single runWithTenant transaction so (a) the tenant GUC is set and
     // (b) park + insert are atomic — a failed INSERT rolls back the park UPDATEs, so no
@@ -322,6 +352,21 @@ export class ClarificationService {
     }
 
     const { clarification } = session;
+
+    // A1 · A fresh greeting mid-clarification is a restart intent, not an answer. Reset to
+    // the action menu WITHOUT counting an attempt or escalating (José 16-ago report: the bot
+    // was escalating a greeting to a human operator unnecessarily). The evento_crudo is left
+    // as-is (still awaiting_clarification, recoverable from the panel) — no worse than today.
+    // For an in-progress `data` clarification, any already-`collected` field answers are
+    // intentionally discarded here (clarification set to null): the sender restarts clean.
+    if (this.actionMenu.isGreeting(text)) {
+      session.clarification = null;
+      session.state = 'awaiting_action';
+      await this.sessions.set(phoneNumber, session);
+      await this.wa.sendText(phoneNumber, this.actionMenu.buildMenu());
+      this.logger.log(`[Clarification] A1 greeting reset for ${phoneNumber} — cleared pending ${clarification.type}, showed action menu`);
+      return true;
+    }
 
     if (clarification.type === 'project') {
       return this.handleProjectResponse(phoneNumber, text, session, messageId, canalId);

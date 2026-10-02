@@ -261,10 +261,12 @@ export class F5Controller {
     const destinatarios = await this.resolverDestinatarios(user.client_id, rep.project_id, body.destinatarios);
 
     // reply-to = el Gmail conectado del tenant, para que la respuesta del cliente
-    // caiga en el buzón que pollea GmailService (no en noreply@, que nadie lee).
+    // caiga en el buzón Gmail que pollea la ingesta (no en noreply@, que nadie lee).
+    // Filtramos provider='gmail' explícito: Sheets/Gmail reply-to debe usar el buzón
+    // Gmail, nunca un Outlook conectado (que no comparte el flujo de exportación).
     const [gmailRow] = await this.ds.query(
       `SELECT email FROM gmail_tokens
-        WHERE client_id=$1 AND tokens IS NOT NULL
+        WHERE client_id=$1 AND provider='gmail' AND tokens IS NOT NULL
         ORDER BY updated_at DESC LIMIT 1`,
       [user.client_id],
     ).catch(() => []);

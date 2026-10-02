@@ -2,7 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsAppService } from './whatsapp.service';
-import { WhatsAppSessionService, WhatsAppSession } from './whatsapp-session.service';
+import { ACTION_MENU_CLOSING_INVITE } from './action-menu.service';
+import {
+  WhatsAppSessionService,
+  WhatsAppSession,
+} from './whatsapp-session.service';
+import { OperatorNotifierService } from './operator-notifier.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PendingStaffService } from '../pending-staff/pending-staff.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { runWithTenant } from '../../common/tenant/tenant-context';
 import { UserRole } from '../../common/enums/user-role.enum';
@@ -33,6 +40,9 @@ export class EvidenceIntakeService {
     @InjectDataSource() private readonly ds: DataSource,
     private readonly wa: WhatsAppService,
     private readonly sessions: WhatsAppSessionService,
+    private readonly notifier: OperatorNotifierService,
+    private readonly notifications: NotificationsService,
+    private readonly pendingStaff: PendingStaffService,
   ) {}
 
   /**
@@ -50,38 +60,50 @@ export class EvidenceIntakeService {
 
     // Resolver la persona por dígitos del teléfono. El `from` de Meta llega 549...
     // y el phone guardado tiene '+', espacios, etc. Todo dentro de runWithTenant (RLS).
-    // Resolvemos al remitente contra las MISMAS tablas que autoriza el gate del bot
-    // (isAuthorizedSender): promotores, colaboradores y usuarios (Manager/Operador/
+    // Resolvemos al remitente contra las MISMAS tablas de staff que reconoce el bot
+    // (match por dígitos del teléfono): promotores, colaboradores y usuarios (Manager/Operador/
     // Supervisor). Así cualquier staff autorizado que mande su foto de la activación
     // queda asociado. checkins.persona_id NO tiene FK, así que el id de cualquiera de
     // las tres tablas sirve como persona del check-in. Todo dentro de runWithTenant (RLS).
-    const personaId: string | null = await runWithTenant(this.ds, opts.clientId, async () => {
-      const prom = await this.ds.query(
-        `SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
-        [opts.clientId, digits],
-      );
-      if (prom.length) return prom[0].id;
+    const personaId: string | null = await runWithTenant(
+      this.ds,
+      opts.clientId,
+      async () => {
+        const prom = await this.ds.query(
+          `SELECT id FROM promoters WHERE client_id=$1 AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
+          [opts.clientId, digits],
+        );
+        if (prom.length) return prom[0].id;
 
-      const colab = await this.ds.query(
-        `SELECT id FROM collaborators WHERE client_id=$1 AND is_active=true AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
-        [opts.clientId, digits],
-      );
-      if (colab.length) return colab[0].id;
+        const colab = await this.ds.query(
+          `SELECT id FROM collaborators WHERE client_id=$1 AND is_active=true AND regexp_replace(phone,'\\D','','g')=$2 LIMIT 1`,
+          [opts.clientId, digits],
+        );
+        if (colab.length) return colab[0].id;
 
-      const usr = await this.ds.query(
-        `SELECT id FROM users
+        const usr = await this.ds.query(
+          `SELECT id FROM users
           WHERE client_id=$1 AND is_active=true AND phone IS NOT NULL
             AND role IN ($3, $4, $5)
             AND regexp_replace(phone,'\\D','','g')=$2
           LIMIT 1`,
-        [opts.clientId, digits, UserRole.MANAGER, UserRole.OPERATOR, UserRole.SUPERVISOR],
-      );
-      return usr.length ? usr[0].id : null;
-    }).catch(() => null);
+          [
+            opts.clientId,
+            digits,
+            UserRole.MANAGER,
+            UserRole.OPERATOR,
+            UserRole.SUPERVISOR,
+          ],
+        );
+        return usr.length ? usr[0].id : null;
+      },
+    ).catch(() => null);
 
     if (!personaId) {
       await this.escalate(
-        opts.eventoCrudoId, opts.phoneNumber, opts.clientId,
+        opts.eventoCrudoId,
+        opts.phoneNumber,
+        opts.clientId,
         'No te encuentro registrado para asociar esta evidencia. Lo derivo a un operador.',
         'evidence_unknown_persona',
       );
@@ -100,6 +122,10 @@ export class EvidenceIntakeService {
           WHERE client_id=$1 AND promoter_id=$2
             AND status IN ('scheduled','in_progress')
             AND estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · "activaciones vencidas": solo vigentes — hoy (hora Chile) en
+            -- adelante, o sin fecha. now() AT TIME ZONE 'America/Santiago' y no CURRENT_DATE
+            -- (UTC del contenedor). NULL se conserva (fecha desconocida ≠ vencida).
+            AND (activation_date IS NULL OR activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
           ORDER BY activation_date DESC LIMIT 10`,
         [opts.clientId, personaId],
       ),
@@ -112,6 +138,8 @@ export class EvidenceIntakeService {
             WHERE client_id=$1
               AND status IN ('scheduled','in_progress')
               AND estado_f5 IS DISTINCT FROM 'cerrada'
+              -- Matriz v1.3 · vigente: hoy (hora Chile) en adelante, o sin fecha (ver nivel 1).
+              AND (activation_date IS NULL OR activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
             ORDER BY activation_date DESC LIMIT 10`,
           [opts.clientId],
         ),
@@ -119,10 +147,10 @@ export class EvidenceIntakeService {
     }
 
     if (!activaciones.length) {
-      await this.escalate(
-        opts.eventoCrudoId, opts.phoneNumber, opts.clientId,
-        'No encontré una activación activa a tu nombre para esta evidencia. Lo derivo a un operador.',
-        'evidence_no_active_activation',
+      await this.notifyNoActivation(
+        opts.eventoCrudoId,
+        opts.phoneNumber,
+        opts.clientId,
       );
       return;
     }
@@ -132,7 +160,9 @@ export class EvidenceIntakeService {
       label: `Activación ${a.activation_date ?? ''}`.trim(),
     }));
 
-    const session = (await this.sessions.get(opts.phoneNumber)) ?? this.emptySession(opts.clientId);
+    const session =
+      (await this.sessions.get(opts.phoneNumber)) ??
+      this.emptySession(opts.clientId);
     session.clientId = opts.clientId;
     session.state = STATE;
     session.evidenceIntake = {
@@ -148,7 +178,9 @@ export class EvidenceIntakeService {
       session.evidenceIntake.activacionId = opciones[0].id;
       await this.sessions.set(opts.phoneNumber, session);
       await this.askObservacion(opts.phoneNumber);
-      this.logger.log(`[Evidence] Intake iniciado (auto-activación) para evento ${opts.eventoCrudoId}`);
+      this.logger.log(
+        `[Evidence] Intake iniciado (auto-activación) para evento ${opts.eventoCrudoId}`,
+      );
       return;
     }
 
@@ -156,12 +188,16 @@ export class EvidenceIntakeService {
     session.evidenceIntake.step = 'activacion';
     session.evidenceIntake.activaciones = opciones;
     await this.sessions.set(opts.phoneNumber, session);
-    const list = opciones.map((o: { label: string }, i: number) => `${i + 1}. ${o.label}`).join('\n');
+    const list = opciones
+      .map((o: { label: string }, i: number) => `${i + 1}. ${o.label}`)
+      .join('\n');
     await this.wa.sendText(
       opts.phoneNumber,
       `¿A qué activación corresponde esta evidencia?\n\n${list}\n\nRespondé con el número.`,
     );
-    this.logger.log(`[Evidence] Intake iniciado (${opciones.length} activaciones) para evento ${opts.eventoCrudoId}`);
+    this.logger.log(
+      `[Evidence] Intake iniciado (${opciones.length} activaciones) para evento ${opts.eventoCrudoId}`,
+    );
   }
 
   /**
@@ -174,20 +210,35 @@ export class EvidenceIntakeService {
 
     const ei = session.evidenceIntake;
     switch (ei.step) {
-      case 'activacion':  return this.handleActivacion(phoneNumber, text, session);
-      case 'observacion': return this.handleObservacion(phoneNumber, text, session);
-      default:            return false;
+      case 'activacion':
+        return this.handleActivacion(phoneNumber, text, session);
+      case 'observacion':
+        return this.handleObservacion(phoneNumber, text, session);
+      case 'ubicacion':
+        // A4 · Estamos esperando el pin GPS (mensaje 'location'), no texto. Un texto
+        // acá NO cierra el registro: re-pregunta la ubicación (acotado por attempts).
+        return this.handleUbicacionReprompt(phoneNumber, session);
+      default:
+        return false;
     }
   }
 
   // ── Pasos ───────────────────────────────────────────────────────────────
 
-  private async handleActivacion(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
-    const ei = session.evidenceIntake!;
+  private async handleActivacion(
+    phone: string,
+    text: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
     const opts = ei.activaciones ?? [];
     const num = parseInt(text.trim(), 10);
     if (isNaN(num) || num < 1 || num > opts.length) {
-      return this.retryOrEscalate(phone, session, `Respondé con un número entre 1 y ${opts.length}.`);
+      return this.retryOrEscalate(
+        phone,
+        session,
+        `Respondé con un número entre 1 y ${opts.length}.`,
+      );
     }
     ei.activacionId = opts[num - 1].id;
     ei.step = 'observacion';
@@ -197,12 +248,25 @@ export class EvidenceIntakeService {
     return true;
   }
 
-  private async handleObservacion(phone: string, text: string, session: WhatsAppSession): Promise<boolean> {
-    const ei = session.evidenceIntake!;
+  private async handleObservacion(
+    phone: string,
+    text: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
     const raw = (text ?? '').trim();
-    const skip = ['listo', 'no', 'omitir', 'skip', '-', ''].includes(raw.toLowerCase());
-    const observacion = skip ? null : raw.slice(0, 500);
-    return this.register(phone, session, observacion);
+    const skip = ['listo', 'no', 'omitir', 'skip', '-', ''].includes(
+      raw.toLowerCase(),
+    );
+    // A4 · La observación se resuelve acá pero NO cierra el registro: la parqueamos
+    // y pasamos al paso OBLIGATORIO de ubicación. El checkin se inserta recién cuando
+    // llega el pin GPS (handleLocationForEvidence).
+    ei.observacion = skip ? null : raw.slice(0, 500);
+    ei.step = 'ubicacion';
+    ei.attempts = 0;
+    await this.sessions.set(phone, session);
+    await this.askUbicacion(phone);
+    return true;
   }
 
   private async askObservacion(phone: string): Promise<void> {
@@ -212,19 +276,90 @@ export class EvidenceIntakeService {
     );
   }
 
+  private async askUbicacion(phone: string): Promise<void> {
+    await this.wa.sendText(
+      phone,
+      'Para cerrar el registro, compartí tu ubicación 📍 (tocá el clip → Ubicación). Es obligatoria para confirmar tu presencia en la activación.',
+    );
+  }
+
+  /**
+   * A4 · En step='ubicacion' esperamos el pin GPS. Si el remitente responde con TEXTO,
+   * re-preguntamos la ubicación sin perder el registro pendiente. Igual que el resto de
+   * los pasos, NO re-pregunta infinitamente: incrementa attempts y, tras MAX_ATTEMPTS,
+   * deriva al operador y limpia la sesión (retryOrEscalate).
+   */
+  private async handleUbicacionReprompt(
+    phone: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    return this.retryOrEscalate(
+      phone,
+      session,
+      'Necesito tu ubicación para confirmar tu presencia. Tocá el clip → Ubicación y enviá el pin GPS 📍.',
+    );
+  }
+
   // ── Registro ──────────────────────────────────────────────────────────────
 
-  private async register(phone: string, session: WhatsAppSession, observacion: string | null): Promise<boolean> {
-    const ei = session.evidenceIntake!;
-    const clientId = session.clientId!;
+  private async register(
+    phone: string,
+    session: WhatsAppSession,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
+    const clientId = session.clientId;
+    const observacion = ei.observacion ?? null;
+
+    // JD-003 · Guard de idempotencia ATÓMICO. Dos pins de ubicación concurrentes
+    // (messageIds distintos, ambos pasan el dedup por-messageId) pueden leer la MISMA
+    // sesión en step='ubicacion' y llamar register() los dos → checkins duplicados
+    // (doble registro de presencia). claimEvidenceRegistration usa SET NX keyed por el
+    // eventoCrudoId del intake (estable durante la conversación). El primero gana; el
+    // segundo hace no-op limpio.
+    const claimed = await this.sessions.claimEvidenceRegistration(
+      ei.eventoCrudoId,
+    );
+    if (!claimed) {
+      this.logger.log(
+        `[Evidence] register() duplicado ignorado (evento ${ei.eventoCrudoId} ya reclamado)`,
+      );
+      await this.sessions.delete(phone);
+      return true;
+    }
+
+    // A4 · Resultado del check de ubicación (obligatorio). handleLocationForEvidence
+    // lo deja en la sesión antes de llamar acá. NO_GPS por defecto (la activación no
+    // tenía coords o el lookup no comparó): la ubicación se envió igual, sin warning falso.
+    const locationStatus = (ei as any)._locationStatus as
+      | 'VERIFIED'
+      | 'MISMATCH'
+      | 'NO_GPS'
+      | undefined;
+    const distanceM = (ei as any)._locationDistanceM as number | null | undefined;
+    const lat = (ei as any)._locationLat as number | undefined;
+    const lng = (ei as any)._locationLng as number | undefined;
 
     try {
-      // Alta CRÍTICA: el checkin (la prueba de presencia que DEBE persistir).
+      // Alta CRÍTICA: el checkin (la prueba de presencia que DEBE persistir). El check
+      // de ubicación va en verificacion_ia (JSONB) — su propósito es exactamente ese:
+      // dejar registrado si la presencia quedó verificada contra la activación.
       const rows = await runWithTenant(this.ds, clientId, () =>
         this.ds.query(
-          `INSERT INTO checkins (client_id, activacion_id, persona_id, foto_key, observacion)
-           VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-          [clientId, ei.activacionId, ei.personaId, ei.storagePath, observacion],
+          `INSERT INTO checkins (client_id, activacion_id, persona_id, foto_key, observacion, verificacion_ia)
+           VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING id`,
+          [
+            clientId,
+            ei.activacionId,
+            ei.personaId,
+            ei.storagePath,
+            observacion,
+            JSON.stringify({
+              location_status: locationStatus ?? 'NO_GPS',
+              distance_m: distanceM ?? null,
+              lat: lat ?? null,
+              lng: lng ?? null,
+            }),
+          ],
         ),
       );
       const checkinId = rows[0]?.id;
@@ -240,31 +375,246 @@ export class EvidenceIntakeService {
            WHERE id=$1`,
           [
             ei.eventoCrudoId,
-            JSON.stringify({ checkin_id: checkinId, evidence_registered_at: new Date().toISOString() }),
+            JSON.stringify({
+              checkin_id: checkinId,
+              evidence_registered_at: new Date().toISOString(),
+            }),
           ],
         ),
-      ).catch((e: any) => this.logger.warn(`[Evidence] Bookkeeping post-alta falló (evento ${ei.eventoCrudoId}): ${e.message}`));
+      ).catch((e: any) =>
+        this.logger.warn(
+          `[Evidence] Bookkeeping post-alta falló (evento ${ei.eventoCrudoId}): ${e.message}`,
+        ),
+      );
 
       await this.sessions.delete(phone);
-      await this.wa.sendText(phone, '✅ Evidencia guardada en la activación. ¡Gracias!');
-      this.logger.log(`[Evidence] Registrado checkin ${checkinId} (evento ${ei.eventoCrudoId})`);
+      // A4 · Sólo avisamos "fuera de rango" ante un MISMATCH real (la activación TENÍA
+      // coords y el pin quedó fuera del radio). Con NO_GPS no hubo comparación → sin
+      // warning falso. La obligatoriedad es que el pin SE ENVÍE, no que caiga en el radio.
+      const mismatchLine =
+        locationStatus === 'MISMATCH'
+          ? `\n⚠️ Ubicación fuera del rango de la activación (${distanceM != null ? `${distanceM}m` : 'distancia no disponible'}).`
+          : '';
+      await this.wa.sendText(
+        phone,
+        `✅ Evidencia guardada en la activación. ¡Gracias!${mismatchLine}${ACTION_MENU_CLOSING_INVITE}`,
+      );
+      this.logger.log(
+        `[Evidence] Registrado checkin ${checkinId} (evento ${ei.eventoCrudoId})`,
+      );
       return true;
     } catch (err: any) {
-      this.logger.error(`[Evidence] Error registrando evidencia (evento ${ei.eventoCrudoId}): ${err.message}`);
+      this.logger.error(
+        `[Evidence] Error registrando evidencia (evento ${ei.eventoCrudoId}): ${err.message}`,
+      );
+      // Liberar el claim: el registro NO se completó, así que un reintento legítimo del
+      // mismo evento no debe quedar bloqueado por el claim de 24h (JD-003 defensa en
+      // profundidad). En el éxito el claim se conserva para evitar el doble registro.
+      await this.sessions.releaseEvidenceRegistration(ei.eventoCrudoId);
       await this.sessions.delete(phone);
-      await this.wa.sendText(phone, 'No pude guardar la evidencia. Un operador lo va a revisar.');
+      await this.wa.sendText(
+        phone,
+        'No pude guardar la evidencia. Un operador lo va a revisar.',
+      );
       return true;
     }
   }
 
+  // ── Ubicación (A4 · check-in obligatorio) ──────────────────────────────────
+
+  /**
+   * A4 · Punto de entrada para un mensaje de tipo 'location' desde el webhook.
+   * Si este remitente tiene un intake de evidencia en step='ubicacion', valida la
+   * ubicación GPS contra la activación elegida (haversine + radio), escribe el
+   * LOCATION_CHECK en activation_events, y completa el registro del checkin.
+   *
+   * Returns true → el pin fue consumido por el intake de evidencia (el caller NO debe
+   *   correr el check-in standalone). Returns false → no había evidencia pendiente en
+   *   este paso, el caller debe continuar con la lógica standalone normal.
+   *
+   * MISMATCH policy: la ubicación es OBLIGATORIA (el promotor debe compartir el pin),
+   * pero un MISMATCH NO bloquea el registro. Se completa igual y se avisa en el mensaje.
+   */
+  async handleLocationForEvidence(
+    phone: string,
+    lat: number,
+    lng: number,
+    locationEventoCrudoId: string,
+  ): Promise<boolean> {
+    const session = await this.sessions.get(phone);
+    if (!session?.evidenceIntake || session.state !== STATE) return false;
+    const ei = session.evidenceIntake;
+    if (ei.step !== 'ubicacion') return false;
+
+    const clientId = session.clientId;
+    // NEUTRAL por defecto. Sólo pasa a VERIFIED/MISMATCH si REALMENTE hubo una
+    // comparación (la activación tiene coords y el pin se comparó). Si la activación no
+    // tiene GPS almacenado, o el lookup vino vacío/falló, se queda NO_GPS: se registra
+    // igual, sin el warning falso de "fuera de rango".
+    let locationStatus: 'VERIFIED' | 'MISMATCH' | 'NO_GPS' = 'NO_GPS';
+    let distanceM: number | null = null;
+    let actStatus: string | undefined;
+
+    try {
+      const rows = await runWithTenant(this.ds, clientId, () =>
+        this.ds.query(
+          `SELECT a.id, a.location, a.status
+             FROM activations a
+            WHERE a.id = $1 AND a.client_id = $2`,
+          [ei.activacionId, clientId],
+        ),
+      ).catch(() => []);
+
+      if (rows.length > 0) {
+        const act = rows[0];
+        actStatus = act.status;
+        const loc =
+          typeof act.location === 'string'
+            ? JSON.parse(act.location)
+            : act.location;
+        // Checks numéricos, NO truthiness: una coordenada legítima de exactamente 0
+        // (ecuador / meridiano de Greenwich) es falsy y se saltaría.
+        if (
+          loc != null &&
+          Number.isFinite(Number(loc.lat)) &&
+          Number.isFinite(Number(loc.lng))
+        ) {
+          const distance = this.haversine(
+            lat,
+            lng,
+            Number(loc.lat),
+            Number(loc.lng),
+          );
+          const radius = loc.radiusMeters ?? 200;
+          distanceM = Math.round(distance);
+          locationStatus = distance <= radius ? 'VERIFIED' : 'MISMATCH';
+        }
+      }
+
+      // LOCATION_CHECK ligado a la activación (misma tabla y forma que material/standalone).
+      await runWithTenant(this.ds, clientId, () =>
+        this.ds.query(
+          `INSERT INTO activation_events
+             (client_id, activation_id, event_type, location_status, lat, lng, metadata, created_at)
+           VALUES ($1, $2, 'LOCATION_CHECK', $3, $4, $5, $6::jsonb, NOW())`,
+          [
+            clientId,
+            ei.activacionId,
+            locationStatus,
+            lat,
+            lng,
+            JSON.stringify({
+              distance_m: distanceM,
+              from: phone,
+              source: 'evidence_intake',
+              location_evento_crudo_id: locationEventoCrudoId,
+            }),
+          ],
+        ),
+      ).catch((e: any) =>
+        this.logger.warn(`[Evidence] LOCATION_CHECK insert falló: ${e.message}`),
+      );
+
+      // Decisión de José: la primera evidencia con ubicación VERIFICADA (pin dentro del
+      // radio) marca la activación como "en vivo" — espeja el check-in standalone del
+      // menú viejo (ahora removido). Sólo con VERIFIED: NO_GPS (sin coords para comparar)
+      // y MISMATCH (fuera de rango) NO transicionan. Sólo si estaba 'scheduled', para no
+      // pisar una activación ya en curso o cerrada. Best-effort: un fallo acá no voltea
+      // el checkin ni bloquea el registro.
+      if (locationStatus === 'VERIFIED' && actStatus === 'scheduled') {
+        await runWithTenant(this.ds, clientId, () =>
+          this.ds.query(
+            `UPDATE activations
+                SET status = 'in_progress', estado_f5 = 'en_vivo', updated_at = NOW()
+              WHERE id = $1 AND client_id = $2 AND status = 'scheduled'`,
+            [ei.activacionId, clientId],
+          ),
+        ).catch((e: any) =>
+          this.logger.warn(
+            `[Evidence] transición a en_vivo falló (activación ${ei.activacionId}): ${e.message}`,
+          ),
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(`[Evidence] Validación de ubicación falló: ${e.message}`);
+    }
+
+    // Se guarda el resultado en la sesión para que register() lo persista en
+    // verificacion_ia y arme el mensaje de confirmación. El checkin se crea igual,
+    // sea VERIFIED, MISMATCH o NO_GPS.
+    (ei as any)._locationStatus = locationStatus;
+    (ei as any)._locationDistanceM = distanceM;
+    (ei as any)._locationLat = lat;
+    (ei as any)._locationLng = lng;
+
+    return this.register(phone, session);
+  }
+
+  private haversine(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
+    const R = 6371000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   // ── Escalado / reintento ───────────────────────────────────────────────────
+
+  /**
+   * Sin activación activa (decisión T3): NO deriva a un operador y NO toca ninguno
+   * de los tres canales de alerta (pending_staff, notifier, notifyUsers). Envía un
+   * mensaje claro y accionable al remitente y marca el evento con
+   * status='no_activation' (solo auditoría, NO entra en la cola de escalados).
+   * NO deja sesión (no hay conversación que continuar).
+   */
+  private async notifyNoActivation(
+    eventoCrudoId: string,
+    phone: string,
+    clientId: string,
+  ): Promise<void> {
+    // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
+    // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
+    await runWithTenant(this.ds, clientId, () =>
+      this.ds.query(
+        `UPDATE eventos_crudos SET status='no_activation',
+           parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
+        [
+          eventoCrudoId,
+          JSON.stringify({
+            escalation_reason: 'evidence_no_active_activation',
+            at: new Date().toISOString(),
+          }),
+        ],
+      ),
+    ).catch(() => {});
+
+    await this.wa.sendText(
+      phone,
+      'No veo una activación activa hoy para asociar esta evidencia. Pedile a tu coordinador que cargue la activación y volvé a enviármela. 🙌',
+    );
+    this.logger.log(
+      `[Evidence] Sin activación activa, aviso al remitente (evento ${eventoCrudoId})`,
+    );
+  }
 
   /**
    * Deriva a un operador: avisa al remitente y marca el evento como escalated.
    * NO deja sesión (no hay conversación que continuar).
    */
   private async escalate(
-    eventoCrudoId: string, phone: string, clientId: string, message: string, reason: string,
+    eventoCrudoId: string,
+    phone: string,
+    clientId: string,
+    message: string,
+    reason: string,
   ): Promise<void> {
     // eventos_crudos tiene RLS y el rol de la app es NOBYPASSRLS: sin
     // app.current_tenant el UPDATE matchea 0 filas. Va envuelto en runWithTenant.
@@ -272,27 +622,153 @@ export class EvidenceIntakeService {
       this.ds.query(
         `UPDATE eventos_crudos SET status='escalated',
            parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-        [eventoCrudoId, JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: reason })],
+        [
+          eventoCrudoId,
+          JSON.stringify({
+            escalated_at: new Date().toISOString(),
+            escalation_reason: reason,
+          }),
+        ],
       ),
     ).catch(() => {});
+
+    // Operator alerting: three INDEPENDENT channels. Each is isolated in its own
+    // try/catch so a failure in one (e.g. a users-table hiccup while resolving
+    // managers) never suppresses the others. Errors are logged, never swallowed
+    // silently, and none of them block the sender reply below.
+
+    // Channel 1 — pending_staff roster-gap entry (durable record; the core of the
+    // feature). Only for unknown_persona. PendingStaffService normalizes the phone.
+    if (reason === 'evidence_unknown_persona') {
+      // Best-effort: resolve WHICH activation the evidence likely belongs to so
+      // the operator has context. A failure here must NOT skip the upsert.
+      let activacion: { id: string; label: string } | null = null;
+      try {
+        activacion = await this.resolveProbableActivation(clientId);
+      } catch (err: any) {
+        this.logger.warn(
+          `[Evidence] probable activation resolution failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+        );
+      }
+      try {
+        await this.pendingStaff.upsert(clientId, phone, 'evidence_unknown', {
+          eventoCrudoId,
+          activacion,
+        });
+      } catch (err: any) {
+        this.logger.error(
+          `[Evidence] pending_staff upsert failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+        );
+      }
+    }
+
+    // Channel 2 — WhatsApp alert to operators (independent of manager resolution).
+    try {
+      const operatorMsg = `Evidencia sin asociar (${reason}) del número ${phone}. Revisar en el panel.`;
+      await this.notifier.notificar(
+        clientId,
+        operatorMsg,
+        `evidence-${reason}:${eventoCrudoId}`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[Evidence] operator WhatsApp alert failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+      );
+    }
+
+    // Channel 3 — in-app notification for every Manager (needs manager resolution).
+    // metadata.link deep-links the notification to where the operator resolves it:
+    // unknown_persona -> Staff page ("Promotores a agregar"); otherwise the terreno
+    // view where activations live. The bell navigates to this link on click.
+    const link =
+      reason === 'evidence_unknown_persona'
+        ? '/client/promoters'
+        : '/client/terreno';
+    try {
+      const managerIds = await this.notifications.resolveManagerIds(clientId);
+      await this.notifications.notifyUsers(clientId, managerIds, {
+        type: reason,
+        title:
+          reason === 'evidence_unknown_persona'
+            ? 'Promotor desconocido — evidencia pendiente'
+            : 'Evidencia sin activación activa',
+        body: `Número ${phone} envió evidencia sin poder ser asociada.`,
+        metadata: { eventoCrudoId, phone, link },
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `[Evidence] in-app operator notification failed (evento=${eventoCrudoId}): ${err?.message ?? String(err)}`,
+      );
+    }
+
     await this.wa.sendText(phone, message);
     this.logger.log(`[Evidence] Escalado evento ${eventoCrudoId} (${reason})`);
   }
 
-  private async retryOrEscalate(phone: string, session: WhatsAppSession, retryMsg: string): Promise<boolean> {
-    const ei = session.evidenceIntake!;
+  /**
+   * Resolves the single probable active activation for a tenant, so the operator
+   * knows which activation an unregistered sender's evidence likely relates to.
+   * Returns null when there are zero or multiple active activations — the UI then
+   * shows "por confirmar". Label combines the location name and the date.
+   */
+  private async resolveProbableActivation(
+    clientId: string,
+  ): Promise<{ id: string; label: string } | null> {
+    const rows = await runWithTenant(this.ds, clientId, () =>
+      this.ds.query(
+        `SELECT a.id, a.activation_date, l.name AS location_name
+           FROM activations a
+           LEFT JOIN locations l ON l.id = a.location_id
+          WHERE a.client_id = $1
+            AND a.status IN ('scheduled','in_progress')
+            AND a.estado_f5 IS DISTINCT FROM 'cerrada'
+            -- Matriz v1.3 · vigente: hoy (hora Chile) en adelante, o sin fecha (ver askActivacion).
+            AND (a.activation_date IS NULL OR a.activation_date >= (now() AT TIME ZONE 'America/Santiago')::date)
+          ORDER BY a.activation_date DESC
+          LIMIT 2`,
+        [clientId],
+      ),
+    );
+
+    // 0 or ambiguous (>1) → let the operator confirm; don't guess.
+    if (rows.length !== 1) return null;
+
+    const a = rows[0];
+    const date = a.activation_date
+      ? new Date(a.activation_date).toLocaleDateString('es-CL')
+      : '';
+    const label =
+      [a.location_name, date].filter(Boolean).join(' · ') || 'Activación';
+    return { id: a.id, label };
+  }
+
+  private async retryOrEscalate(
+    phone: string,
+    session: WhatsAppSession,
+    retryMsg: string,
+  ): Promise<boolean> {
+    const ei = session.evidenceIntake;
     ei.attempts = (ei.attempts ?? 0) + 1;
 
     if (ei.attempts >= MAX_ATTEMPTS) {
-      await runWithTenant(this.ds, session.clientId!, () =>
+      await runWithTenant(this.ds, session.clientId, () =>
         this.ds.query(
           `UPDATE eventos_crudos SET status='escalated',
              parsed_data = COALESCE(parsed_data,'{}'::jsonb) || $2::jsonb WHERE id=$1`,
-          [ei.eventoCrudoId, JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: 'evidence_intake_max_attempts' })],
+          [
+            ei.eventoCrudoId,
+            JSON.stringify({
+              escalated_at: new Date().toISOString(),
+              escalation_reason: 'evidence_intake_max_attempts',
+            }),
+          ],
         ),
       ).catch(() => {});
       await this.sessions.delete(phone);
-      await this.wa.sendText(phone, 'Voy a derivar esto a un operador para que lo cargue manualmente. Gracias.');
+      await this.wa.sendText(
+        phone,
+        'Voy a derivar esto a un operador para que lo cargue manualmente. Gracias.',
+      );
       return true;
     }
 

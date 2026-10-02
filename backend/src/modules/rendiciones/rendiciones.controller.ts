@@ -2,7 +2,7 @@ import {
   Controller, Get, Patch, Param, Body, Query, Res,
   UseGuards, ParseUUIDPipe, HttpCode, HttpStatus,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { FastifyReply } from 'fastify';
 import { RendicionesService } from './rendiciones.service';
 import { RechazarRendicionDto, MarcarPagadaDto, RendicionFiltersDto } from './dto/rendicion.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -14,6 +14,12 @@ import { ClientActiveGuard } from '../../common/guards/client-active.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditAction } from '../../common/decorators/audit-action.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
+import { IsOptional, IsUUID } from 'class-validator';
+
+// C2 (v1.9): reasignar la activación de un gasto. activation_id null = desligar.
+class ReasignarActivacionDto {
+  @IsOptional() @IsUUID() activation_id?: string | null;
+}
 
 @Controller('rendiciones')
 @UseGuards(AuthGuard, RolesGuard, ClientIsolationGuard, ClientActiveGuard)
@@ -29,6 +35,42 @@ export class RendicionesController {
   @Get('kpis')
   kpis(@CurrentUser() user: JwtPayload) {
     return this.svc.kpis(user.client_id);
+  }
+
+  // T10 — imagen de una boleta (invoice). Declarado ANTES de :id para no chocar
+  // con el ParseUUIDPipe de findOne. Sirve los bytes (Fastify reply).
+  @Get('boletas/:invoiceId')
+  async getBoleta(
+    @CurrentUser() user: JwtPayload,
+    @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
+    @Res() res: FastifyReply,
+  ) {
+    const { buffer, mimeType } = await this.svc.getBoletaImagen(user.client_id, invoiceId);
+    res
+      .header('Content-Type', mimeType)
+      .header('Content-Length', buffer.length)
+      .send(buffer);
+  }
+
+  // C2 (v1.9): activaciones candidatas para reasignar un gasto (las del proyecto del gasto).
+  @Get('boletas/:invoiceId/activaciones')
+  getActivacionesCandidatas(
+    @CurrentUser() user: JwtPayload,
+    @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
+  ) {
+    return this.svc.getActivacionesCandidatas(user.client_id, invoiceId);
+  }
+
+  // C2 (v1.9): reasignar (o desligar, con activation_id null) la activación de un gasto.
+  // Actualiza la factura y re-agrupa el ítem de rendición (si está en borrador).
+  @Patch('boletas/:invoiceId/activacion')
+  @AuditAction({ action: 'REASSIGN_ACTIVATION', entity: 'Invoice' })
+  reasignarActivacion(
+    @CurrentUser() user: JwtPayload,
+    @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
+    @Body() dto: ReasignarActivacionDto,
+  ) {
+    return this.svc.reasignarActivacion(user.client_id, invoiceId, dto.activation_id ?? null);
   }
 
   @Get(':id')
@@ -71,15 +113,16 @@ export class RendicionesController {
   async exportPdf(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
-    @Res() res: Response,
+    @Res() res: FastifyReply,
   ) {
     const buffer = await this.svc.exportPdf(user.client_id, id);
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="rendicion-${id.slice(0, 8)}.pdf"`,
-      'Content-Length': buffer.length,
-    });
-    res.end(buffer);
+    // Backend es Fastify: usar la API del reply (header/send), NO res.set/res.end
+    // (Express) — esas no existen en FastifyReply y tiran 500.
+    res
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="rendicion-${id.slice(0, 8)}.pdf"`)
+      .header('Content-Length', buffer.length)
+      .send(buffer);
   }
 
   @Patch(':id/marcar-pagada')

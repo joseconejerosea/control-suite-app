@@ -12,6 +12,16 @@ function parseCLP(v: unknown): number | undefined {
   return digits ? parseInt(digits, 10) : undefined;
 }
 
+// B1: el margen proyectado se calcula solo (margen sobre ingreso), no se escribe a mano.
+// Margen % = (Presupuesto − Costo) / Presupuesto × 100. Requiere presupuesto > 0 y costo cargado.
+// Redondeado a 1 decimal. null si faltan datos o el presupuesto es 0.
+function computeMargenPct(budget: unknown, costo: unknown): number | null {
+  const ingreso = parseCLP(budget);
+  const cost = parseCLP(costo);
+  if (ingreso == null || ingreso <= 0 || cost == null) return null;
+  return Math.round(((ingreso - cost) / ingreso) * 1000) / 10;
+}
+
 type Local = { nombre: string; direccion: string };
 type Persona = { rol: string; cantidad: string };
 
@@ -26,7 +36,6 @@ type FormState = {
   cliente_final: string;
   cliente_rut: string;
   costo_estimado: string;
-  margen: string;
   locales: Local[];
   personas: Persona[];
   hitos: string[];
@@ -34,7 +43,7 @@ type FormState = {
 
 const EMPTY: FormState = {
   name: "", brief: "", objectives: "", status: "active", start_date: "", end_date: "",
-  budget: "", cliente_final: "", cliente_rut: "", costo_estimado: "", margen: "",
+  budget: "", cliente_final: "", cliente_rut: "", costo_estimado: "",
   locales: [], personas: [], hitos: [],
 };
 
@@ -49,7 +58,6 @@ function fromExtracted(ex: any): Partial<FormState> {
     cliente_final: ex?.cliente_final ?? "",
     cliente_rut: ex?.cliente_final_rut ?? "",
     costo_estimado: ex?.costo_estimado != null ? String(ex.costo_estimado) : "",
-    margen: ex?.margen_proyectado != null ? String(ex.margen_proyectado) : "",
     locales: Array.isArray(ex?.locales)
       ? ex.locales.map((l: any) => ({ nombre: l?.nombre ?? "", direccion: l?.direccion ?? "" }))
       : [],
@@ -84,7 +92,7 @@ function buildConfig(f: FormState) {
     cliente_final: f.cliente_final || null,
     cliente_final_rut: f.cliente_rut || null,
     costo_estimado: parseCLP(f.costo_estimado) ?? null,
-    margen_proyectado: (() => { const m = parseFloat(String(f.margen).replace(",", ".").replace(/[^\d.]/g, "")); return f.margen && Number.isFinite(m) ? m : null; })(),
+    margen_proyectado: computeMargenPct(f.budget, f.costo_estimado),
     locales: f.locales.filter((l) => l.nombre.trim() || l.direccion.trim()),
     perfil_personas: f.personas
       .filter((p) => p.rol.trim())
@@ -330,7 +338,16 @@ export default function ProjectForm({ mode, projectId }: { mode: "create" | "edi
           <div>{label("Cliente final")}<input value={form.cliente_final} onChange={(e) => set("cliente_final", e.target.value)} style={inputStyle} placeholder="Marca / empresa" /></div>
           <div>{label("RUT del cliente")}<input value={form.cliente_rut} onChange={(e) => set("cliente_rut", e.target.value)} style={inputStyle} placeholder="76.123.456-7" /></div>
           <div>{label("Costo estimado (CLP)")}<input value={form.costo_estimado} onChange={(e) => set("costo_estimado", e.target.value)} style={inputStyle} placeholder="3000000" /></div>
-          <div>{label("Margen proyectado (%)")}<input value={form.margen} onChange={(e) => set("margen", e.target.value)} style={inputStyle} placeholder="35" /></div>
+          <div>{label("Margen proyectado (%)")}
+            <input
+              value={(() => { const m = computeMargenPct(form.budget, form.costo_estimado); return m != null ? `${m}%` : ""; })()}
+              readOnly
+              disabled
+              title="Se calcula solo: (Presupuesto − Costo) / Presupuesto × 100"
+              style={{ ...inputStyle, color: "var(--muted-foreground)", cursor: "not-allowed" }}
+              placeholder="Se calcula solo"
+            />
+          </div>
         </div>
       ))}
 

@@ -53,6 +53,49 @@ export class ProjectResolverService {
       };
     }
 
+    // Signal 0: "proyecto del día" — exactly 1 activation today for this sender's promoter.
+    // Fires AFTER the single-project early return so single-project tenants still win at 0.95.
+    // DB SESSION TZ ASSUMPTION: CURRENT_DATE is evaluated in the DB session timezone
+    // (production = America/Santiago, UTC-3/-4). The 1-day grace absorbs late messages /
+    // TZ boundary drift so a boleta sent just after midnight local still matches the
+    // scheduled activation. If activation_date is widely NULL in some envs, this signal
+    // is inert for those rows (see P2-T02 data-population note).
+    if (phoneNumber) {
+      try {
+        const phone = phoneNumber.replace(/\D/g, '');
+        const signal0Rows = await this.ds.query(
+          `SELECT DISTINCT a.project_id AS id, p.name
+             FROM activations a
+             JOIN projects p   ON p.id = a.project_id
+             JOIN promoters pr ON pr.id = a.promoter_id
+            WHERE a.client_id = $1
+              AND regexp_replace(pr.phone, '\\D', '', 'g') = $2
+              AND pr.client_id = $1
+              AND a.activation_date >= CURRENT_DATE - INTERVAL '1 day'
+              AND a.activation_date <= CURRENT_DATE
+              AND a.status IN ('scheduled','in_progress')
+              AND a.project_id IS NOT NULL
+              AND p.status = 'active'`,
+          [tenantId, phone],
+        );
+        if (signal0Rows.length === 1) {
+          const row = signal0Rows[0];
+          this.logger.log(`[Resolver] Signal 0 proyecto_del_dia → ${row.id}`);
+          return {
+            projectId: row.id,
+            projectName: row.name,
+            confidence: 0.99,
+            method: 'proyecto_del_dia',
+            alternatives: [],
+          };
+        }
+        // 0 or 2+ rows → fall through to existing signals (I-5)
+      } catch (err: any) {
+        this.logger.warn(`[Resolver] Signal 0 error: ${err.message}`);
+        // Non-fatal: fall through to existing signals
+      }
+    }
+
     // Signal 1: F5 location check-in today
     const locationMatch = await this.checkLocationToday(userId, tenantId);
     if (locationMatch) {

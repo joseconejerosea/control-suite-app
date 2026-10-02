@@ -3,31 +3,40 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { roleLabel } from "@/lib/roles";
-import { clearAuth } from "@/lib/api";
 import {
   LayoutDashboard, FolderOpen, MapPin, Users, Megaphone,
-  FileText, UserCircle, Zap, Building2, ChevronRight,
+  FileText, UserCircle, Building2,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
-  Settings, CalendarDays,
+  Settings, CalendarDays, Zap, Layers, Boxes, ChevronDown, Send,
 } from "lucide-react";
 
+// Un item puede ser un link plano ({ href }) o un grupo colapsable ({ children }).
 const CLIENT_SECTIONS = [
   { label: "General", items: [{ label: "Dashboard", icon: LayoutDashboard, href: "/client/dashboard" }] },
   { label: "Operación", items: [
-    { label: "Reportes Internos", icon: FileText, href: "/client/reportes" },
-    { label: "Documentos por revisar", icon: AlertTriangle, href: "/client/documentos-revisar" },
-    { label: "Inventario POP", icon: Package, href: "/client/inventario" },
-    { label: "Rendiciones", icon: Receipt, href: "/client/rendiciones" },
-    { label: "Terreno", icon: Radio, href: "/client/terreno" },
-    { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
-    { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
-    { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
-    { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
-    { label: "Staff", icon: Users, href: "/client/promoters" },
-    { label: "Documentos", icon: FileText, href: "/client/documents" },
-    { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
+    { label: "Planificación", icon: Layers, children: [
+      { label: "Proyectos", icon: FolderOpen, href: "/client/projects" },
+      { label: "Campañas", icon: Megaphone, href: "/client/campaigns" },
+      { label: "Activaciones", icon: Zap, href: "/client/activaciones" },
+    ]},
+    { label: "Recursos", icon: Boxes, children: [
+      { label: "Ubicaciones", icon: MapPin, href: "/client/locations" },
+      { label: "Staff", icon: Users, href: "/client/promoters" },
+      { label: "Colaboradores", icon: UserCircle, href: "/client/collaborators" },
+    ]},
+    { label: "Terreno", icon: Radio, children: [
+      { label: "Terreno", icon: Radio, href: "/client/terreno" },
+      { label: "Calendario", icon: CalendarDays, href: "/client/calendario" },
+      { label: "Convocatorias", icon: Send, href: "/client/convocatorias" },
+      { label: "Inventario POP", icon: Package, href: "/client/inventario" },
+    ]},
+    { label: "Documentos", icon: FileText, children: [
+      { label: "Documentos", icon: FileText, href: "/client/documents" },
+      { label: "Documentos por revisar", icon: AlertTriangle, href: "/client/documentos-revisar" },
+      { label: "Reportes Internos", icon: FileText, href: "/client/reportes" },
+      { label: "Rendiciones", icon: Receipt, href: "/client/rendiciones" },
+    ]},
   ]},
   { label: "Configuración", items: [
     { label: "Usuarios",          icon: UserCircle,  href: "/client/usuarios" },
@@ -62,10 +71,51 @@ const SUPER_ADMIN_ITEMS = [
   { label: "Usuarios", icon: UserCircle, href: "/admin/usuarios" },
 ];
 
+const ACTIVE_STYLE = {
+  background: "linear-gradient(90deg, rgba(79,70,229,0.10), rgba(79,70,229,0))",
+  color: "var(--primary)",
+  boxShadow: "inset 2px 0 0 var(--primary)",
+} as const;
+
+const isActive = (pathname: string, href: string) =>
+  pathname === href || pathname.startsWith(href + "/");
+
+function NavLink({ item, pathname, indented }: { item: any; pathname: string; indented?: boolean }) {
+  const Icon = item.icon;
+  const active = isActive(pathname, item.href);
+  return (
+    <Link href={item.href}
+      className={`w-full flex items-center gap-2.5 ${indented ? "pl-9 pr-4" : "px-4"} py-2 text-sm text-left transition-colors ${active ? "font-medium" : "text-slate-700 hover:bg-slate-50"}`}
+      style={active ? ACTIVE_STYLE : undefined}>
+      <Icon size={16} strokeWidth={active ? 2 : 1.75} className={active ? "" : "text-slate-500"} style={active ? { color: "var(--primary)" } : undefined} />
+      <span className="flex-1">{item.label}</span>
+      {item.badge && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{item.badge}</span>}
+    </Link>
+  );
+}
+
+function NavGroup({ item, pathname, open, onToggle }: { item: any; pathname: string; open: boolean; onToggle: () => void }) {
+  const Icon = item.icon;
+  const hasActive = item.children.some((c: any) => isActive(pathname, c.href));
+  return (
+    <div>
+      <button onClick={onToggle}
+        className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm text-left transition-colors bg-transparent border-0 cursor-pointer ${hasActive ? "font-medium" : "text-slate-700 hover:bg-slate-50"}`}
+        style={hasActive ? { color: "var(--primary)" } : undefined}>
+        <Icon size={16} strokeWidth={hasActive ? 2 : 1.75} className={hasActive ? "" : "text-slate-500"} style={hasActive ? { color: "var(--primary)" } : undefined} />
+        <span className="flex-1">{item.label}</span>
+        <ChevronDown size={14} className="text-slate-400 transition-transform" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} />
+      </button>
+      {open && item.children.map((c: any) => <NavLink key={c.href} item={c} pathname={pathname} indented />)}
+    </div>
+  );
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const [user, setUser] = useState<Record<string, string> | null>(null);
   const [role, setRole] = useState<"admin" | "client">("client");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     try {
@@ -73,6 +123,27 @@ export default function Sidebar() {
       if (stored) setUser(JSON.parse(stored));
     } catch {}
   }, []);
+
+  // Estado de grupos abiertos: hidrata de localStorage y fuerza abierto el grupo
+  // que contiene la ruta activa (para que al navegar el item quede visible).
+  useEffect(() => {
+    let next: Record<string, boolean> = {};
+    try { next = JSON.parse(localStorage.getItem("cs_sidebar_groups") || "{}"); } catch {}
+    for (const section of CLIENT_SECTIONS) {
+      for (const it of section.items as any[]) {
+        if (it.children?.some((c: any) => isActive(pathname, c.href))) next[it.label] = true;
+      }
+    }
+    setOpenGroups(next);
+  }, [pathname]);
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [label]: !prev[label] };
+      try { localStorage.setItem("cs_sidebar_groups", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const isSuperAdmin = user?.role === "super_admin";
   // El toggle "Administrador" expone ADMIN_SECTIONS = secciones de PLATAFORMA (Clientes/tenants,
@@ -85,19 +156,10 @@ export default function Sidebar() {
     : role === "admin" ? ADMIN_SECTIONS : CLIENT_SECTIONS;
 
   return (
-    <aside className="flex flex-col w-60 flex-shrink-0 border-r" style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}>
-      <div className="flex items-center gap-2.5 px-4 py-5 border-b" style={{ borderColor: "var(--border)" }}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--primary)", boxShadow: "0 4px 14px rgba(79,70,229,0.35)" }}>
-          <Zap size={15} color="#fff" strokeWidth={2.5} />
-        </div>
-        <div>
-          <div className="text-sm font-bold leading-none">Control Suite</div>
-          <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>Operations Platform</div>
-        </div>
-      </div>
-
+    <aside className="w-60 flex-shrink-0 border-r overflow-y-auto py-4" style={{ background: "var(--sidebar)", borderColor: "var(--line)" }}>
+      {/* Reserved role toggle (SERVICE_LEAD) — hidden until the 6-role migration */}
       {showPlatformToggle && (
-        <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border)" }}>
+        <div className="px-3 pb-3">
           <div className="flex rounded-lg p-0.5 text-xs" style={{ background: "var(--secondary)" }}>
             <button onClick={() => setRole("admin")} className="flex-1 py-1.5 rounded-md font-medium"
               style={{ background: role === "admin" ? "var(--card)" : "transparent", color: role === "admin" ? "var(--foreground)" : "var(--muted-foreground)", border: "none", cursor: "pointer" }}>
@@ -111,51 +173,22 @@ export default function Sidebar() {
         </div>
       )}
 
-      {user && (
-        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: "var(--border)" }}>
-          <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0" style={{ background: "var(--secondary)", color: "var(--muted-foreground)" }}>
-            {(user.email?.[0] ?? "U").toUpperCase()}
-          </div>
-          <div className="overflow-hidden">
-            <div className="text-xs truncate" style={{ color: "var(--foreground)" }}>{user.email}</div>
-            <div className="text-xs" style={{ color: "var(--muted-foreground)", textTransform: "uppercase", fontSize: "10px" }}>{roleLabel(user.role)}</div>
-          </div>
-        </div>
-      )}
-
-      <nav className="flex-1 px-2 py-3 overflow-y-auto flex flex-col gap-0.5">
-        {sections.map((section: any) => (
-          <div key={section.label} className="mb-2">
+      <nav className="flex flex-col">
+        {sections.map((section: any, si: number) => (
+          <div key={section.label || si}>
             {section.label && (
-              <div className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted-foreground)", opacity: 0.5, fontSize: "10px" }}>
+              <div className={`px-4 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 ${si === 0 ? "pt-2" : "pt-5"}`}>
                 {section.label}
               </div>
             )}
-            {section.items.map((item: any) => {
-              const Icon = item.icon;
-              const active = pathname === item.href || pathname.startsWith(item.href + "/");
-              return (
-                <Link key={item.href} href={item.href}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"
-                  style={{ background: active ? "linear-gradient(90deg, rgba(79,70,229,0.10), rgba(79,70,229,0))" : "transparent", color: active ? "var(--primary)" : "var(--muted-foreground)", fontWeight: active ? 600 : 400, textDecoration: "none", boxShadow: active ? "inset 2px 0 0 var(--primary)" : "none" }}>
-                  <Icon size={15} strokeWidth={active ? 2.5 : 1.8} />
-                  <span className="flex-1">{item.label}</span>
-                  {item.badge && <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "var(--primary)", color: "#fff" }}>{item.badge}</span>}
-                  {active && <ChevronRight size={12} />}
-                </Link>
-              );
-            })}
+            {section.items.map((item: any) =>
+              item.children
+                ? <NavGroup key={item.label} item={item} pathname={pathname} open={!!openGroups[item.label]} onToggle={() => toggleGroup(item.label)} />
+                : <NavLink key={item.href} item={item} pathname={pathname} />
+            )}
           </div>
         ))}
       </nav>
-
-      <div className="px-2 py-3 border-t" style={{ borderColor: "var(--border)" }}>
-        <button onClick={() => { clearAuth(); window.location.href = "/login"; }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm"
-          style={{ background: "none", border: "none", color: "var(--muted-foreground)", cursor: "pointer" }}>
-          Sign out
-        </button>
-      </div>
     </aside>
   );
 }

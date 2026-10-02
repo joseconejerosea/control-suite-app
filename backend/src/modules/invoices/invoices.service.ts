@@ -21,6 +21,9 @@ export interface ReportSummary {
   total_amount: number;
   total_count: number;
   by_category: Array<{ category: string; total: number; count: number }>;
+  // Tarea 8 — posibles duplicados EXCLUIDOS del total (siguen visibles en rows).
+  dup_excluidos_count: number;
+  dup_excluidos_amount: number;
   rows: Array<{
     id: string;
     vendor_name: string | null;
@@ -32,6 +35,7 @@ export interface ReportSummary {
     description: string | null;
     status: string;
     created_at: string;
+    posible_duplicado: boolean;
   }>;
 }
 
@@ -402,7 +406,7 @@ export class InvoicesService {
     const params: any[] = [clientId, category];
     let sql = `
       SELECT id, vendor_name, amount, currency, invoice_date,
-             category, source, description, status, created_at
+             category, source, description, status, created_at, posible_duplicado
       FROM invoices WHERE client_id = $1 AND category = $2
     `;
     if (filters.from)       { params.push(filters.from);       sql += ` AND invoice_date >= $${params.length}`; }
@@ -411,12 +415,30 @@ export class InvoicesService {
     sql += ' ORDER BY invoice_date DESC, created_at DESC';
 
     const rows = await this.dataSource.query(sql, params);
-    const total_amount = rows.reduce((sum: number, r: any) => sum + (parseFloat(r.amount ?? '0') || 0), 0);
+
+    // Tarea 8 — el total EXCLUYE las filas marcadas como posible duplicado (posible_duplicado=true);
+    // esas siguen visibles en `rows` pero se reportan aparte en dup_excluidos_* para que el humano
+    // las confirme. total_count = filas NO marcadas.
+    const isDup = (r: any): boolean => r.posible_duplicado === true;
+    const parseAmount = (r: any): number => parseFloat(r.amount ?? '0') || 0;
+
+    const total_amount = rows.reduce(
+      (sum: number, r: any) => sum + (isDup(r) ? 0 : parseAmount(r)),
+      0,
+    );
+    const total_count = rows.filter((r: any) => !isDup(r)).length;
+    const dup_excluidos_amount = rows.reduce(
+      (sum: number, r: any) => sum + (isDup(r) ? parseAmount(r) : 0),
+      0,
+    );
+    const dup_excluidos_count = rows.filter(isDup).length;
 
     return {
       total_amount: Math.round(total_amount),
-      total_count:  rows.length,
-      by_category: [{ category, total: Math.round(total_amount), count: rows.length }],
+      total_count,
+      by_category: [{ category, total: Math.round(total_amount), count: total_count }],
+      dup_excluidos_count,
+      dup_excluidos_amount: Math.round(dup_excluidos_amount),
       rows: rows.map((r: any) => ({
         id: r.id, vendor_name: r.vendor_name ?? null,
         amount: r.amount != null ? parseFloat(r.amount) : null,
@@ -425,6 +447,7 @@ export class InvoicesService {
         category: r.category, source: r.source,
         description: r.description ?? null, status: r.status,
         created_at: r.created_at ? String(r.created_at) : '',
+        posible_duplicado: r.posible_duplicado === true,
       })),
     };
   }

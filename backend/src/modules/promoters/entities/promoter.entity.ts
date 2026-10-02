@@ -1,5 +1,6 @@
 import { Entity, Column, Index } from 'typeorm';
 import { TenantBaseEntity } from '../../../common/entities/tenant-base.entity';
+import { PROMOTOR_ROL_TIPO_MEMBERS } from '../../../common/promoter-role/role-rota.util';
 
 @Entity('promoters')
 export class Promoter extends TenantBaseEntity {
@@ -27,8 +28,23 @@ export class Promoter extends TenantBaseEntity {
   })
   status!: 'active' | 'inactive' | 'suspended';
 
-  // Rol/perfil del anfitrión (promotora, anfitriona, supervisor, …). Nullable:
-  // se usa para la auto-sugerencia de convocatoria (match contra perfil_personas).
+  // Rol/perfil legacy (texto libre). Se conserva para compatibilidad durante la transición.
+  // El valor estructurado vive en rol_tipo.
   @Column({ type: 'varchar', length: 100, nullable: true })
   rol!: string | null;
+
+  // Rol estructurado DB-enforced (enum promotor_rol_tipo_enum). Nullable para filas
+  // pre-migración con rol no mapeable.
+  @Column({
+    type: 'enum',
+    enum: PROMOTOR_ROL_TIPO_MEMBERS,
+    nullable: true,
+    name: 'rol_tipo',
+  })
+  rol_tipo!: string | null;
+
+  // Flag de rotación: true = el promotor trabaja en múltiples clientes/proyectos.
+  // Derivado en el servicio desde rol_tipo (no editable por el cliente — spec I-6).
+  @Column({ type: 'boolean', default: true })
+  rota!: boolean;
 }

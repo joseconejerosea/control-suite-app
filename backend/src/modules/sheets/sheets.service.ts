@@ -22,8 +22,11 @@ export class SheetsService {
     );
 
     // C3 — tokens per-tenant (ya no el buzón global GMAIL_EMAIL).
+    // provider='gmail' OBLIGATORIO: Sheets reusa el consentimiento OAuth de Google
+    // (scope spreadsheets). Los tokens de Outlook viven en la misma tabla pero NO
+    // tienen ese scope — sin este filtro, un token de Outlook rompería la exportación.
     const rows = await this.dataSource.query(
-      `SELECT tokens FROM gmail_tokens WHERE client_id = $1 AND tokens IS NOT NULL ORDER BY updated_at DESC LIMIT 1`,
+      `SELECT tokens FROM gmail_tokens WHERE client_id = $1 AND provider = 'gmail' AND tokens IS NOT NULL ORDER BY updated_at DESC LIMIT 1`,
       [clientId],
     );
     if (!rows.length) throw new Error('No Gmail OAuth tokens found for this client. Connect Gmail first.');

@@ -14,6 +14,21 @@ import { SAFE_MESSAGES } from '../../../common/exceptions';
 
 const RAW_CAUSE = 'duplicate key value violates unique constraint "invoices_pkey" xyz';
 
+// A2: invoices.project_id is resolved ATOMICALLY inside the INSERT via a tenant-scoped
+// correlated subquery (SELECT id FROM projects WHERE id=$12 AND client_id=$1). The processor
+// still normalizes any non-uuid project id (empty string, LLM-emitted project NAME, malformed
+// id) to null in JS BEFORE the INSERT so $12 is uuid-or-null and never cast-errors. Downstream
+// (rendición / confirmation / offer) reads the value the DB actually persisted, taken from the
+// INSERT's `RETURNING project_id`. So load-bearing project ids in these tests must be canonical
+// uuids, and every INSERT mock must ECHO params[11] as `project_id` to model "exists in tenant".
+const UUID_A = '11111111-1111-4111-8111-111111111111';
+const UUID_RESOLVED = '22222222-2222-4222-8222-222222222222';
+const UUID_OTHER = '33333333-3333-4333-8333-333333333333';
+const UUID_SUGGESTED = '44444444-4444-4444-8444-444444444444';
+const UUID_PAYLOAD = '55555555-5555-4555-8555-555555555555';
+const UUID_SOLO = '66666666-6666-4666-8666-666666666666';
+const UUID_STALE = '77777777-7777-4777-8777-777777777777';
+
 describe('PersistProcessor — error_message sanitization', () => {
   let processor: PersistProcessor;
   let queryMock: jest.Mock;
@@ -84,7 +99,7 @@ describe('PersistProcessor — WhatsApp confirmation (happy path)', () => {
   let dataSource: DataSource;
 
   beforeEach(() => {
-    queryMock = jest.fn((sql: string) => {
+    queryMock = jest.fn((sql: string, params?: any[]) => {
       if (sql.includes('set_config')) return Promise.resolve([]);
       if (sql.includes('SELECT payload')) {
         return Promise.resolve([
@@ -97,7 +112,10 @@ describe('PersistProcessor — WhatsApp confirmation (happy path)', () => {
           },
         ]);
       }
-      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-1' }]);
+      // A2: the INSERT now CONTAINS the correlated subquery `FROM projects`, so this branch
+      // MUST precede any `FROM projects` name-lookup branch. Echo params[11] as project_id to
+      // model "the project exists in this tenant" (subquery yields the id).
+      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-1', project_id: params?.[11] ?? null }]);
       if (sql.includes('FROM projects')) return Promise.resolve([{ name: 'Activación Falabella Costanera' }]);
       // resolvePersonaId (promoters/collaborators), UPDATE eventos_crudos, etc.
       return Promise.resolve([]);
@@ -141,7 +159,7 @@ describe('PersistProcessor — WhatsApp confirmation (happy path)', () => {
           destino: 'gastos',
           categoria: 'insumos',
           confidence_score: 0.9,
-          proyecto_id_sugerido: 'proj-1',
+          proyecto_id_sugerido: UUID_A,
           datos_extraidos: {
             monto_total: 123456,
             moneda: 'CLP',
@@ -164,14 +182,14 @@ describe('PersistProcessor — WhatsApp confirmation (happy path)', () => {
   });
 
   it('does not send a WhatsApp confirmation for the email channel', async () => {
-    queryMock.mockImplementation((sql: string) => {
+    queryMock.mockImplementation((sql: string, params?: any[]) => {
       if (sql.includes('set_config')) return Promise.resolve([]);
       if (sql.includes('SELECT payload')) {
         return Promise.resolve([
           { canal: 'email', source: 'email', email_from: 'a@b.com', payload: {} },
         ]);
       }
-      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-1' }]);
+      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-1', project_id: params?.[11] ?? null }]);
       return Promise.resolve([]);
     });
 
@@ -212,7 +230,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
     const confirmarProcesado = jest.fn().mockResolvedValue(true);
     const asignarFacturaARendicion = jest.fn().mockResolvedValue(undefined);
 
-    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+    const queryMock = jest.fn().mockImplementation(async (sql: string, params?: any[]) => {
       if (sql.includes('set_config')) return [];
       if (sql.includes('SELECT payload')) {
         return [{
@@ -228,7 +246,10 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
             : null,
         }];
       }
-      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-adrl' }];
+      // A2: the INSERT CONTAINS the correlated subquery `FROM projects`, so it MUST be matched
+      // BEFORE the name-lookup branch below. Echo params[11] as project_id to model "the project
+      // exists in this tenant" — downstream (rendición/confirmation) reads this RETURNING value.
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-adrl', project_id: params?.[11] ?? null }];
       if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Resolved Project' }];
       // resolvePersonaId: return a promoter so asignarFacturaARendicion is called
       if (sql.includes('FROM promoters')) return [{ id: 'persona-1' }];
@@ -263,8 +284,8 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
 
   it('B06 — rendición derivation uses resolved_project_id over proyecto_id_sugerido', async () => {
     const { processor, asignarFacturaARendicion } = buildProcessorWithResolvedId({
-      resolvedProjectId: 'proj-resolved',
-      proyectoIdSugerido: 'proj-other',
+      resolvedProjectId: UUID_RESOLVED,
+      proyectoIdSugerido: UUID_OTHER,
     });
 
     const job = {
@@ -277,7 +298,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
           destino: 'gastos',
           categoria: 'insumos',
           confidence_score: 0.9,
-          proyecto_id_sugerido: 'proj-other',
+          proyecto_id_sugerido: UUID_OTHER,
           datos_extraidos: {
             monto_total: 5000,
             moneda: 'CLP',
@@ -294,14 +315,14 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
     const callArgs = asignarFacturaARendicion.mock.calls[0];
     // signature: (clientId, invoiceId, personaId, projectId, amount, date)
     const projectIdArg = callArgs[3];
-    expect(projectIdArg).toBe('proj-resolved');
-    expect(projectIdArg).not.toBe('proj-other');
+    expect(projectIdArg).toBe(UUID_RESOLVED);
+    expect(projectIdArg).not.toBe(UUID_OTHER);
   });
 
   it('B07 — confirmation derivation uses resolved_project_id over proyecto_id_sugerido', async () => {
     const { processor, queryMock, confirmarProcesado } = buildProcessorWithResolvedId({
-      resolvedProjectId: 'proj-resolved',
-      proyectoIdSugerido: 'proj-other',
+      resolvedProjectId: UUID_RESOLVED,
+      proyectoIdSugerido: UUID_OTHER,
     });
 
     const job = {
@@ -314,7 +335,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
           destino: 'gastos',
           categoria: 'insumos',
           confidence_score: 0.9,
-          proyecto_id_sugerido: 'proj-other',
+          proyecto_id_sugerido: UUID_OTHER,
           datos_extraidos: {
             monto_total: 5000,
             moneda: 'CLP',
@@ -326,20 +347,26 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
 
     await processor.process(job);
 
-    // The SELECT FROM projects to get project name should use proj-resolved, not proj-other
+    // The SELECT FROM projects to get project name should use the resolved uuid, not the sugerido.
+    // Restrict to the NAME lookup (has 'WHERE id=' but NOT the guard's client_id) so we do not
+    // accidentally match the anchored tenant guard SELECT.
     const projectSelectCalls = queryMock.mock.calls.filter(
-      ([sql]: [string]) => typeof sql === 'string' && sql.includes('FROM projects') && sql.includes('WHERE id='),
+      ([sql]: [string]) =>
+        typeof sql === 'string' &&
+        sql.includes('FROM projects') &&
+        sql.includes('WHERE id=') &&
+        !sql.includes('client_id'),
     );
     expect(projectSelectCalls.length).toBeGreaterThanOrEqual(1);
     const [, params] = projectSelectCalls[0];
-    expect(params[0]).toBe('proj-resolved');
-    expect(params[0]).not.toBe('proj-other');
+    expect(params[0]).toBe(UUID_RESOLVED);
+    expect(params[0]).not.toBe(UUID_OTHER);
   });
 
   it('B06/B07 — null resolved_project_id → legacy behavior: proyecto_id_sugerido used', async () => {
     const { processor, asignarFacturaARendicion, queryMock } = buildProcessorWithResolvedId({
       resolvedProjectId: null,
-      proyectoIdSugerido: 'proj-suggested',
+      proyectoIdSugerido: UUID_SUGGESTED,
     });
 
     const job = {
@@ -352,7 +379,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
           destino: 'gastos',
           categoria: 'insumos',
           confidence_score: 0.9,
-          proyecto_id_sugerido: 'proj-suggested',
+          proyecto_id_sugerido: UUID_SUGGESTED,
           datos_extraidos: {
             monto_total: 1000,
             moneda: 'CLP',
@@ -364,20 +391,24 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
 
     await processor.process(job);
 
-    // Rendición: projectId should be 'proj-suggested' (legacy behavior)
+    // Rendición: projectId should be the sugerido uuid (legacy behavior)
     expect(asignarFacturaARendicion).toHaveBeenCalled();
     const rendicionArgs = asignarFacturaARendicion.mock.calls[0];
-    expect(rendicionArgs[3]).toBe('proj-suggested');
+    expect(rendicionArgs[3]).toBe(UUID_SUGGESTED);
 
-    // Confirmation: the FROM projects lookup MUST have run with the legacy id.
+    // Confirmation: the FROM projects NAME lookup MUST have run with the legacy id.
     // JAB-002/JBB-006 — assert unconditionally: a regression that drops the
     // confirmation derivation (never selecting the project) must fail here, not
-    // pass vacuously behind a length>0 guard.
+    // pass vacuously behind a length>0 guard. Exclude the anchored tenant guard SELECT.
     const projectSelectCalls = queryMock.mock.calls.filter(
-      ([sql]: [string]) => typeof sql === 'string' && sql.includes('FROM projects') && sql.includes('WHERE id='),
+      ([sql]: [string]) =>
+        typeof sql === 'string' &&
+        sql.includes('FROM projects') &&
+        sql.includes('WHERE id=') &&
+        !sql.includes('client_id'),
     );
     expect(projectSelectCalls.length).toBeGreaterThanOrEqual(1);
-    expect(projectSelectCalls[0][1][0]).toBe('proj-suggested');
+    expect(projectSelectCalls[0][1][0]).toBe(UUID_SUGGESTED);
   });
 
   it('JBB-002 — handles parsed_data delivered as a JSON string (not just object)', async () => {
@@ -386,7 +417,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
     const confirmarProcesado = jest.fn().mockResolvedValue(true);
     const asignarFacturaARendicion = jest.fn().mockResolvedValue(undefined);
 
-    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+    const queryMock = jest.fn().mockImplementation(async (sql: string, params?: any[]) => {
       if (sql.includes('set_config')) return [];
       if (sql.includes('SELECT payload')) {
         return [{
@@ -395,10 +426,11 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
           email_from: null,
           payload: { from: '5492216205665' },
           // parsed_data as a JSON STRING, not an object.
-          parsed_data: JSON.stringify({ resolved_project_id: 'proj-resolved' }),
+          parsed_data: JSON.stringify({ resolved_project_id: UUID_RESOLVED }),
         }];
       }
-      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-adrl' }];
+      // A2: INSERT (with subquery `FROM projects`) matched before the name lookup; echo params[11].
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-adrl', project_id: params?.[11] ?? null }];
       if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Resolved Project' }];
       if (sql.includes('FROM promoters')) return [{ id: 'persona-1' }];
       return [];
@@ -437,7 +469,7 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
           destino: 'gastos',
           categoria: 'insumos',
           confidence_score: 0.9,
-          proyecto_id_sugerido: 'proj-other',
+          proyecto_id_sugerido: UUID_OTHER,
           datos_extraidos: { monto_total: 5000, moneda: 'CLP', razon_social_emisor: 'Proveedor X' },
         },
       },
@@ -447,13 +479,13 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
 
     // resolved_project_id parsed from the string wins over proyecto_id_sugerido.
     expect(asignarFacturaARendicion).toHaveBeenCalled();
-    expect(asignarFacturaARendicion.mock.calls[0][3]).toBe('proj-resolved');
+    expect(asignarFacturaARendicion.mock.calls[0][3]).toBe(UUID_RESOLVED);
   });
 
   it('B06 — resolved_project_id used over payload.project_id for rendición', async () => {
     const { processor, asignarFacturaARendicion } = buildProcessorWithResolvedId({
-      resolvedProjectId: 'proj-resolved',
-      payloadProjectId: 'proj-from-payload',
+      resolvedProjectId: UUID_RESOLVED,
+      payloadProjectId: UUID_PAYLOAD,
     });
 
     const job = {
@@ -480,8 +512,355 @@ describe('PersistProcessor — ADR-12: resolved_project_id precedence (B06/B07)'
 
     expect(asignarFacturaARendicion).toHaveBeenCalled();
     const rendicionArgs = asignarFacturaARendicion.mock.calls[0];
-    expect(rendicionArgs[3]).toBe('proj-resolved');
-    expect(rendicionArgs[3]).not.toBe('proj-from-payload');
+    expect(rendicionArgs[3]).toBe(UUID_RESOLVED);
+    expect(rendicionArgs[3]).not.toBe(UUID_PAYLOAD);
+  });
+
+  // ─── A2 — persist resolved project onto invoices.project_id ────────────────
+  // The INSERT INTO invoices previously omitted project_id, so every invoice
+  // landed "sin asignar" (project_id = NULL) even when the resolver identified a
+  // project. project_id is the 12th param (index 11) of the INSERT params array.
+  //
+  // Helper: locate the invoice INSERT among the mocked query calls and return its
+  // project_id param.
+  function invoiceInsertProjectId(queryMock: jest.Mock): unknown {
+    const insertCall = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && /INSERT INTO invoices/.test(sql),
+    );
+    expect(insertCall).toBeDefined();
+    const [sql, params] = insertCall;
+    // Load-bearing: the INSERT SQL itself must carry the project_id column and resolve it
+    // ATOMICALLY via the tenant-scoped correlated subquery, then RETURN the resolved value.
+    // Pinning the SQL text makes a regression that drops any piece (subquery, tenant scope,
+    // RETURNING project_id) fail here rather than silently.
+    expect(sql).toContain('project_id');
+    expect(sql).toContain('FROM projects WHERE id = $12');
+    expect(sql).toContain('client_id = $1');
+    expect(sql).toContain('RETURNING id, project_id');
+    return params[11];
+  }
+
+  it('A2 — proyecto_id_sugerido (no resolved_project_id) is written to invoices.project_id', async () => {
+    const { processor, queryMock } = buildProcessorWithResolvedId({
+      resolvedProjectId: null,
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-a2-sug',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: UUID_SUGGESTED,
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor X',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    expect(invoiceInsertProjectId(queryMock)).toBe(UUID_SUGGESTED);
+  });
+
+  it('A2 — resolved_project_id takes precedence over proyecto_id_sugerido in the INSERT', async () => {
+    const { processor, queryMock } = buildProcessorWithResolvedId({
+      resolvedProjectId: UUID_RESOLVED,
+      proyectoIdSugerido: UUID_SUGGESTED,
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-a2-res',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: UUID_SUGGESTED,
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor X',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    const projectId = invoiceInsertProjectId(queryMock);
+    expect(projectId).toBe(UUID_RESOLVED);
+    expect(projectId).not.toBe(UUID_SUGGESTED);
+  });
+
+  it('A2 — no resolved, no sugerido, no payload.project_id → invoices.project_id is null', async () => {
+    const { processor, queryMock } = buildProcessorWithResolvedId({
+      resolvedProjectId: null,
+    });
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-a2-null',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          // No proyecto_id_sugerido
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor X',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    expect(invoiceInsertProjectId(queryMock)).toBeNull();
+  });
+
+  it('A2 (R3-001) — a resolved project id absent for this tenant degrades to null (factura NOT lost)', async () => {
+    // R3-001: invoices.project_id is a FK to projects(id). A stale/deleted/foreign id must not
+    // FK-violate the INSERT and lose the factura. With the atomic design the INSERT resolves
+    // project_id via a tenant-scoped correlated subquery; when the project does NOT exist for
+    // this tenant the subquery yields NULL, so the row persists "sin asignar" and can never
+    // FK-violate. The DB (via RETURNING project_id: null), NOT a JS guard, enforces this.
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const asignarFacturaARendicion = jest.fn().mockResolvedValue(undefined);
+
+    const queryMock = jest.fn().mockImplementation(async (sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return [];
+      if (sql.includes('SELECT payload')) {
+        return [{
+          canal: null,
+          source: 'whatsapp',
+          email_from: null,
+          payload: { from: '5492216205665' },
+          parsed_data: { resolved_project_id: UUID_STALE },
+        }];
+      }
+      // INSERT: the subquery finds NO matching project for this tenant → RETURNING project_id
+      // is null even though a valid uuid ($12 = UUID_STALE) was passed. This models the
+      // "graceful sin asignar" path, now enforced by the DB, not by a JS guard.
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-stale', project_id: null }];
+      if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Resolved Project' }];
+      if (sql.includes('FROM promoters')) return [{ id: 'persona-1' }];
+      return [];
+    });
+
+    const makeQueryRunner = () => ({
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      isTransactionActive: true,
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    });
+
+    const ds = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      ds,
+      { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
+      { asignarFacturaARendicion } as any,
+      { confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-a2-stale',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: UUID_STALE,
+          datos_extraidos: {
+            monto_total: 5000,
+            moneda: 'CLP',
+            razon_social_emisor: 'Proveedor X',
+          },
+        },
+      },
+    } as unknown as Job<any>;
+
+    // The persist must NOT throw — graceful degradation, not a lost factura.
+    await expect(processor.process(job)).resolves.not.toThrow();
+
+    // params[11] still carries the valid uuid ($12): JS keeps it, the DB decides existence.
+    expect(invoiceInsertProjectId(queryMock)).toBe(UUID_STALE);
+    // Downstream reads the DB-resolved value (RETURNING project_id: null): rendición gets null.
+    expect(asignarFacturaARendicion).toHaveBeenCalled();
+    expect(asignarFacturaARendicion.mock.calls[0][3]).toBeNull();
+    // And the confirmation shows "sin asignar" (no resolved project).
+    expect(confirmarProcesado).toHaveBeenCalled();
+    expect(confirmarProcesado.mock.calls[0][0].proyecto).toBe('sin asignar');
+  });
+});
+
+// ─── A2 — factura is NEVER lost (atomic in-SQL project_id resolution) ────────
+// A dual adversarial review found the prior guard+retry approach was BROKEN in production:
+// a 23503 FK violation ABORTS the tenant transaction, so the retry INSERT fails with 25P02
+// ("current transaction is aborted"), NOT 23503 → the retry is dead code and the factura is
+// still lost (see project memory `no-catch-swallow-in-tx`). The fix removes the guard SELECT
+// and the FK-retry entirely: the INSERT resolves project_id via a tenant-scoped correlated
+// subquery (SELECT id FROM projects WHERE id=$12 AND client_id=$1), which can NEVER FK-violate
+// (the value is drawn FROM projects) and is atomic (no TOCTOU). JS normalization still nulls
+// non-uuid input so $12 is uuid-or-null and never cast-errors. These tests prove the factura is
+// persisted (never thrown away) across the raw-LLM-input edge cases.
+describe('PersistProcessor — A2: factura never lost', () => {
+  // Locate the invoice INSERT among mocked calls and return its project_id param ($12 / index 11).
+  function invoiceInsertProjectId(queryMock: jest.Mock): unknown {
+    const insertCall = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && /INSERT INTO invoices/.test(sql),
+    );
+    expect(insertCall).toBeDefined();
+    const [, params] = insertCall;
+    return params[11];
+  }
+
+  /**
+   * Build a processor whose queryMock returns sensible defaults. The INSERT echoes params[11]
+   * as project_id to model "the tenant-scoped subquery found the project" (existence is decided
+   * by the DB, not a JS guard). There is no guard SELECT and no FK-retry anymore.
+   */
+  function buildProcessor(opts: { resolvedProjectId?: string | null } = {}) {
+    const { resolvedProjectId = null } = opts;
+
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const asignarFacturaARendicion = jest.fn().mockResolvedValue(undefined);
+
+    const queryMock = jest.fn().mockImplementation((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([{
+          canal: null,
+          source: 'whatsapp',
+          email_from: null,
+          payload: { from: '5492216205665' },
+          parsed_data: resolvedProjectId !== null ? { resolved_project_id: resolvedProjectId } : null,
+        }]);
+      }
+      // INSERT (with the subquery `FROM projects`) matched BEFORE the name lookup; echo params[11].
+      if (sql.includes('INSERT INTO invoices')) {
+        return Promise.resolve([{ id: 'inv-hard', project_id: params?.[11] ?? null }]);
+      }
+      if (sql.includes('FROM projects WHERE id=')) return Promise.resolve([{ name: 'Proyecto' }]);
+      if (sql.includes('FROM promoters')) return Promise.resolve([{ id: 'persona-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = () => ({
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      isTransactionActive: true,
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    });
+
+    const ds = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      ds,
+      { exportInvoice: jest.fn().mockResolvedValue(undefined) } as any,
+      { asignarFacturaARendicion } as any,
+      {
+        confirmarProcesado,
+        avisarDuplicado: jest.fn().mockResolvedValue(true),
+        avisarFalloProcesamiento: jest.fn().mockResolvedValue(true),
+      } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+
+    return { processor, queryMock, confirmarProcesado, asignarFacturaARendicion };
+  }
+
+  function makeJob(proyectoIdSugerido: string): any {
+    return {
+      data: {
+        evento_crudo_id: 'evt-hard',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          categoria: 'insumos',
+          confidence_score: 0.9,
+          proyecto_id_sugerido: proyectoIdSugerido,
+          datos_extraidos: { monto_total: 5000, moneda: 'CLP', razon_social_emisor: 'Proveedor X' },
+        },
+      },
+    };
+  }
+
+  it('empty-string proyecto_id_sugerido → INSERT runs with project_id null, no throw', async () => {
+    // '' is falsy: `??` does NOT skip it, so normalization uses `!projectId ||` to coerce '' → null
+    // BEFORE the INSERT. $12 is thus null (never the empty string, which would cast-error at uuid).
+    const { processor, queryMock } = buildProcessor({ resolvedProjectId: null });
+
+    await expect(processor.process(makeJob(''))).resolves.not.toThrow();
+
+    // INSERT ran with project_id = null (sin asignar), never ''.
+    expect(invoiceInsertProjectId(queryMock)).toBeNull();
+
+    // The evento was marked processed (not failed) — factura NOT lost.
+    const processedWrite = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='processed'"),
+    );
+    expect(processedWrite).toBeDefined();
+  });
+
+  it('a project NAME (non-uuid) is normalized to null → INSERT gets null $12, no throw', async () => {
+    // The LLM can emit a project NAME instead of an id. Normalization drops any non-uuid to null
+    // so $12 is uuid-or-null and the subquery `id = $12` never cast-errors. The factura persists.
+    const { processor, queryMock } = buildProcessor({ resolvedProjectId: null });
+
+    await expect(processor.process(makeJob('Snack Pacifico'))).resolves.not.toThrow();
+
+    // INSERT ran with project_id = null.
+    expect(invoiceInsertProjectId(queryMock)).toBeNull();
+    const processedWrite = queryMock.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes("status='processed'"),
+    );
+    expect(processedWrite).toBeDefined();
+  });
+
+  it('a valid uuid is passed as $12 and echoed back via RETURNING → downstream uses the resolved value', async () => {
+    // When the subquery finds the project (mock echoes params[11]), assignedProjectId comes from
+    // RETURNING project_id, and the rendición receives that resolved value.
+    const { processor, queryMock, asignarFacturaARendicion } = buildProcessor({ resolvedProjectId: UUID_RESOLVED });
+
+    await expect(processor.process(makeJob(UUID_RESOLVED))).resolves.not.toThrow();
+
+    expect(invoiceInsertProjectId(queryMock)).toBe(UUID_RESOLVED);
+    expect(asignarFacturaARendicion).toHaveBeenCalled();
+    expect(asignarFacturaARendicion.mock.calls[0][3]).toBe(UUID_RESOLVED);
   });
 });
 
@@ -517,7 +896,7 @@ describe('PersistProcessor — Slice C: NUEVO offer (C01/C02)', () => {
 
     const confirmarProcesado = jest.fn().mockResolvedValue(true);
 
-    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+    const queryMock = jest.fn().mockImplementation(async (sql: string, params?: any[]) => {
       if (sql.includes('set_config')) return [];
       if (sql.includes('SELECT payload')) {
         return [{
@@ -528,7 +907,9 @@ describe('PersistProcessor — Slice C: NUEVO offer (C01/C02)', () => {
           parsed_data: null,
         }];
       }
-      if (sql.includes('INSERT INTO invoices')) return [{ id: invoiceId }];
+      // A2: INSERT (with subquery `FROM projects`) matched BEFORE the name lookup. Echo params[11]
+      // so proj-solo survives to autoAssignedProjectId (C02) via RETURNING project_id.
+      if (sql.includes('INSERT INTO invoices')) return [{ id: invoiceId, project_id: params?.[11] ?? null }];
       if (sql.includes('FROM projects WHERE id=')) return [{ name: 'Proyecto Solo' }];
       // canCreate inline query: MANAGER check (also carries language for nuevoLine wording)
       if (sql.includes("role = 'MANAGER'")) {
@@ -576,7 +957,7 @@ describe('PersistProcessor — Slice C: NUEVO offer (C01/C02)', () => {
           destino: 'gastos',
           categoria: 'insumos',
           confidence_score: 0.95,
-          proyecto_id_sugerido: 'proj-solo',
+          proyecto_id_sugerido: UUID_SOLO,
           resolver_method: opts.resolverMethod ?? 'single_active_project',
           datos_extraidos: {
             monto_total: 5000,
@@ -637,7 +1018,7 @@ describe('PersistProcessor — Slice C: NUEVO offer (C01/C02)', () => {
     // Must carry the evento id
     expect(savedSession.clarification.eventoCrudoId).toBe('ec-solo');
     // Must carry the auto-assigned project id
-    expect(savedSession.clarification.autoAssignedProjectId).toBe('proj-solo');
+    expect(savedSession.clarification.autoAssignedProjectId).toBe(UUID_SOLO);
   });
 
   it('C02 — facturaId is stored on the offer session (sub-case 2 detection)', async () => {
@@ -691,10 +1072,10 @@ describe('PersistProcessor — Slice C: NUEVO offer (C01/C02)', () => {
   it('C01/C02 — NO offer when phone is unresolved (email channel, no phone)', async () => {
     const sessionSet = jest.fn().mockResolvedValue(undefined);
     const confirmarProcesado = jest.fn().mockResolvedValue(true);
-    const queryMock = jest.fn().mockImplementation(async (sql: string) => {
+    const queryMock = jest.fn().mockImplementation(async (sql: string, params?: any[]) => {
       if (sql.includes('set_config')) return [];
       if (sql.includes('SELECT payload')) return [{ canal: 'email', source: 'email', email_from: 'x@y.com', payload: {}, parsed_data: null }];
-      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-1' }];
+      if (sql.includes('INSERT INTO invoices')) return [{ id: 'inv-1', project_id: params?.[11] ?? null }];
       return [];
     });
 
@@ -787,5 +1168,475 @@ describe('PersistProcessor — duplicate notification', () => {
 
     expect(avisarDuplicado).toHaveBeenCalledWith('5492216205665');
     expect(confirmarProcesado).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Tarea 8 (Matriz v1.4) — FIX: marca posible duplicado sin borrar ─────────
+// El QA reportó doble-conteo de la MISMA boleta. La causa real (confirmada contra la
+// DB de dev, NO la hipótesis "por-alcance proyecto" del informe): las DOS capas de
+// dedup dependen de una llave que puede faltar —
+//   1) content-hash: exige eventos_crudos.doc_sha256 (el OCR lo backfillea; puede ser NULL).
+//   2) natural-key : sólo corre `if (datos.numero_documento && datos.rut_emisor)`.
+// Cuando faltan AMBAS (foto sin hash + OCR sin folio/RUT), NINGUNA capa la caza y un
+// reenvío crea una SEGUNDA factura. El FIX agrega una TERCERA capa SOFT: detecta un
+// probable duplicado por vendor_name + amount + invoice_date y MARCA la factura
+// (posible_duplicado=true) SIN borrarla — el humano revisa en el reporte. Estos tests
+// prueban que la factura se INSERTA con el flag correcto según el tercer check.
+//
+// El INSERT lleva posible_duplicado como ÚLTIMA columna ($13 / params[12]); project_id
+// sigue en $12 (params[11]) vía subquery, y RETURNING id, project_id no cambia.
+function invoiceInsertPosibleDuplicado(queryMock: jest.Mock): unknown {
+  const insertCall = queryMock.mock.calls.find(
+    ([sql]: [string]) => typeof sql === 'string' && /INSERT INTO invoices/.test(sql),
+  );
+  expect(insertCall).toBeDefined();
+  const [sql, params] = insertCall;
+  // Load-bearing: la columna nueva viaja como último parámetro, sin tocar el resto.
+  expect(sql).toContain('posible_duplicado');
+  expect(sql).toContain('$13');
+  expect(sql).toContain('RETURNING id, project_id');
+  return params[12];
+}
+
+describe('PersistProcessor — Tarea 8 (fix): marca posible duplicado sin borrar', () => {
+  function buildProcessor(softMatch: boolean) {
+    const queryMock = jest.fn((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' }, parsed_data: null },
+        ]);
+      }
+      // Content-hash: NO hay otro evento con el mismo hash (esta foto entró sin doc_sha256).
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([]);
+      // Tercera capa SOFT: se distingue por `vendor_name=` (el natural-key usa numero_documento).
+      if (sql.includes('FROM invoices WHERE') && sql.includes('vendor_name=')) {
+        return Promise.resolve(softMatch ? [{ id: 'existing' }] : []);
+      }
+      // Natural-key: no debería ni consultarse (guard salteado); si corriera, no matchea.
+      if (sql.includes('FROM invoices WHERE')) return Promise.resolve([]);
+      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-dup-t8', project_id: params?.[11] ?? null }]);
+      if (sql.includes('FROM promoters')) return Promise.resolve([{ id: 'persona-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const avisarDuplicado = jest.fn().mockResolvedValue(true);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: jest.fn() } as any,
+      { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+
+    return { processor, queryMock, avisarDuplicado, confirmarProcesado };
+  }
+
+  function makeJob(): Job<any> {
+    return {
+      data: {
+        evento_crudo_id: 'evt-t8',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          // Boleta de Valparaíso del QA: SIN numero_documento ni rut_emisor (el OCR no los sacó).
+          datos_extraidos: { monto_total: 3150, moneda: 'CLP', razon_social_emisor: 'I. MUNICIPALIDAD DE VALPARAÍSO', fecha_emision: '2026-08-25' },
+        },
+      },
+    } as unknown as Job<any>;
+  }
+
+  it('cuando el tercer check MATCHEA → inserta la factura con posible_duplicado=true (no la borra)', async () => {
+    const { processor, queryMock, avisarDuplicado } = buildProcessor(true);
+
+    await processor.process(makeJob());
+
+    // La factura SÍ se inserta (nada se pierde) pero MARCADA como posible duplicado.
+    expect(invoiceInsertPosibleDuplicado(queryMock)).toBe(true);
+    // No se descartó como duplicado duro (no markDuplicate): el evento queda 'processed'.
+    expect(avisarDuplicado).not.toHaveBeenCalled();
+    const dupUpdate = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes("processing_status_new='duplicate'"));
+    expect(dupUpdate).toBeUndefined();
+    const processedWrite = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes("status='processed'"));
+    expect(processedWrite).toBeDefined();
+  });
+
+  it('cuando el tercer check NO matchea (vendor/monto/fecha distintos) → inserta normal, posible_duplicado=false', async () => {
+    const { processor, queryMock, avisarDuplicado } = buildProcessor(false);
+
+    await processor.process(makeJob());
+
+    expect(invoiceInsertPosibleDuplicado(queryMock)).toBe(false);
+    expect(avisarDuplicado).not.toHaveBeenCalled();
+  });
+
+  it('R3-002 · vendor "Unknown" (OCR sin proveedor) NO dispara el soft-check → sin falso positivo', async () => {
+    // El mock MATCHEARÍA (softMatch=true), pero con vendor='Unknown' el soft-check ni se
+    // consulta → dos boletas sin proveedor con mismo monto+fecha no se marcan (no se excluye
+    // un gasto legítimo del total).
+    const { processor, queryMock } = buildProcessor(true);
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-t8-unknown',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          // SIN razon_social_emisor → vendorName cae a 'Unknown'.
+          datos_extraidos: { monto_total: 3150, moneda: 'CLP', fecha_emision: '2026-08-25' },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    // El soft-check (SELECT por vendor_name=) NUNCA se consultó (guard 'Unknown').
+    const softCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('vendor_name='));
+    expect(softCall).toBeUndefined();
+    // La factura entra sin marca.
+    expect(invoiceInsertPosibleDuplicado(queryMock)).toBe(false);
+  });
+});
+
+describe('PersistProcessor — content-hash duplicate (T10)', () => {
+  it('marca duplicate + avisa cuando otro evento PROCESADO tiene el mismo doc_sha256, SIN natural-key', async () => {
+    const queryMock = jest.fn((sql: string, _params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' } },
+        ]);
+      }
+      // Dedup por CONTENIDO: el JOIN encuentra otro evento con el mismo hash.
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([{ id: 'prior-evt' }]);
+      // Natural-key NO matchea (aislamos el path del hash).
+      if (sql.includes('FROM invoices WHERE')) return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const avisarDuplicado = jest.fn().mockResolvedValue(true);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: jest.fn() } as any,
+      { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+
+    const job = {
+      data: {
+        evento_crudo_id: 'evt-hashdup',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'factura_recibida',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          // Sin numero_documento/rut_emisor → el natural-key ni se evalúa; SOLO el hash caza.
+          datos_extraidos: { monto_total: 100 },
+        },
+      },
+    } as unknown as Job<any>;
+
+    await processor.process(job);
+
+    expect(avisarDuplicado).toHaveBeenCalledWith('5492216205665');
+    expect(confirmarProcesado).not.toHaveBeenCalled();
+    // NO insertó invoice.
+    const insertCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'));
+    expect(insertCall).toBeUndefined();
+    // Marcó el evento como duplicate.
+    const dupUpdate = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes("processing_status_new='duplicate'"));
+    expect(dupUpdate).toBeDefined();
+  });
+});
+
+// ─── C1 (Informe v1.9) — hardening de la dedup natural-key ────────────────────
+// El informe v1.9 reportó que un reenvío RE-ENCODEADO (WhatsApp cambia los bytes → el hash
+// no lo caza) creaba una segunda factura. Causa raíz confirmada contra la BD dev: la capa
+// natural-key era CÓDIGO MUERTO — el INSERT nunca poblaba invoices.numero_documento /
+// rut_emisor (NULL en 47/47 facturas) y además exigía el rut_emisor, que el OCR varía
+// (69060900-2 vs 6906090-2). FIX: (1) el INSERT persiste esas columnas; (2) la natural-key
+// keyea por N° doc normalizado + monto, SIN exigir RUT. Estos tests fijan ambos.
+describe('PersistProcessor — C1 v1.9 (natural-key por N° doc + monto, persiste campos)', () => {
+  function buildProcessor(naturalKeyHit: boolean) {
+    const queryMock = jest.fn((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' }, parsed_data: null },
+        ]);
+      }
+      // Hash miss: el reenvío re-encodeado tiene otros bytes → otro doc_sha256.
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([]);
+      // Natural-key: el SELECT con regexp_replace(numero_documento) es exclusivo de esta capa.
+      if (sql.includes('regexp_replace') && sql.includes('numero_documento')) {
+        return Promise.resolve(naturalKeyHit ? [{ id: 'prior-inv' }] : []);
+      }
+      // Soft-check (vendor_name=) — no debe cazar en estos tests.
+      if (sql.includes('FROM invoices WHERE') && sql.includes('vendor_name=')) return Promise.resolve([]);
+      if (sql.includes('INSERT INTO invoices')) {
+        return Promise.resolve([{ id: 'inv-c1', project_id: params?.[11] ?? null }]);
+      }
+      if (sql.includes('FROM promoters')) return Promise.resolve([{ id: 'persona-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const avisarDuplicado = jest.fn().mockResolvedValue(true);
+    const confirmarProcesado = jest.fn().mockResolvedValue(true);
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: jest.fn() } as any,
+      { avisarDuplicado, confirmarProcesado } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+    return { processor, queryMock, avisarDuplicado, confirmarProcesado };
+  }
+
+  // La boleta del caso: N° doc estable, RUT con formato distinto entre corridas.
+  function makeJob(over: Record<string, unknown> = {}): Job<any> {
+    return {
+      data: {
+        evento_crudo_id: 'evt-c1',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'boleta',
+          destino: 'gastos',
+          confidence_score: 0.9,
+          datos_extraidos: {
+            numero_documento: '195647265',
+            rut_emisor: '6906090-2',
+            monto_total: 3150,
+            moneda: 'CLP',
+            razon_social_emisor: 'I. MUNICIPALIDAD DE VALPARAÍSO',
+            fecha_emision: '2026-08-25',
+            monto_neto: 2647,
+            monto_iva: 503,
+            ...over,
+          },
+        },
+      },
+    } as unknown as Job<any>;
+  }
+
+  it('reenvío re-encodeado (hash miss) → la natural-key lo caza por N° doc + monto, aunque el RUT varíe', async () => {
+    const { processor, queryMock, avisarDuplicado } = buildProcessor(true);
+
+    await processor.process(makeJob());
+
+    // Cazado como duplicado: avisa y NO inserta.
+    expect(avisarDuplicado).toHaveBeenCalledWith('5492216205665');
+    const insertCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'));
+    expect(insertCall).toBeUndefined();
+
+    // La natural-key se consultó con el folio NORMALIZADO y el monto — no con el RUT.
+    const nkCall = queryMock.mock.calls.find(
+      ([sql]: [string]) => String(sql).includes('regexp_replace') && String(sql).includes('numero_documento'),
+    );
+    expect(nkCall).toBeDefined();
+    const [, nkParams] = nkCall;
+    expect(nkParams[1]).toBe('195647265'); // normalizeDocKey del folio
+    expect(nkParams[2]).toBe(3150); // monto
+    expect(nkParams).not.toContain('6906090-2'); // el RUT NO participa de la llave
+  });
+
+  it('sin duplicado → el INSERT persiste numero_documento, rut_emisor, tipo, destino y montos', async () => {
+    const { processor, queryMock } = buildProcessor(false);
+
+    await processor.process(makeJob());
+
+    const insertCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'));
+    expect(insertCall).toBeDefined();
+    const [sql, params] = insertCall;
+    // Columnas nuevas presentes y el INSERT llega hasta $22 (sin correr project_id=$12 ni posible_duplicado=$13).
+    expect(sql).toContain('numero_documento');
+    expect(sql).toContain('rut_emisor');
+    expect(sql).toContain('$22');
+    expect(sql).toContain('RETURNING id, project_id');
+    // Valores mapeados (append después de posible_duplicado en params[12]).
+    expect(params[12]).toBe(false); // posible_duplicado intacto
+    expect(params[13]).toBe('195647265'); // numero_documento
+    expect(params[14]).toBe('6906090-2'); // rut_emisor (se persiste tal cual el OCR)
+    expect(params[15]).toBe('boleta'); // tipo
+    expect(params[16]).toBe('gastos'); // destino
+    expect(params[20]).toBe(3150); // monto_total
+  });
+
+  it('folio ausente → la natural-key NO corre (cae al soft-check), sin falso positivo', async () => {
+    const { processor, queryMock } = buildProcessor(true);
+
+    await processor.process(makeJob({ numero_documento: undefined }));
+
+    // Con numero_documento ausente la capa natural-key ni se consulta.
+    const nkCall = queryMock.mock.calls.find(
+      ([sql]: [string]) => String(sql).includes('regexp_replace') && String(sql).includes('numero_documento'),
+    );
+    expect(nkCall).toBeUndefined();
+  });
+});
+
+// ─── C2 (Informe v1.9) — inferir activation_id por promotor + fecha ───────────
+// Rompe el silo gasto↔terreno: el gasto WhatsApp se liga a la activación agendada del
+// promotor remitente para esa fecha, SOLO si hay exactamente una candidata. 0 o >1 → null
+// (queda por proyecto). Se persiste en invoices.activation_id ($23) y se pasa a la rendición.
+describe('PersistProcessor — C2 v1.9 (inferir activation_id)', () => {
+  function buildProcessor(activationRows: { id: string }[], promoterRows = [{ id: 'promoter-1' }]) {
+    const asignar = jest.fn();
+    const queryMock = jest.fn((sql: string, params?: any[]) => {
+      if (sql.includes('set_config')) return Promise.resolve([]);
+      if (sql.includes('SELECT payload')) {
+        return Promise.resolve([
+          { canal: null, source: 'whatsapp', email_from: null, payload: { from: '5492216205665' }, parsed_data: null },
+        ]);
+      }
+      if (sql.includes('JOIN eventos_crudos dup')) return Promise.resolve([]);
+      if (sql.includes('regexp_replace') && sql.includes('numero_documento')) return Promise.resolve([]);
+      if (sql.includes('FROM invoices WHERE') && sql.includes('vendor_name=')) return Promise.resolve([]);
+      if (sql.includes('FROM activations')) return Promise.resolve(activationRows);
+      if (sql.includes('FROM promoters')) return Promise.resolve(promoterRows);
+      if (sql.includes('INSERT INTO invoices')) return Promise.resolve([{ id: 'inv-c2', project_id: 'proj-1' }]);
+      return Promise.resolve([]);
+    });
+
+    const makeQueryRunner = (): QueryRunner =>
+      ({
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+        query: (sql: string, params?: any[]) => queryMock(sql, params),
+      }) as unknown as QueryRunner;
+
+    const dataSource = {
+      createQueryRunner: jest.fn(() => makeQueryRunner()),
+      query: (sql: string, params?: any[]) => queryMock(sql, params),
+    } as unknown as DataSource;
+
+    const processor = new PersistProcessor(
+      dataSource,
+      { exportInvoice: jest.fn() } as any,
+      { asignarFacturaARendicion: asignar } as any,
+      { avisarDuplicado: jest.fn(), confirmarProcesado: jest.fn() } as any,
+      { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined), delete: jest.fn() } as any,
+    );
+    return { processor, queryMock, asignar };
+  }
+
+  function makeJob(): Job<any> {
+    return {
+      data: {
+        evento_crudo_id: 'evt-c2',
+        client_id: 'client-1',
+        processing_status: 'processed',
+        classification: {
+          tipo: 'boleta',
+          destino: 'gastos', // → category 'expense' → corre asignarFacturaARendicion
+          confidence_score: 0.9,
+          datos_extraidos: { monto_total: 5000, moneda: 'CLP', razon_social_emisor: 'Proveedor X', fecha_emision: '2026-09-14' },
+        },
+      },
+    } as unknown as Job<any>;
+  }
+
+  const insertParams = (queryMock: jest.Mock) =>
+    queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO invoices'))?.[1];
+
+  it('exactamente UNA activación del promotor esa fecha → liga activation_id (invoice + rendición)', async () => {
+    const { processor, queryMock, asignar } = buildProcessor([{ id: 'act-1' }]);
+
+    await processor.process(makeJob());
+
+    // Persistido en invoices.activation_id ($23 → params[22]).
+    const params = insertParams(queryMock);
+    expect(params?.[22]).toBe('act-1');
+    // Y pasado a la rendición como 7º argumento.
+    expect(asignar).toHaveBeenCalledWith('client-1', 'inv-c2', 'promoter-1', 'proj-1', 5000, '2026-09-14', 'act-1');
+  });
+
+  it('activación AMBIGUA (>1 candidata) → activation_id null (no adivina)', async () => {
+    const { processor, queryMock, asignar } = buildProcessor([{ id: 'act-1' }, { id: 'act-2' }]);
+
+    await processor.process(makeJob());
+
+    expect(insertParams(queryMock)?.[22]).toBeNull();
+    expect(asignar).toHaveBeenCalledWith('client-1', 'inv-c2', 'promoter-1', 'proj-1', 5000, '2026-09-14', null);
+  });
+
+  it('sin activación candidata → activation_id null', async () => {
+    const { processor, queryMock } = buildProcessor([]);
+
+    await processor.process(makeJob());
+
+    expect(insertParams(queryMock)?.[22]).toBeNull();
+  });
+
+  it('remitente sin promotor → no consulta activaciones, activation_id null', async () => {
+    const { processor, queryMock } = buildProcessor([{ id: 'act-1' }], []); // promoterRows vacío
+
+    await processor.process(makeJob());
+
+    // Sin promotor, la query de activaciones ni corre.
+    const actCall = queryMock.mock.calls.find(([sql]: [string]) => String(sql).includes('FROM activations'));
+    expect(actCall).toBeUndefined();
+    expect(insertParams(queryMock)?.[22]).toBeNull();
   });
 });

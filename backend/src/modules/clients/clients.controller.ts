@@ -57,4 +57,11 @@ export class ClientsController {
   getOnboardingStatus(@Param('id', ParseUUIDPipe) id: string) {
     return this.clientsService.getOnboardingStatus(id);
   }
+
+  /** Rotate the agency affiliation code (credential → must be revocable). */
+  @Post(':id/rotate-affiliation-code')
+  @AuditAction({ action: 'ROTATE_AFFILIATION_CODE', entity: 'Client' })
+  rotateAffiliationCode(@Param('id', ParseUUIDPipe) id: string) {
+    return this.clientsService.rotateAffiliationCode(id);
+  }
 }
