@@ -10,6 +10,7 @@ import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { Client } from '../clients/client.entity';
 import { User } from '../users/user.entity';
+import { assertEmailNotPlatform } from '../users/assert-email-not-platform';
 import { CreateAdminUserDto } from './dto/create-admin-user.dto';
 import { UserRole } from '../../common/enums/user-role.enum';
 
@@ -63,6 +64,9 @@ export class OnboardingService {
 
     const existing = await this.userRepo.findOneBy({ email: dto.email, client_id: clientId });
     if (existing) throw new ConflictException(`User '${dto.email}' already exists for this client.`);
+
+    // Un email de super_admin (platform, client_id NULL) no puede ser el admin de un tenant.
+    await assertEmailNotPlatform(this.userRepo, dto.email);
 
     const user = this.userRepo.create({
       email: dto.email,

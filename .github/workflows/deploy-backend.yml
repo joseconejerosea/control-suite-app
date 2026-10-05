@@ -46,7 +46,13 @@ jobs:
             # On a manual workflow_dispatch it is empty, so fall back to the
             # chosen `environment` input. This keeps both trigger paths working.
             TARGET_REF="${{ github.event.inputs.environment || github.base_ref }}"
-            if [ "$TARGET_REF" = "main" ]; then
+            # Visibilidad: sin esto, un TARGET_REF que no matchea "main" caía al
+            # catch-all y deployaba dev SIN avisar (un PR dev->main terminaba en
+            # dev). Ahora logeamos qué resolvió y, abajo, un valor inesperado
+            # FALLA en vez de deployar el entorno equivocado por default.
+            echo "event=${{ github.event_name }} base_ref='${{ github.base_ref }}' input='${{ github.event.inputs.environment }}' -> TARGET_REF='$TARGET_REF'"
+            case "$TARGET_REF" in
+            main)
               DIR="$HOME/entornos/control-suite-prod"
               PORT=3002
               NODE_ENV=production
@@ -76,7 +82,8 @@ jobs:
               ENV_LABEL="prod"
               FRONTEND_PORT=3100
               NEXT_PUBLIC_API_URL="${{ vars.PROD_NEXT_PUBLIC_API_URL }}"
-            else
+              ;;
+            dev)
               DIR="$HOME/entornos/control-suite-dev"
               PORT=3001
               NODE_ENV=development
@@ -106,7 +113,12 @@ jobs:
               ENV_LABEL="dev"
               FRONTEND_PORT=3000
               NEXT_PUBLIC_API_URL="${{ vars.DEV_NEXT_PUBLIC_API_URL }}"
-            fi
+              ;;
+            *)
+              echo "::error::TARGET_REF inesperado ('$TARGET_REF') — event=${{ github.event_name }} base_ref='${{ github.base_ref }}'. No se deploya nada."
+              exit 1
+              ;;
+            esac
 
             cd "$DIR"
             git pull origin "$TARGET_REF"

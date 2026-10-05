@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -43,13 +43,69 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.userRepo.findOne({ where: { email: dto.email } });
-    if (!user) throw new UnauthorizedException('Credenciales inválidas');
+    // users.email es único SÓLO por tenant (índice compuesto (client_id, email),
+    // migración 009): el mismo email puede existir en varias agencias. Por eso
+    // NO alcanza con findOne({ email }) — devolvía un tenant arbitrario y el JWT
+    // quedaba con el client_id equivocado (info cruzada en /client/usuarios).
+    const candidates = await this.userRepo.find({
+      where: { email: dto.email },
+    });
 
-    const valid = await bcrypt.compare(dto.password, user.password);
-    if (!valid) throw new UnauthorizedException('Credenciales inválidas');
+    // La contraseña se valida contra CADA candidato. Nunca revelamos a qué
+    // agencias pertenece un email antes de autenticar: sólo las cuentas cuya
+    // contraseña matchea son elegibles para el siguiente paso.
+    const matches: User[] = [];
+    for (const candidate of candidates) {
+      if (await bcrypt.compare(dto.password, candidate.password)) {
+        matches.push(candidate);
+      }
+    }
 
-    return this.generateTokens(user);
+    if (matches.length === 0) {
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    // Caso normal: una sola cuenta matchea → login determinístico.
+    if (matches.length === 1) {
+      return this.generateTokens(matches[0]);
+    }
+
+    // Ambiguo: el MISMO email + contraseña existe en más de una agencia.
+    // Si el frontend ya eligió agencia, resolvemos a esa (y sólo entre las que
+    // matchearon la contraseña, para no habilitar un tenant ajeno).
+    if (dto.tenantId) {
+      const chosen = matches.find((u) => u.client_id === dto.tenantId);
+      if (!chosen) throw new UnauthorizedException('Credenciales inválidas');
+      return this.generateTokens(chosen);
+    }
+
+    // Si no eligió, pedimos desambiguación por agencia.
+    return { needsTenant: true as const, tenants: await this.tenantChoices(matches) };
+  }
+
+  /**
+   * Arma la lista de agencias para el paso de desambiguación del login.
+   * Sólo cuentas de tenant (client_id no nulo); los usuarios platform-level
+   * (super_admin/service_lead) tienen email único global (UQ_USERS_EMAIL_PLATFORM),
+   * así que no entran en este camino de colisión.
+   */
+  private async tenantChoices(
+    users: User[],
+  ): Promise<{ id: string; nombre: string | null }[]> {
+    const ids = users
+      .map((u) => u.client_id)
+      .filter((id): id is string => !!id);
+    if (!ids.length) return [];
+
+    const clients = await this.clientRepo.find({ where: { id: In(ids) } });
+    const nameById = new Map(clients.map((c) => [c.id, c.nombre ?? null]));
+
+    return users
+      .filter((u) => !!u.client_id)
+      .map((u) => ({
+        id: u.client_id as string,
+        nombre: nameById.get(u.client_id as string) ?? null,
+      }));
   }
 
   async refreshToken(token: string) {

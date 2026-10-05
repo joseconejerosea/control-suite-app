@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { assertEmailNotPlatform } from './assert-email-not-platform';
 
 @Injectable()
 export class UserService {
@@ -19,6 +20,8 @@ export class UserService {
   }
 
   async create(dto: CreateUserDto): Promise<User> {
+    await assertEmailNotPlatform(this.userRepo, dto.email);
+
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const user = this.userRepo.create({

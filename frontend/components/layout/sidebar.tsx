@@ -1,15 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { clearAuth } from "@/lib/api";
 import {
   LayoutDashboard, FolderOpen, MapPin, Users, Megaphone,
   FileText, UserCircle, Building2,
   Bell, List, Activity, CreditCard, ShieldCheck,
   AlertTriangle, Receipt, Package, Brain, Radio, GitCompare,
   Settings, CalendarDays, Zap, Layers, Boxes, ChevronDown, Send,
+  ChevronsUpDown,
 } from "lucide-react";
+
+// NEXT_PUBLIC_API_URL NO incluye /api (contrato de lib/api.ts). El /api se agrega acá.
+const API = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/api`;
 
 // Un item puede ser un link plano ({ href }) o un grupo colapsable ({ children }).
 const CLIENT_SECTIONS = [
@@ -113,9 +118,11 @@ function NavGroup({ item, pathname, open, onToggle }: { item: any; pathname: str
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [user, setUser] = useState<Record<string, string> | null>(null);
   const [role, setRole] = useState<"admin" | "client">("client");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [agency, setAgency] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -123,6 +130,31 @@ export default function Sidebar() {
       if (stored) setUser(JSON.parse(stored));
     } catch {}
   }, []);
+
+  // Nombre de la agencia activa para el chip del sidebar. /workspace/context es
+  // self-service del Manager (devuelve su propio client). Super_admin interviene
+  // agencias vía select-tenant → el chip no aplica a su vista de plataforma.
+  useEffect(() => {
+    if (!user || user.role === "super_admin") return;
+    try {
+      const token = localStorage.getItem("cs_token") ?? "";
+      fetch(`${API}/workspace/context`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((res) => {
+          const d = res?.data ?? res;
+          if (d?.client?.nombre) setAgency(d.client.nombre as string);
+        })
+        .catch(() => {});
+    } catch {}
+  }, [user]);
+
+  // Cambiar de agencia = autenticarse como la otra cuenta (el selector necesita
+  // email+password, que no guardamos). Limpiamos sesión y mandamos al login,
+  // donde reaparece el selector de agencias si el email existe en varias.
+  const switchAgency = () => {
+    clearAuth();
+    router.push("/login");
+  };
 
   // Estado de grupos abiertos: hidrata de localStorage y fuerza abierto el grupo
   // que contiene la ruta activa (para que al navegar el item quede visible).
@@ -170,6 +202,27 @@ export default function Sidebar() {
               Cliente
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Chip de agencia activa — arriba de "General". Click → selector de agencias. */}
+      {!isSuperAdmin && agency && (
+        <div className="px-3 pb-3">
+          <button
+            onClick={switchAgency}
+            title="Cambiar de agencia"
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left transition-colors hover:border-indigo-400 hover:bg-indigo-50/40 cursor-pointer"
+            style={{ borderColor: "var(--line)", background: "var(--card)" }}
+          >
+            <div className="w-7 h-7 rounded-md flex items-center justify-center bg-gradient-to-br from-indigo-500 to-cyan-500 flex-shrink-0">
+              <Building2 size={15} color="#fff" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Agencia</div>
+              <div className="text-sm font-medium truncate">{agency}</div>
+            </div>
+            <ChevronsUpDown size={14} className="text-slate-400 flex-shrink-0" />
+          </button>
         </div>
       )}
 
