@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { assertEmailNotPlatform } from './assert-email-not-platform';
 import * as bcrypt from 'bcrypt';
 import { User } from './user.entity';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -103,6 +104,11 @@ export class AdminUsersController {
     }
   }
 
+  /** Delega en el helper compartido (fuente única del chequeo platform-email). */
+  private assertEmailNotPlatform(email: string): Promise<void> {
+    return assertEmailNotPlatform(this.userRepo, email);
+  }
+
   @Get()
   async findByClient(
     @CurrentUser() caller: JwtPayload,
@@ -147,6 +153,8 @@ export class AdminUsersController {
     const effectiveClientId =
       caller.role === UserRole.SUPERADMIN ? dto.client_id : caller.client_id;
 
+    await this.assertEmailNotPlatform(dto.email);
+
     const existing = await this.userRepo.findOne({
       where: { client_id: effectiveClientId, email: dto.email },
     });
@@ -181,6 +189,11 @@ export class AdminUsersController {
 
     // Verificar que el target pertenece al mismo tenant del caller.
     this.assertTenantAccess(caller, user.client_id);
+
+    // Cambiar el email a uno de un usuario platform recrearía la colisión.
+    if (dto.email !== undefined && dto.email !== user.email) {
+      await this.assertEmailNotPlatform(dto.email);
+    }
 
     if (dto.role !== undefined) user.role = dto.role;
     if (dto.full_name !== undefined) user.full_name = dto.full_name;
