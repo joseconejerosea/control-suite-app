@@ -90,7 +90,7 @@ async function request<T>(
   // Credenciales inválidas en el propio login: mensaje claro, sin intentar refresh.
   if (res.status === 401 && path.includes("/auth/login")) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error?.message ?? data?.message ?? "Invalid credentials");
+    throw new Error(data?.error?.message ?? data?.message ?? "Credenciales inválidas");
   }
 
   // Access token expirado/ inválido → intentar UN refresh y reintentar la request.

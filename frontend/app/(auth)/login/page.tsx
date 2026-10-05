@@ -42,7 +42,7 @@ export default function LoginPage() {
 
       window.location.href = user.role === "super_admin" ? "/admin/dashboard" : "/client/dashboard";
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Invalid credentials");
+      setError(err instanceof Error ? err.message : "Credenciales inválidas");
     } finally {
       setLoading(false);
     }
