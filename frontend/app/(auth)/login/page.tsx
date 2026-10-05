@@ -19,23 +19,38 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  // Desambiguación multi-tenant: si el mismo email+contraseña existe en más de
+  // una agencia, el backend responde { needsTenant, tenants } y mostramos el
+  // selector. null = no hay que elegir (flujo normal).
+  const [tenants, setTenants]   = useState<{ id: string; nombre: string | null }[] | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const doLogin = async (tenantId?: string) => {
     setError("");
     setLoading(true);
     try {
-      const res = await api.post<any>("/auth/login", { email, password });
-      const token = res?.data?.accessToken ?? res?.access_token ?? res?.accessToken;
-      const refresh = res?.data?.refreshToken ?? res?.refresh_token ?? res?.refreshToken;
+      const res = await api.post<any>("/auth/login", {
+        email,
+        password,
+        ...(tenantId ? { tenantId } : {}),
+      });
+      const body = res?.data ?? res;
+
+      // El email pertenece a varias agencias → pedir elección antes de emitir token.
+      if (body?.needsTenant) {
+        setTenants(body.tenants ?? []);
+        return;
+      }
+
+      const token = body?.accessToken ?? res?.access_token ?? res?.accessToken;
+      const refresh = body?.refreshToken ?? res?.refresh_token ?? res?.refreshToken;
       if (!token) throw new Error("No token received");
 
-      const payload = parseJwt(token);
+      const claims = parseJwt(token);
       const user = {
-        id: payload?.sub ?? "",
-        email: payload?.email ?? email,
-        role: payload?.role ?? "user",
-        client_id: payload?.client_id ?? "",
+        id: claims?.sub ?? "",
+        email: claims?.email ?? email,
+        role: claims?.role ?? "user",
+        client_id: claims?.client_id ?? "",
       };
 
       saveAuth(token, refresh ?? null, user);
@@ -46,6 +61,11 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    doLogin();
   };
 
   const inputClass =
@@ -108,9 +128,48 @@ export default function LoginPage() {
             <span className="font-semibold tracking-tight">Control Suite BTL</span>
           </div>
 
-          <h2 className="display-font text-3xl mb-2">Bienvenido</h2>
-          <p className="text-sm text-slate-500 mb-8">Inicia sesión para continuar</p>
+          <h2 className="display-font text-3xl mb-2">{tenants ? "Elegí tu agencia" : "Bienvenido"}</h2>
+          <p className="text-sm text-slate-500 mb-8">
+            {tenants
+              ? "Tu cuenta existe en más de una agencia. Seleccioná con cuál ingresar."
+              : "Inicia sesión para continuar"}
+          </p>
 
+          {tenants ? (
+            <div className="space-y-3">
+              {error && (
+                <div
+                  className="text-xs px-3 py-2 rounded-lg"
+                  style={{ background: "rgba(239,68,68,0.12)", color: "var(--danger)" }}
+                >
+                  {error}
+                </div>
+              )}
+              {tenants.length === 0 ? (
+                <p className="text-sm text-slate-500">No se encontraron agencias para esta cuenta.</p>
+              ) : (
+                tenants.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => doLogin(t.id)}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-slate-200 bg-white hover:border-indigo-600 hover:bg-indigo-50/40 transition-colors text-sm font-medium disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <span>{t.nombre ?? "Agencia sin nombre"}</span>
+                    <span className="text-indigo-600">→</span>
+                  </button>
+                ))
+              )}
+              <button
+                type="button"
+                onClick={() => { setTenants(null); setError(""); }}
+                className="text-xs text-slate-500 hover:text-slate-700 cursor-pointer"
+              >
+                ← Volver
+              </button>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className={labelClass}>Correo</label>
@@ -184,6 +243,7 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+          )}
         </div>
       </div>
     </div>
