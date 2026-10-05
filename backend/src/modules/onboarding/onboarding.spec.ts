@@ -16,7 +16,7 @@ describe('OnboardingService', () => {
 
   let service: OnboardingService;
   let clientRepo: { findOneBy: jest.Mock; findOne: jest.Mock; update: jest.Mock };
-  let userRepo: { findOneBy: jest.Mock; create: jest.Mock; save: jest.Mock };
+  let userRepo: { findOneBy: jest.Mock; findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
   let dataSource: DataSource;
   let txUpdate: jest.Mock;
 
@@ -28,6 +28,8 @@ describe('OnboardingService', () => {
     };
     userRepo = {
       findOneBy: jest.fn(),
+      // findOne lo usa assertEmailNotPlatform (guard email-platform). null = sin colisión.
+      findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((u: Partial<User>) => u),
       save: jest.fn((u: Partial<User>) => Promise.resolve({ ...u, id: 'user-1' })),
     };
