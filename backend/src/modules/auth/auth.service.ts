@@ -44,10 +44,10 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.userRepo.findOne({ where: { email: dto.email } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Credenciales inválidas');
 
     const valid = await bcrypt.compare(dto.password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    if (!valid) throw new UnauthorizedException('Credenciales inválidas');
 
     return this.generateTokens(user);
   }
@@ -72,7 +72,7 @@ export class AuthService {
    */
   async getAssignedTenants(userId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Credenciales inválidas');
 
     // SUPERADMIN interviene en cualquier agencia → el selector le muestra todas.
     if (user.role === UserRole.SUPERADMIN) {
@@ -100,7 +100,7 @@ export class AuthService {
    */
   async selectTenant(userId: string, tenantId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Credenciales inválidas');
 
     // SUPERADMIN: intervención global — puede entrar a cualquier agencia existente.
     if (user.role === UserRole.SUPERADMIN) {
