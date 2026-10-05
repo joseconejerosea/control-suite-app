@@ -16,13 +16,16 @@ export class ClientActiveGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
-    if (!user?.client_id) {
-      throw new ForbiddenException('No client context');
+    // Super admins bypass the check: operate globally and may have no active
+    // tenant selected yet (client_id null), so this MUST run before the
+    // "No client context" guard below — otherwise a super_admin with no active
+    // tenant eats a 403 on every tenant-scoped endpoint (e.g. notifications poll).
+    if (user?.role === UserRole.SUPERADMIN) {
+      return true;
     }
 
-    // Super admins bypass the check
-    if (user.role === UserRole.SUPERADMIN) {
-      return true;
+    if (!user?.client_id) {
+      throw new ForbiddenException('No client context');
     }
 
     const clientRepo = this.dataSource.getRepository(Client);
